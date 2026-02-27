@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "../_lib/supabase/server";
 
-export async function GET(request: Request) {
+export async function POST(request: Request) {
   const supabase = await createClient();
   await supabase.auth.signOut();
 
@@ -9,5 +9,6 @@ export async function GET(request: Request) {
   url.pathname = "/login";
   url.search = "";
   url.hash = "";
+
   return NextResponse.redirect(url);
 }

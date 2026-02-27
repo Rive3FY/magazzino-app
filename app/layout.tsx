@@ -43,16 +43,20 @@
 
   {/* ✅ TASTO LOGOUT */}
   <a
-    href="/logout"
+    <form action="/logout" method="POST" style={{ margin: 0 }}>
+  <button
+    type="submit"
     style={{
       padding: "8px 12px",
       borderRadius: 14,
-      textDecoration: "none",
-      color: "rgba(255,255,255,0.92)",
       border: "1px solid rgba(255,255,255,0.16)",
       background: "rgba(255,255,255,0.06)",
+      color: "rgba(255,255,255,0.92)",
+      cursor: "pointer",
     }}
   >
     Logout
+  </button>
+</form>
   </a>
 </nav>

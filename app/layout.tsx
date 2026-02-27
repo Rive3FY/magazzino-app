@@ -14,7 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           fontFamily: "system-ui",
           minHeight: "100vh",
           background: "#0b1220",
-          color: "rgba(255,255,255,0.92)", // ✅ testo base chiaro
+          color: "rgba(255,255,255,0.92)",
         }}
       >
         {/* SFONDO SFUMATO + SFUOCATO */}
@@ -114,9 +114,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     background: "rgba(255,255,255,0.10)",
                   }}
                 >
-                  
                   Movimenti
                 </a>
+
                 <a
                   href="/giacenze"
                   style={{
@@ -130,6 +130,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 >
                   Giacenze
                 </a>
+
                 <a
                   href="/import"
                   style={{
@@ -142,21 +143,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   }}
                 >
                   Import
-                
-              </a>
-              <a
-  href="/logout"
-  style={{
-    padding: "8px 12px",
-    borderRadius: 14,
-    textDecoration: "none",
-    color: "rgba(255,255,255,0.92)",
-    border: "1px solid rgba(255,255,255,0.16)",
-    background: "rgba(255,255,255,0.06)",
-  }}
->
-  Logout
-</a>
+                </a>
+
+                {/* ✅ LOGOUT */}
+                <a
+                  href="/logout"
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 14,
+                    textDecoration: "none",
+                    color: "rgba(255,255,255,0.92)",
+                    border: "1px solid rgba(255,255,255,0.16)",
+                    background: "rgba(255,255,255,0.06)",
+                  }}
+                >
+                  Logout
+                </a>
               </nav>
             </div>
           </header>

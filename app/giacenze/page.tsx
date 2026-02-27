@@ -5,6 +5,9 @@ export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "../_lib/supabase/client";
+<a href="/logout" style={{ color: "white" }}>
+  🔓 Logout
+</a>
 
 const PAGE_SIZE = 25;
 

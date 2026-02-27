@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "../_lib/supabase/client";

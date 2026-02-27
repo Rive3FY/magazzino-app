@@ -29,9 +29,10 @@ export async function middleware(request: NextRequest) {
 
   // Pagine pubbliche (accessibili senza login)
   const isPublic =
-    path === "/login" ||
-    path.startsWith("/_next") ||
-    path.startsWith("/favicon.ico");
+  path === "/login" ||
+  path === "/logout" ||   // ✅ aggiunto
+  path.startsWith("/_next") ||
+  path.startsWith("/favicon.ico");
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();

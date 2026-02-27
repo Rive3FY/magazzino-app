@@ -1,15 +1,26 @@
-create or replace function public.handle_new_user()
-returns trigger as $$
-begin
-  insert into public.profiles (user_id, role)
-  values (new.id, 'user')
-  on conflict (user_id) do nothing;
-  return new;
-end;
-$$ language plpgsql security definer;
+"use client";
 
-drop trigger if exists on_auth_user_created on auth.users;
+import { useEffect, useState } from "react";
+import { createClient } from "../_lib/supabase/client";
 
-create trigger on_auth_user_created
-after insert on auth.users
-for each row execute procedure public.handle_new_user();
+export default function LogoutPage() {
+  const [msg, setMsg] = useState("Logout in corso…");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const supabase = createClient();
+        await supabase.auth.signOut();
+      } finally {
+        setMsg("Sei uscito. Reindirizzamento…");
+        window.location.replace("/login");
+      }
+    })();
+  }, []);
+
+  return (
+    <main style={{ padding: 40, fontFamily: "system-ui" }}>
+      {msg}
+    </main>
+  );
+}

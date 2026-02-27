@@ -1,13 +1,25 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  addMovement,
-  deleteMovement,
-  getItems,
-  getMovements,
-  getStockByCode,
-} from "../_lib/store";
+import { createClient } from "../_lib/supabase/client";
+
+type DbItem = {
+  code: string;
+  name: string;
+  um: string | null;
+  warehouse: string | null;
+  warehouse_desc: string | null;
+  initial_qty: number | null;
+};
+
+type DbMovement = {
+  id: string;
+  created_at: string;
+  type: "IN" | "OUT";
+  code: string;
+  qty: number;
+  note: string | null;
+};
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
@@ -19,124 +31,206 @@ function fmtDate(iso: string) {
   return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
 }
 
+function toNumber(v: string) {
+  const n = Number(v.trim().replace(",", "."));
+  return Number.isFinite(n) ? n : NaN;
+}
+
 export default function MovimentiPage() {
-  const [items, setItems] = useState<ReturnType<typeof getItems>>([]);
-  const [movs, setMovs] = useState<ReturnType<typeof getMovements>>([]);
+  const supabase = createClient();
+
   const [ready, setReady] = useState(false);
 
   const [type, setType] = useState<"IN" | "OUT">("IN");
-  const [code, setCode] = useState("");
   const [qty, setQty] = useState("");
   const [note, setNote] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
 
-  // Autocomplete
+  // autocomplete
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const boxRef = useRef<HTMLDivElement | null>(null);
 
-  function refreshAll() {
-    setItems(getItems());
-    setMovs(getMovements());
+  const [picked, setPicked] = useState<DbItem | null>(null);
+
+  const [suggestions, setSuggestions] = useState<DbItem[]>([]);
+  const [stock, setStock] = useState<number | null>(null);
+
+  const [history, setHistory] = useState<DbMovement[]>([]);
+
+  async function loadSuggestions(text: string) {
+    const s = text.trim();
+    if (!s) {
+      setSuggestions([]);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("items")
+      .select("code,name,um,warehouse,warehouse_desc,initial_qty")
+      .or(`code.ilike.%${s}%,name.ilike.%${s}%`)
+      .order("code", { ascending: true })
+      .limit(12);
+
+    if (error) {
+      console.error(error);
+      setSuggestions([]);
+      return;
+    }
+
+    setSuggestions((data ?? []) as DbItem[]);
+  }
+
+  async function computeStockFor(code: string) {
+    // prendo initial_qty
+    const { data: item, error: e1 } = await supabase
+      .from("items")
+      .select("initial_qty")
+      .eq("code", code)
+      .single();
+
+    if (e1) {
+      console.error(e1);
+      setStock(null);
+      return;
+    }
+
+    const initial = Number(item?.initial_qty ?? 0);
+
+    // prendo movimenti di quel codice e sommo
+    const { data: movs, error: e2 } = await supabase
+      .from("movements")
+      .select("type,qty")
+      .eq("code", code);
+
+    if (e2) {
+      console.error(e2);
+      setStock(initial);
+      return;
+    }
+
+    let delta = 0;
+    for (const m of movs ?? []) {
+      const v = Number((m as any).qty ?? 0);
+      delta += (m as any).type === "IN" ? v : -v;
+    }
+    setStock(initial + delta);
+  }
+
+  async function loadHistory(code?: string) {
+    let q = supabase
+      .from("movements")
+      .select("id,created_at,type,code,qty,note")
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    if (code) q = q.eq("code", code);
+
+    const { data, error } = await q;
+    if (error) {
+      console.error(error);
+      setHistory([]);
+      return;
+    }
+    setHistory((data ?? []) as DbMovement[]);
   }
 
   useEffect(() => {
-    refreshAll();
     setReady(true);
-  }, []);
-
-  const filteredItems = useMemo(() => {
-    const s = search.trim().toLowerCase();
-    if (!s) return [];
-    return items
-      .filter((i) => (i.code + " " + i.name).toLowerCase().includes(s))
-      .slice(0, 12); // massimo 12 risultati in finestra
-  }, [items, search]);
-
-  useEffect(() => {
-    setActiveIndex(0);
-  }, [search]);
-
-  const selected = useMemo(
-    () => items.find((i) => i.code === code),
-    [items, code]
-  );
-
-  const selectedStock = useMemo(() => {
-    if (!code) return null;
-    return getStockByCode(code);
-  }, [code, movs]);
-
-  function pickItem(it: { code: string; name: string }) {
-    setCode(it.code);
-    setSearch(`${it.code} — ${it.name}`);
-    setOpen(false);
-  }
-
-  // chiudi la finestra se clicchi fuori
-  useEffect(() => {
+    loadHistory();
+    // click fuori chiude tendina
     function onDocMouseDown(e: MouseEvent) {
       if (!boxRef.current) return;
       if (!boxRef.current.contains(e.target as Node)) setOpen(false);
     }
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function save() {
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [search]);
+
+  async function pickItem(it: DbItem) {
+    setPicked(it);
+    setSearch(`${it.code} — ${it.name}`);
+    setOpen(false);
+    await computeStockFor(it.code);
+    await loadHistory(it.code);
+  }
+
+  async function save() {
     setMsg(null);
 
-    if (!code) return setMsg("Seleziona un Materiale (scrivi e clicca un risultato).");
-    const n = Number(qty.trim().replace(",", "."));
+    if (!picked) return setMsg("Seleziona un materiale (scrivi e scegli dalla lista).");
+
+    const n = toNumber(qty);
     if (!Number.isFinite(n) || n <= 0) return setMsg("Quantità non valida (deve essere > 0).");
 
+    // blocco uscita sotto zero
     if (type === "OUT") {
-      const current = getStockByCode(code);
+      const current = stock ?? 0;
       if (current - n < 0) {
         return setMsg(`Uscita non possibile: giacenza ${current} → diventerebbe ${current - n}.`);
       }
     }
 
-    addMovement({ type, code, qty: n, note: note.trim() || undefined });
+    const { error } = await supabase.from("movements").insert({
+      type,
+      code: picked.code,
+      qty: n,
+      note: note.trim() || null,
+    });
+
+    if (error) return setMsg("Errore salvataggio movimento: " + error.message);
+
     setQty("");
     setNote("");
     setMsg("Movimento salvato ✅");
-    refreshAll();
+
+    await computeStockFor(picked.code);
+    await loadHistory(picked.code);
   }
 
-  function removeMovement(id: string) {
-    deleteMovement(id);
-    refreshAll();
+  async function del(id: string) {
+    const ok = confirm("Eliminare questo movimento?");
+    if (!ok) return;
+
+    const { error } = await supabase.from("movements").delete().eq("id", id);
+    if (error) return alert("Errore delete: " + error.message);
+
+    if (picked) {
+      await computeStockFor(picked.code);
+      await loadHistory(picked.code);
+    } else {
+      await loadHistory();
+    }
   }
 
-  const movFiltered = useMemo(() => {
-    if (!code) return movs.slice(0, 200);
-    return movs.filter((m) => m.code === code).slice(0, 200);
-  }, [movs, code]);
+  const active = useMemo(() => suggestions[activeIndex], [suggestions, activeIndex]);
 
   return (
-    <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 1100 }}>
+    <main style={{ fontFamily: "system-ui" }}>
       <h1>➕/➖ Movimenti</h1>
 
       {!ready ? (
         <p>Caricamento…</p>
-      ) : items.length === 0 ? (
-        <p>
-          Nessun articolo trovato. Prima fai <a href="/import">Import Excel</a>.
-        </p>
       ) : (
         <>
-          <div style={{ display: "grid", gap: 12, marginTop: 12, maxWidth: 800 }}>
+          <div style={{ display: "grid", gap: 12, marginTop: 12, maxWidth: 820 }}>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <button
                 onClick={() => setType("IN")}
                 style={{
                   padding: 10,
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.25)",
+                  background: type === "IN" ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.10)",
+                  color: "white",
                   cursor: "pointer",
-                  fontWeight: type === "IN" ? "700" : "400",
+                  fontWeight: type === "IN" ? 800 : 500,
                 }}
               >
                 ➕ Entrata
@@ -145,29 +239,38 @@ export default function MovimentiPage() {
                 onClick={() => setType("OUT")}
                 style={{
                   padding: 10,
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.25)",
+                  background: type === "OUT" ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.10)",
+                  color: "white",
                   cursor: "pointer",
-                  fontWeight: type === "OUT" ? "700" : "400",
+                  fontWeight: type === "OUT" ? 800 : 500,
                 }}
               >
                 ➖ Uscita
               </button>
-              <a href="/giacenze" style={{ alignSelf: "center" }}>
+
+              <a href="/giacenze" style={{ alignSelf: "center", color: "white" }}>
                 📦 Giacenze
+              </a>
+              <a href="/import" style={{ alignSelf: "center", color: "white" }}>
+                📥 Import
               </a>
             </div>
 
-            {/* ✅ AUTOCOMPLETE */}
+            {/* AUTOCOMPLETE */}
             <div ref={boxRef} style={{ position: "relative" }}>
-              <label>
+              <label style={{ color: "white" }}>
                 Materiale (scrivi per cercare)
                 <input
                   value={search}
-                  onChange={(e) => {
-                    setSearch(e.target.value);
+                  onChange={async (e) => {
+                    const v = e.target.value;
+                    setSearch(v);
                     setOpen(true);
-                    setCode(""); // finché non scegli un risultato, non selezioniamo
+                    setPicked(null);
+                    setStock(null);
+                    await loadSuggestions(v);
                   }}
                   onFocus={() => setOpen(true)}
                   onKeyDown={(e) => {
@@ -175,14 +278,13 @@ export default function MovimentiPage() {
 
                     if (e.key === "ArrowDown") {
                       e.preventDefault();
-                      setActiveIndex((i) => Math.min(i + 1, filteredItems.length - 1));
+                      setActiveIndex((i) => Math.min(i + 1, suggestions.length - 1));
                     } else if (e.key === "ArrowUp") {
                       e.preventDefault();
                       setActiveIndex((i) => Math.max(i - 1, 0));
                     } else if (e.key === "Enter") {
                       e.preventDefault();
-                      const it = filteredItems[activeIndex];
-                      if (it) pickItem(it);
+                      if (active) pickItem(active);
                     } else if (e.key === "Escape") {
                       setOpen(false);
                     }
@@ -192,8 +294,11 @@ export default function MovimentiPage() {
                     display: "block",
                     marginTop: 6,
                     padding: 10,
-                    borderRadius: 10,
-                    border: "1px solid #ccc",
+                    borderRadius: 12,
+                    border: "1px solid rgba(255,255,255,0.25)",
+                    background: "rgba(255,255,255,0.10)",
+                    color: "white",
+                    outline: "none",
                     width: "100%",
                   }}
                 />
@@ -207,35 +312,34 @@ export default function MovimentiPage() {
                     right: 0,
                     top: "100%",
                     marginTop: 6,
-                    background: "white",
-                    border: "1px solid #ddd",
-                    borderRadius: 12,
-                    boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
+                    background: "rgba(255,255,255,0.92)",
+                    border: "1px solid rgba(15,23,42,0.10)",
+                    borderRadius: 14,
+                    boxShadow: "0 16px 40px rgba(0,0,0,0.20)",
                     overflow: "hidden",
                     zIndex: 50,
                   }}
                 >
-                  {filteredItems.length === 0 ? (
-                    <div style={{ padding: 12, color: "#666" }}>Nessun risultato</div>
+                  {suggestions.length === 0 ? (
+                    <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
                   ) : (
-                    filteredItems.map((it, idx) => (
+                    suggestions.map((it, idx) => (
                       <div
                         key={it.code}
                         onMouseEnter={() => setActiveIndex(idx)}
                         onMouseDown={(e) => {
-                          // onMouseDown per evitare che blur chiuda prima del click
                           e.preventDefault();
                           pickItem(it);
                         }}
                         style={{
                           padding: "10px 12px",
                           cursor: "pointer",
-                          background: idx === activeIndex ? "#f1f5f9" : "white",
-                          borderTop: idx === 0 ? "none" : "1px solid #f0f0f0",
+                          background: idx === activeIndex ? "#eef2ff" : "white",
+                          borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
                         }}
                       >
-                        <div style={{ fontWeight: 600 }}>{it.code}</div>
-                        <div style={{ fontSize: 12, color: "#555" }}>{it.name}</div>
+                        <div style={{ fontWeight: 800, color: "#0f172a" }}>{it.code}</div>
+                        <div style={{ fontSize: 12, color: "#334155" }}>{it.name}</div>
                       </div>
                     ))
                   )}
@@ -243,29 +347,22 @@ export default function MovimentiPage() {
               )}
             </div>
 
-            {selected && (
-              <div style={{ color: "#555", fontSize: 14 }}>
+            {picked && (
+              <div style={{ color: "rgba(255,255,255,0.90)", fontSize: 14 }}>
                 <div>
                   Magazzino:{" "}
                   <b>
-                    {[selected.warehouse, selected.warehouseDesc]
-                      .filter(Boolean)
-                      .join(" - ") || "-"}
+                    {[picked.warehouse, picked.warehouse_desc].filter(Boolean).join(" - ") || "-"}
                   </b>
                 </div>
                 <div>
-                  UM: <b>{selected.um ?? "-"}</b> · TOTALE iniziale: <b>{selected.initialQty}</b>
-                  {selectedStock !== null && (
-                    <>
-                      {" "}
-                      · Giacenza attuale: <b>{selectedStock}</b>
-                    </>
-                  )}
+                  UM: <b>{picked.um ?? "-"}</b> · Iniziale: <b>{picked.initial_qty ?? 0}</b>
+                  {" · "}Giacenza attuale: <b>{stock ?? 0}</b>
                 </div>
               </div>
             )}
 
-            <label>
+            <label style={{ color: "white" }}>
               Quantità
               <input
                 value={qty}
@@ -275,14 +372,17 @@ export default function MovimentiPage() {
                   display: "block",
                   marginTop: 6,
                   padding: 10,
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.25)",
+                  background: "rgba(255,255,255,0.10)",
+                  color: "white",
+                  outline: "none",
                   width: "100%",
                 }}
               />
             </label>
 
-            <label>
+            <label style={{ color: "white" }}>
               Note (opzionale)
               <input
                 value={note}
@@ -292,8 +392,11 @@ export default function MovimentiPage() {
                   display: "block",
                   marginTop: 6,
                   padding: 10,
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.25)",
+                  background: "rgba(255,255,255,0.10)",
+                  color: "white",
+                  outline: "none",
                   width: "100%",
                 }}
               />
@@ -301,57 +404,60 @@ export default function MovimentiPage() {
 
             <button
               onClick={save}
-              style={{ padding: 12, borderRadius: 10, border: "1px solid #ccc", cursor: "pointer" }}
+              style={{
+                padding: 12,
+                borderRadius: 12,
+                border: "1px solid rgba(255,255,255,0.25)",
+                background: "rgba(255,255,255,0.14)",
+                color: "white",
+                cursor: "pointer",
+                fontWeight: 800,
+              }}
             >
               Salva movimento
             </button>
 
-            {msg && <p style={{ margin: 0 }}>{msg}</p>}
+            {msg && <p style={{ margin: 0, color: "white" }}>{msg}</p>}
           </div>
 
-          <h2 style={{ marginTop: 28 }}>📜 Storico movimenti {code ? `(solo ${code})` : "(ultimi)"}</h2>
+          <h2 style={{ marginTop: 26, color: "white" }}>
+            📜 Storico movimenti {picked ? `(solo ${picked.code})` : "(ultimi)"}
+          </h2>
 
           <div style={{ overflowX: "auto", marginTop: 10 }}>
-            <table style={{ borderCollapse: "collapse", width: "100%" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", background: "rgba(255,255,255,0.85)", borderRadius: 16, overflow: "hidden" }}>
               <thead>
                 <tr>
                   {["Data", "Tipo", "Materiale", "Quantità", "Note", ""].map((h) => (
-                    <th
-                      key={h}
-                      style={{
-                        textAlign: "left",
-                        padding: 8,
-                        borderBottom: "1px solid #ddd",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
+                    <th key={h} style={{ textAlign: "left", padding: 10, borderBottom: "1px solid #e5e7eb", color: "#0f172a", whiteSpace: "nowrap" }}>
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {movFiltered.map((m) => (
+                {history.map((m) => (
                   <tr key={m.id}>
-                    <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0", whiteSpace: "nowrap" }}>
-                      {fmtDate(m.date)}
+                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a", whiteSpace: "nowrap" }}>
+                      {fmtDate(m.created_at)}
                     </td>
-                    <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>
+                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>
                       {m.type === "IN" ? "Entrata" : "Uscita"}
                     </td>
-                    <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>{m.code}</td>
-                    <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>
+                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>{m.code}</td>
+                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>
                       {m.type === "IN" ? "+" : "-"}
                       {m.qty}
                     </td>
-                    <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>{m.note ?? ""}</td>
-                    <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>
+                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>{m.note ?? ""}</td>
+                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9" }}>
                       <button
-                        onClick={() => removeMovement(m.id)}
+                        onClick={() => del(m.id)}
                         style={{
-                          padding: "6px 10px",
-                          borderRadius: 10,
-                          border: "1px solid #ccc",
+                          padding: "8px 10px",
+                          borderRadius: 12,
+                          border: "1px solid #cbd5e1",
+                          background: "white",
                           cursor: "pointer",
                         }}
                       >
@@ -360,9 +466,9 @@ export default function MovimentiPage() {
                     </td>
                   </tr>
                 ))}
-                {movFiltered.length === 0 && (
+                {history.length === 0 && (
                   <tr>
-                    <td colSpan={6} style={{ padding: 12 }}>
+                    <td colSpan={6} style={{ padding: 12, color: "#0f172a" }}>
                       Nessun movimento.
                     </td>
                   </tr>
@@ -371,8 +477,8 @@ export default function MovimentiPage() {
             </table>
           </div>
 
-          <p style={{ marginTop: 24 }}>
-            <a href="/">← Home</a>
+          <p style={{ marginTop: 22 }}>
+            <a href="/" style={{ color: "white" }}>← Home</a>
           </p>
         </>
       )}

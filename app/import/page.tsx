@@ -2,7 +2,7 @@
 
 import * as XLSX from "xlsx";
 import { useState } from "react";
-import { Item, upsertManyItems } from "../_lib/store";
+import { createClient } from "../_lib/supabase/client";
 
 type Row = {
   "Materiale"?: any;
@@ -27,12 +27,14 @@ function toNumber(v: unknown): number {
 }
 
 export default function ImportPage() {
+  const supabase = createClient();
+
   const [msg, setMsg] = useState<string | null>(null);
-  const [preview, setPreview] = useState<Item[]>([]);
+  const [busy, setBusy] = useState(false);
 
   async function onFile(file: File) {
     setMsg(null);
-    setPreview([]);
+    setBusy(true);
 
     try {
       const buf = await file.arrayBuffer();
@@ -40,103 +42,83 @@ export default function ImportPage() {
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json<Row>(sheet, { defval: "" });
 
-      const items: Item[] = rows
+      const items = rows
         .map((r) => {
           const code = String(r["Materiale"] ?? "").trim();
           const name = String(r["Descrizione Materiale"] ?? "").trim();
+          if (!code || !name) return null;
 
-          const total = toNumber(r["TOTALE"]);
-          const qtyFree = toNumber(r["Qnt. a Mag. Libero"]);
-          const qtyBlocked = toNumber(r["Qnt. a Mag. bloccato"]);
-          const qtyQuality = toNumber(r["Controllo Qualità Magazzino"]);
+          const initial_qty = toNumber(r["TOTALE"]); // ✅ giacenza iniziale da TOTALE
+          const qty_free = toNumber(r["Qnt. a Mag. Libero"]);
+          const qty_blocked = toNumber(r["Qnt. a Mag. bloccato"]);
+          const qty_quality = toNumber(r["Controllo Qualità Magazzino"]);
 
           return {
             code,
             name,
-            initialQty: total,
-            um: String(r["UM"] ?? "").trim() || undefined,
+            um: String(r["UM"] ?? "").trim() || null,
 
-            division: String(r["Divisione"] ?? "").trim() || undefined,
-            divisionDesc: String(r["Descrizione Divisione"] ?? "").trim() || undefined,
+            division: String(r["Divisione"] ?? "").trim() || null,
+            division_desc: String(r["Descrizione Divisione"] ?? "").trim() || null,
 
-            warehouse: String(r["Magazzino"] ?? "").trim() || undefined,
-            warehouseDesc: String(r["Descrizione Magazzino"] ?? "").trim() || undefined,
+            warehouse: String(r["Magazzino"] ?? "").trim() || null,
+            warehouse_desc: String(r["Descrizione Magazzino"] ?? "").trim() || null,
 
-            groupDesc: String(r["Descrizione Gruppo Merci"] ?? "").trim() || undefined,
+            group_desc: String(r["Descrizione Gruppo Merci"] ?? "").trim() || null,
 
-            qtyFree,
-            qtyBlocked,
-            qtyQuality,
+            qty_free,
+            qty_blocked,
+            qty_quality,
+            initial_qty,
           };
         })
-        .filter((x) => x.code && x.name);
+        .filter(Boolean) as any[];
 
       if (items.length === 0) {
         setMsg("Nessuna riga valida trovata. Controlla intestazioni del file.");
         return;
       }
 
-      upsertManyItems(items);
-      setPreview(items.slice(0, 20));
-      setMsg(`Import completato ✅ (${items.length} righe).`);
+      // Upsert su code (chiave primaria)
+      const { error } = await supabase
+        .from("items")
+        .upsert(items, { onConflict: "code" });
+
+      if (error) {
+        setMsg("Errore import DB: " + error.message);
+        return;
+      }
+
+      setMsg(`Import completato ✅ (${items.length} righe)`);
     } catch (e: any) {
       setMsg("Errore import: " + (e?.message ?? String(e)));
+    } finally {
+      setBusy(false);
     }
   }
 
   return (
-    <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 1200 }}>
+    <main style={{ fontFamily: "system-ui" }}>
       <h1>📥 Import Excel</h1>
-      <p>Import per file con intestazioni nuove (Materiale, Descrizione Materiale, TOTALE, ecc.).</p>
+      <p style={{ opacity: 0.9 }}>
+        Carica il file Excel. I dati verranno salvati su <b>Supabase</b> e saranno condivisi tra tutti gli utenti loggati.
+      </p>
 
       <input
         type="file"
         accept=".xlsx,.xls"
+        disabled={busy}
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) onFile(f);
         }}
       />
 
+      {busy && <p style={{ marginTop: 12 }}>Import in corso…</p>}
       {msg && <p style={{ marginTop: 12 }}>{msg}</p>}
 
-      {preview.length > 0 && (
-        <>
-          <h2 style={{ marginTop: 20 }}>Anteprima</h2>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ borderCollapse: "collapse", width: "100%" }}>
-              <thead>
-                <tr>
-                  {["Materiale", "Descrizione", "Magazzino", "UM", "Libero", "Bloccato", "CQ", "TOTALE"].map((h) => (
-                    <th key={h} style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {preview.map((it) => (
-                  <tr key={it.code}>
-                    <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>{it.code}</td>
-                    <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>{it.name}</td>
-                    <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>
-                      {[it.warehouse, it.warehouseDesc].filter(Boolean).join(" - ")}
-                    </td>
-                    <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>{it.um ?? ""}</td>
-                    <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>{it.qtyFree ?? 0}</td>
-                    <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>{it.qtyBlocked ?? 0}</td>
-                    <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}>{it.qtyQuality ?? 0}</td>
-                    <td style={{ padding: 8, borderBottom: "1px solid #f0f0f0" }}><b>{it.initialQty}</b></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-
-      <p style={{ marginTop: 24 }}>
-        <a href="/">← Home</a>
+      <p style={{ marginTop: 18 }}>
+        <a href="/giacenze">📦 Vai a Giacenze</a> · <a href="/movimenti">➕/➖ Movimenti</a> · <a href="/">Home</a>
       </p>
     </main>
   );

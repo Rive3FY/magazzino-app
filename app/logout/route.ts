@@ -1,26 +1,13 @@
-"use client";
+import { NextResponse } from "next/server";
+import { createClient } from "../_lib/supabase/server";
 
-import { useEffect, useState } from "react";
-import { createClient } from "../_lib/supabase/client";
+export async function GET(request: Request) {
+  const supabase = await createClient();
+  await supabase.auth.signOut();
 
-export default function LogoutPage() {
-  const [msg, setMsg] = useState("Logout in corso…");
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const supabase = createClient();
-        await supabase.auth.signOut();
-      } finally {
-        setMsg("Sei uscito. Reindirizzamento…");
-        window.location.replace("/login");
-      }
-    })();
-  }, []);
-
-  return (
-    <main style={{ padding: 40, fontFamily: "system-ui" }}>
-      {msg}
-    </main>
-  );
+  const url = new URL(request.url);
+  url.pathname = "/login";
+  url.search = "";
+  url.hash = "";
+  return NextResponse.redirect(url);
 }

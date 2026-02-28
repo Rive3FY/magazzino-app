@@ -63,6 +63,9 @@ export default function MovimentiPage() {
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const [scanning, setScanning] = useState(false);
 
+  // evita doppia lettura
+  const scanLockedRef = useRef(false);
+
   // focus quantità
   const qtyRef = useRef<HTMLInputElement | null>(null);
 
@@ -190,10 +193,11 @@ export default function MovimentiPage() {
     const code = scannedCode.trim();
     if (!code) return;
 
-    // ✅ flusso prelievo: OUT automatico + reset campi
+    // ✅ flusso prelievo: OUT automatico + reset quantità
     setType("OUT");
     setQty("");
-    setNote("");
+    // NON azzerare note automaticamente (altrimenti cancella mentre scrivi)
+    // setNote("");
 
     const { data: item, error } = await supabase
       .from("items")
@@ -220,52 +224,70 @@ export default function MovimentiPage() {
     await pickItem(item as DbItem);
     setMsg(null);
 
-    // ✅ focus quantità
-    setTimeout(() => qtyRef.current?.focus(), 50);
+    // ✅ focus quantità SOLO se non stai già scrivendo in un altro campo (es. Note)
+    setTimeout(() => {
+      const ae = document.activeElement as HTMLElement | null;
+      const isTypingElsewhere =
+        ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA") && ae !== qtyRef.current;
+
+      if (!isTypingElsewhere) qtyRef.current?.focus();
+    }, 120);
   }
 
   async function startScan() {
-  setMsg(null);
-  setOpen(false);
-  setScanning(true);
+    setMsg(null);
+    setOpen(false);
 
-  // ✅ aspetta che React renderizzi il <video>
-  await new Promise((r) => setTimeout(r, 50));
+    // sblocca per una nuova scansione
+    scanLockedRef.current = false;
 
-  if (!readerRef.current) readerRef.current = new BrowserMultiFormatReader();
+    setScanning(true);
 
-  try {
-    const videoEl = videoRef.current;
-    if (!videoEl) throw new Error("Video non disponibile");
+    // ✅ aspetta che React renderizzi il <video>
+    await new Promise((r) => setTimeout(r, 120));
 
-    await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
-      if (result) {
+    if (!readerRef.current) readerRef.current = new BrowserMultiFormatReader();
+
+    try {
+      const videoEl = videoRef.current;
+      if (!videoEl) throw new Error("Video non disponibile");
+
+      await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
+        if (!result) return;
+
+        // ✅ evita doppie letture
+        if (scanLockedRef.current) return;
+        scanLockedRef.current = true;
+
         const text = result.getText();
+
+        // ferma subito
         stopScan();
+
         await pickItemByCode(text);
-      }
-    });
-  } catch (e: any) {
-    console.error(e);
-    setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
-    setScanning(false);
+      });
+    } catch (e: any) {
+      console.error(e);
+      setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
+      setScanning(false);
+    }
   }
-}
 
   function stopScan() {
-  try {
-    (readerRef.current as any)?.stopContinuousDecode?.();
-  } catch {}
+    try {
+      (readerRef.current as any)?.stopContinuousDecode?.();
+    } catch {}
 
-  try {
-    const v = videoRef.current;
-    const stream = v?.srcObject as MediaStream | null;
-    if (stream) stream.getTracks().forEach((t) => t.stop());
-    if (v) v.srcObject = null;
-  } catch {}
+    // spegne proprio la camera
+    try {
+      const v = videoRef.current;
+      const stream = v?.srcObject as MediaStream | null;
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      if (v) v.srcObject = null;
+    } catch {}
 
-  setScanning(false);
-}
+    setScanning(false);
+  }
 
   useEffect(() => {
     setReady(true);
@@ -313,7 +335,7 @@ export default function MovimentiPage() {
     setMsg(null);
 
     if (!userId) return setMsg("Devi essere loggato per salvare movimenti.");
-    if (!picked) return setMsg("Seleziona un materiale (scrivi e scegli dalla lista o scansiona).");
+    if (!picked) return setMsg("Seleziona un materiale (scrivi per cercare o scansiona).");
 
     const n = toNumber(qty);
     if (!Number.isFinite(n) || n <= 0) return setMsg("Quantità non valida (deve essere > 0).");
@@ -344,8 +366,8 @@ export default function MovimentiPage() {
     await computeStockFor(picked.code);
     await loadHistory(picked.code);
 
-    // comodo per il magazzino: rimetti focus quantità per il prossimo
-    setTimeout(() => qtyRef.current?.focus(), 50);
+    // comodo: rimetti focus quantità
+    setTimeout(() => qtyRef.current?.focus(), 100);
   }
 
   async function deleteMovement(id: string) {

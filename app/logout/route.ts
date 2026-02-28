@@ -3,8 +3,11 @@ import { createClient } from "../_lib/supabase/server";
 
 export async function POST(request: Request) {
   const supabase = await createClient();
+
+  // Effettua logout
   await supabase.auth.signOut();
 
+  // Redirect a /login
   const url = new URL(request.url);
   url.pathname = "/login";
   url.search = "";

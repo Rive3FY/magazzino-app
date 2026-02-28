@@ -19,6 +19,9 @@ type DbMovement = {
   code: string;
   qty: number;
   note: string | null;
+  created_by_email: string | null;
+  updated_by_email: string | null;
+  updated_at: string | null;
 };
 
 function fmtDate(iso: string) {
@@ -46,6 +49,10 @@ export default function MovimentiPage() {
   const [note, setNote] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
 
+  // utente loggato (per audit)
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+
   // autocomplete
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
@@ -53,10 +60,8 @@ export default function MovimentiPage() {
   const boxRef = useRef<HTMLDivElement | null>(null);
 
   const [picked, setPicked] = useState<DbItem | null>(null);
-
   const [suggestions, setSuggestions] = useState<DbItem[]>([]);
   const [stock, setStock] = useState<number | null>(null);
-
   const [history, setHistory] = useState<DbMovement[]>([]);
 
   async function loadSuggestions(text: string) {
@@ -83,7 +88,6 @@ export default function MovimentiPage() {
   }
 
   async function computeStockFor(code: string) {
-    // prendo initial_qty
     const { data: item, error: e1 } = await supabase
       .from("items")
       .select("initial_qty")
@@ -98,7 +102,6 @@ export default function MovimentiPage() {
 
     const initial = Number(item?.initial_qty ?? 0);
 
-    // prendo movimenti di quel codice e sommo
     const { data: movs, error: e2 } = await supabase
       .from("movements")
       .select("type,qty")
@@ -121,7 +124,7 @@ export default function MovimentiPage() {
   async function loadHistory(code?: string) {
     let q = supabase
       .from("movements")
-      .select("id,created_at,type,code,qty,note")
+      .select("id,created_at,type,code,qty,note,created_by_email,updated_by_email,updated_at")
       .order("created_at", { ascending: false })
       .limit(200);
 
@@ -139,6 +142,13 @@ export default function MovimentiPage() {
   useEffect(() => {
     setReady(true);
     loadHistory();
+
+    // prendo utente loggato per audit
+    supabase.auth.getUser().then(({ data }) => {
+      setUserEmail(data.user?.email ?? null);
+      setUserId(data.user?.id ?? null);
+    });
+
     // click fuori chiude tendina
     function onDocMouseDown(e: MouseEvent) {
       if (!boxRef.current) return;
@@ -182,6 +192,10 @@ export default function MovimentiPage() {
       code: picked.code,
       qty: n,
       note: note.trim() || null,
+
+      // ✅ audit
+      created_by: userId,
+      created_by_email: userEmail,
     });
 
     if (error) return setMsg("Errore salvataggio movimento: " + error.message);
@@ -192,21 +206,6 @@ export default function MovimentiPage() {
 
     await computeStockFor(picked.code);
     await loadHistory(picked.code);
-  }
-
-  async function del(id: string) {
-    const ok = confirm("Eliminare questo movimento?");
-    if (!ok) return;
-
-    const { error } = await supabase.from("movements").delete().eq("id", id);
-    if (error) return alert("Errore delete: " + error.message);
-
-    if (picked) {
-      await computeStockFor(picked.code);
-      await loadHistory(picked.code);
-    } else {
-      await loadHistory();
-    }
   }
 
   const active = useMemo(() => suggestions[activeIndex], [suggestions, activeIndex]);
@@ -249,13 +248,6 @@ export default function MovimentiPage() {
               >
                 ➖ Uscita
               </button>
-
-              <a href="/giacenze" style={{ alignSelf: "center", color: "white" }}>
-                📦 Giacenze
-              </a>
-              <a href="/import" style={{ alignSelf: "center", color: "white" }}>
-                📥 Import
-              </a>
             </div>
 
             {/* AUTOCOMPLETE */}
@@ -356,8 +348,8 @@ export default function MovimentiPage() {
                   </b>
                 </div>
                 <div>
-                  UM: <b>{picked.um ?? "-"}</b> · Iniziale: <b>{picked.initial_qty ?? 0}</b>
-                  {" · "}Giacenza attuale: <b>{stock ?? 0}</b>
+                  UM: <b>{picked.um ?? "-"}</b> · Iniziale: <b>{picked.initial_qty ?? 0}</b> · Giacenza attuale:{" "}
+                  <b>{stock ?? 0}</b>
                 </div>
               </div>
             )}
@@ -420,16 +412,31 @@ export default function MovimentiPage() {
             {msg && <p style={{ margin: 0, color: "white" }}>{msg}</p>}
           </div>
 
-          <h2 style={{ marginTop: 26, color: "white" }}>
-            📜 Storico movimenti {picked ? `(solo ${picked.code})` : "(ultimi)"}
-          </h2>
+          <h2 style={{ marginTop: 26, color: "white" }}>📜 Storico movimenti {picked ? `(solo ${picked.code})` : "(ultimi)"}</h2>
 
           <div style={{ overflowX: "auto", marginTop: 10 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", background: "rgba(255,255,255,0.85)", borderRadius: 16, overflow: "hidden" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                background: "rgba(255,255,255,0.85)",
+                borderRadius: 16,
+                overflow: "hidden",
+              }}
+            >
               <thead>
                 <tr>
-                  {["Data", "Tipo", "Materiale", "Quantità", "Note", ""].map((h) => (
-                    <th key={h} style={{ textAlign: "left", padding: 10, borderBottom: "1px solid #e5e7eb", color: "#0f172a", whiteSpace: "nowrap" }}>
+                  {["Data", "Tipo", "Materiale", "Quantità", "Note", "Inserito da"].map((h) => (
+                    <th
+                      key={h}
+                      style={{
+                        textAlign: "left",
+                        padding: 10,
+                        borderBottom: "1px solid #e5e7eb",
+                        color: "#0f172a",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       {h}
                     </th>
                   ))}
@@ -450,22 +457,12 @@ export default function MovimentiPage() {
                       {m.qty}
                     </td>
                     <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>{m.note ?? ""}</td>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9" }}>
-                      <button
-                        onClick={() => del(m.id)}
-                        style={{
-                          padding: "8px 10px",
-                          borderRadius: 12,
-                          border: "1px solid #cbd5e1",
-                          background: "white",
-                          cursor: "pointer",
-                        }}
-                      >
-                        Elimina
-                      </button>
+                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a", whiteSpace: "nowrap" }}>
+                      {m.created_by_email ?? "-"}
                     </td>
                   </tr>
                 ))}
+
                 {history.length === 0 && (
                   <tr>
                     <td colSpan={6} style={{ padding: 12, color: "#0f172a" }}>
@@ -476,10 +473,6 @@ export default function MovimentiPage() {
               </tbody>
             </table>
           </div>
-
-          <p style={{ marginTop: 22 }}>
-            <a href="/" style={{ color: "white" }}>← Home</a>
-          </p>
         </>
       )}
     </main>

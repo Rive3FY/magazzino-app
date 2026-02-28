@@ -1,26 +1,90 @@
-@import "tailwindcss";
-
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* =========================
+   RESET BASE
+========================= */
+* {
+  box-sizing: border-box;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* =========================
+   SFONDO PROFESSIONALE
+========================= */
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: system-ui;
+  min-height: 100vh;
+  color: rgba(255,255,255,0.95);
+  background: transparent;
+  position: relative;
+}
+
+/* Immagine sfondo separata (così possiamo applicare blur) */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+
+  background-image: url("/terna-bg.jpg");
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-size: cover;
+
+  transform: scale(1.05);           /* evita bordi col blur */
+  filter: blur(3px) brightness(0.7); /* 🔥 migliora leggibilità */
+}
+
+/* Overlay scuro uniforme (molto più leggibile) */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+
+  background: rgba(11,18,32,0.65);
+}
+
+/* Tutto il contenuto sopra overlay */
+body > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* =========================
+   LAYOUT
+========================= */
+
+.app-container {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 26px 16px 44px;
+}
+
+.app-footer {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 0 16px 28px;
+  opacity: 0.8;
+  font-size: 12px;
+}
+
+/* =========================
+   GLASS EFFECT PER CARD
+   (aggiungi className="glass")
+========================= */
+
+.glass {
+  background: rgba(15, 20, 30, 0.65);
+  border: 1px solid rgba(255,255,255,0.12);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+  border-radius: 16px;
+  padding: 20px;
 }

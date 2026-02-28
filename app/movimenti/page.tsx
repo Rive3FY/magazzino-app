@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
+import { BrowserMultiFormatReader } from "@zxing/browser";
 
 type DbItem = {
   code: string;
@@ -56,6 +57,14 @@ export default function MovimentiPage() {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const boxRef = useRef<HTMLDivElement | null>(null);
+
+  // scanner
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const [scanning, setScanning] = useState(false);
+
+  // focus quantità
+  const qtyRef = useRef<HTMLInputElement | null>(null);
 
   const [picked, setPicked] = useState<DbItem | null>(null);
   const [suggestions, setSuggestions] = useState<DbItem[]>([]);
@@ -169,6 +178,84 @@ export default function MovimentiPage() {
     setNameMap(map);
   }
 
+  async function pickItem(it: DbItem) {
+    setPicked(it);
+    setSearch(`${it.code} — ${it.name}`);
+    setOpen(false);
+    await computeStockFor(it.code);
+    await loadHistory(it.code);
+  }
+
+  async function pickItemByCode(scannedCode: string) {
+    const code = scannedCode.trim();
+    if (!code) return;
+
+    // ✅ flusso prelievo: OUT automatico + reset campi
+    setType("OUT");
+    setQty("");
+    setNote("");
+
+    const { data: item, error } = await supabase
+      .from("items")
+      .select("code,name,um,warehouse,warehouse_desc,initial_qty")
+      .eq("code", code)
+      .maybeSingle();
+
+    if (error) {
+      console.error("pickItemByCode error:", error);
+      setMsg("Errore ricerca articolo: " + error.message);
+      return;
+    }
+
+    if (!item) {
+      setPicked(null);
+      setStock(null);
+      setMsg(`Codice "${code}" non trovato in anagrafica.`);
+      setSearch(code);
+      setOpen(true);
+      await loadSuggestions(code);
+      return;
+    }
+
+    await pickItem(item as DbItem);
+    setMsg(null);
+
+    // ✅ focus quantità
+    setTimeout(() => qtyRef.current?.focus(), 50);
+  }
+
+  async function startScan() {
+    setMsg(null);
+    setOpen(false);
+    setScanning(true);
+
+    if (!readerRef.current) readerRef.current = new BrowserMultiFormatReader();
+
+    try {
+      const videoEl = videoRef.current;
+      if (!videoEl) throw new Error("Video non disponibile");
+
+      await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
+        if (result) {
+          const text = result.getText();
+          stopScan();
+          await pickItemByCode(text);
+        }
+      });
+    } catch (e: any) {
+      console.error(e);
+      setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
+      setScanning(false);
+    }
+  }
+
+  function stopScan() {
+    try {
+      readerRef.current?.reset();
+    } catch {}
+    setScanning(false);
+  }
+
   useEffect(() => {
     setReady(true);
     loadHistory();
@@ -185,15 +272,12 @@ export default function MovimentiPage() {
         return;
       }
 
-      // ✅ admin check via RPC (no direct profiles query)
       const { data: isAdm, error } = await supabase.rpc("is_admin");
-
       if (error) {
         console.error("is_admin rpc error:", error);
         setIsAdmin(false);
         return;
       }
-
       setIsAdmin(!!isAdm);
     });
 
@@ -202,7 +286,11 @@ export default function MovimentiPage() {
       if (!boxRef.current.contains(e.target as Node)) setOpen(false);
     }
     document.addEventListener("mousedown", onDocMouseDown);
-    return () => document.removeEventListener("mousedown", onDocMouseDown);
+
+    return () => {
+      document.removeEventListener("mousedown", onDocMouseDown);
+      stopScan();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -210,20 +298,11 @@ export default function MovimentiPage() {
     setActiveIndex(0);
   }, [search]);
 
-  async function pickItem(it: DbItem) {
-    setPicked(it);
-    setSearch(`${it.code} — ${it.name}`);
-    setOpen(false);
-    await computeStockFor(it.code);
-    await loadHistory(it.code);
-  }
-
   async function save() {
     setMsg(null);
 
     if (!userId) return setMsg("Devi essere loggato per salvare movimenti.");
-
-    if (!picked) return setMsg("Seleziona un materiale (scrivi e scegli dalla lista).");
+    if (!picked) return setMsg("Seleziona un materiale (scrivi e scegli dalla lista o scansiona).");
 
     const n = toNumber(qty);
     if (!Number.isFinite(n) || n <= 0) return setMsg("Quantità non valida (deve essere > 0).");
@@ -253,6 +332,9 @@ export default function MovimentiPage() {
 
     await computeStockFor(picked.code);
     await loadHistory(picked.code);
+
+    // comodo per il magazzino: rimetti focus quantità per il prossimo
+    setTimeout(() => qtyRef.current?.focus(), 50);
   }
 
   async function deleteMovement(id: string) {
@@ -334,10 +416,10 @@ export default function MovimentiPage() {
               </button>
             </div>
 
-            {/* Autocomplete */}
+            {/* Autocomplete + Scanner */}
             <div ref={boxRef} style={{ position: "relative" }}>
               <label style={{ color: "white", fontSize: 13, opacity: 0.95 }}>
-                Materiale (scrivi per cercare)
+                Materiale (scrivi per cercare) oppure scansiona
                 <input
                   value={search}
                   onChange={async (e) => {
@@ -379,6 +461,62 @@ export default function MovimentiPage() {
                   }}
                 />
               </label>
+
+              <div style={{ display: "flex", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => (scanning ? stopScan() : startScan())}
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    border: "1px solid rgba(255,255,255,0.25)",
+                    background: "rgba(255,255,255,0.16)",
+                    color: "white",
+                    cursor: "pointer",
+                    fontWeight: 800,
+                  }}
+                >
+                  {scanning ? "⏹ Ferma scansione" : "📷 Scansiona barcode"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopScan();
+                    setSearch("");
+                    setPicked(null);
+                    setStock(null);
+                    setSuggestions([]);
+                    setOpen(false);
+                    setMsg(null);
+                  }}
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    border: "1px solid rgba(255,255,255,0.25)",
+                    background: "rgba(255,255,255,0.10)",
+                    color: "white",
+                    cursor: "pointer",
+                    fontWeight: 700,
+                  }}
+                >
+                  Pulisci
+                </button>
+              </div>
+
+              {scanning && (
+                <div style={{ marginTop: 10 }}>
+                  <video
+                    ref={videoRef}
+                    style={{ width: "100%", borderRadius: 12, background: "black" }}
+                    muted
+                    playsInline
+                  />
+                  <div style={{ color: "white", fontSize: 12, marginTop: 6, opacity: 0.9 }}>
+                    Inquadra il codice a barre con la fotocamera.
+                  </div>
+                </div>
+              )}
 
               {open && search.trim() && (
                 <div
@@ -442,6 +580,7 @@ export default function MovimentiPage() {
               <label style={{ color: "white", fontSize: 13 }}>
                 Quantità
                 <input
+                  ref={qtyRef}
                   value={qty}
                   onChange={(e) => setQty(e.target.value)}
                   inputMode="decimal"

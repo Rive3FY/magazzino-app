@@ -225,35 +225,45 @@ export default function MovimentiPage() {
   }
 
   async function startScan() {
-    setMsg(null);
-    setOpen(false);
-    setScanning(true);
+  setMsg(null);
+  setOpen(false);
+  setScanning(true);
 
-    if (!readerRef.current) readerRef.current = new BrowserMultiFormatReader();
+  // ✅ aspetta che React renderizzi il <video>
+  await new Promise((r) => setTimeout(r, 50));
 
-    try {
-      const videoEl = videoRef.current;
-      if (!videoEl) throw new Error("Video non disponibile");
+  if (!readerRef.current) readerRef.current = new BrowserMultiFormatReader();
 
-      await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
-        if (result) {
-          const text = result.getText();
-          stopScan();
-          await pickItemByCode(text);
-        }
-      });
-    } catch (e: any) {
-      console.error(e);
-      setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
-      setScanning(false);
-    }
+  try {
+    const videoEl = videoRef.current;
+    if (!videoEl) throw new Error("Video non disponibile");
+
+    await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
+      if (result) {
+        const text = result.getText();
+        stopScan();
+        await pickItemByCode(text);
+      }
+    });
+  } catch (e: any) {
+    console.error(e);
+    setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
+    setScanning(false);
   }
+}
 
   function stopScan() {
   try {
-    // ferma la scansione continua in modo compatibile
     (readerRef.current as any)?.stopContinuousDecode?.();
   } catch {}
+
+  try {
+    const v = videoRef.current;
+    const stream = v?.srcObject as MediaStream | null;
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    if (v) v.srcObject = null;
+  } catch {}
+
   setScanning(false);
 }
 

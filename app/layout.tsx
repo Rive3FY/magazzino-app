@@ -7,7 +7,11 @@ export const metadata = {
   description: "Movimenti e Giacenze",
 };
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const supabase = await createClient();
   const { data } = await supabase.auth.getUser();
   const email = data.user?.email ?? null;
@@ -19,52 +23,43 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           margin: 0,
           fontFamily: "system-ui",
           minHeight: "100vh",
-          background: "#0b1220",
           color: "rgba(255,255,255,0.92)",
         }}
       >
-        {/* Background più “soft” */}
-        <div style={{ position: "fixed", inset: 0, overflow: "hidden", zIndex: 0 }}>
-          <div
-            style={{
-              position: "absolute",
-              width: 640,
-              height: 640,
-              left: -220,
-              top: -240,
-              borderRadius: 9999,
-              background: "radial-gradient(circle at 30% 30%, rgba(96,165,250,0.9), transparent 60%)",
-              filter: "blur(55px)",
-              opacity: 0.85,
-            }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              width: 640,
-              height: 640,
-              right: -240,
-              bottom: -260,
-              borderRadius: 9999,
-              background: "radial-gradient(circle at 30% 30%, rgba(167,139,250,0.9), transparent 60%)",
-              filter: "blur(60px)",
-              opacity: 0.8,
-            }}
-          />
+        {/* SFONDO TERNA */}
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 0,
+            backgroundImage: "url('/terna-bg.jpg')",
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            backgroundRepeat: "no-repeat",
+          }}
+        >
+          {/* Overlay scuro per leggibilità */}
           <div
             style={{
               position: "absolute",
               inset: 0,
-              background: "linear-gradient(180deg, rgba(0,0,0,0.30), rgba(0,0,0,0.45))",
-              backdropFilter: "blur(12px)",
+              background: "rgba(11, 18, 32, 0.70)",
+              backdropFilter: "blur(2px)",
             }}
           />
         </div>
 
+        {/* CONTENUTO SOPRA LO SFONDO */}
         <div style={{ position: "relative", zIndex: 1 }}>
           <TopNav email={email} />
 
-          <main style={{ maxWidth: 1040, margin: "0 auto", padding: "26px 16px 44px" }}>
+          <main
+            style={{
+              maxWidth: 1040,
+              margin: "0 auto",
+              padding: "26px 16px 44px",
+            }}
+          >
             {children}
           </main>
 

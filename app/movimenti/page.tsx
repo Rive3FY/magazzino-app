@@ -250,11 +250,12 @@ export default function MovimentiPage() {
   }
 
   function stopScan() {
-    try {
-      readerRef.current?.reset();
-    } catch {}
-    setScanning(false);
-  }
+  try {
+    // ferma la scansione continua in modo compatibile
+    (readerRef.current as any)?.stopContinuousDecode?.();
+  } catch {}
+  setScanning(false);
+}
 
   useEffect(() => {
     setReady(true);

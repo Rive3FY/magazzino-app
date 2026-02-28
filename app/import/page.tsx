@@ -1,22 +1,22 @@
 "use client";
 
 import * as XLSX from "xlsx";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 
 type Row = {
-  "Materiale"?: any;
+  Materiale?: any;
   "Descrizione Materiale"?: any;
-  "Divisione"?: any;
+  Divisione?: any;
   "Descrizione Divisione"?: any;
-  "Magazzino"?: any;
+  Magazzino?: any;
   "Descrizione Magazzino"?: any;
   "Qnt. a Mag. bloccato"?: any;
   "Controllo Qualità Magazzino"?: any;
   "Descrizione Gruppo Merci"?: any;
   "Qnt. a Mag. Libero"?: any;
-  "UM"?: any;
-  "TOTALE"?: any;
+  UM?: any;
+  TOTALE?: any;
   "Qnt. Reale"?: any;
 };
 
@@ -31,6 +31,45 @@ export default function ImportPage() {
 
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const [checking, setChecking] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // ✅ controllo admin all'apertura pagina
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      setChecking(true);
+      setMsg(null);
+
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) {
+        if (!alive) return;
+        setIsAdmin(false);
+        setChecking(false);
+        return;
+      }
+
+      const { data: adm, error } = await supabase.rpc("is_admin");
+      if (!alive) return;
+
+      if (error) {
+        console.error("is_admin rpc error:", error);
+        setIsAdmin(false);
+        setChecking(false);
+        return;
+      }
+
+      setIsAdmin(!!adm);
+      setChecking(false);
+    })();
+
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function onFile(file: File) {
     setMsg(null);
@@ -48,7 +87,7 @@ export default function ImportPage() {
           const name = String(r["Descrizione Materiale"] ?? "").trim();
           if (!code || !name) return null;
 
-          const initial_qty = toNumber(r["TOTALE"]); // ✅ giacenza iniziale da TOTALE
+          const initial_qty = toNumber(r["TOTALE"]); // giacenza iniziale da TOTALE
           const qty_free = toNumber(r["Qnt. a Mag. Libero"]);
           const qty_blocked = toNumber(r["Qnt. a Mag. bloccato"]);
           const qty_quality = toNumber(r["Controllo Qualità Magazzino"]);
@@ -79,13 +118,12 @@ export default function ImportPage() {
         return;
       }
 
-      // Upsert su code (chiave primaria)
-      const { error } = await supabase
-        .from("items")
-        .upsert(items, { onConflict: "code" });
+      // ✅ Upsert su code (chiave primaria)
+      const { error } = await supabase.from("items").upsert(items, { onConflict: "code" });
 
       if (error) {
-        setMsg("Errore import DB: " + error.message);
+        // Se non admin, Supabase blocca con RLS: qui mostriamo messaggio chiaro
+        setMsg("Import bloccato ❌ (solo admin). Dettaglio: " + error.message);
         return;
       }
 
@@ -97,11 +135,56 @@ export default function ImportPage() {
     }
   }
 
+  // UI: loading controllo admin
+  if (checking) {
+    return (
+      <main style={{ fontFamily: "system-ui" }}>
+        <h1>📥 Import Excel</h1>
+        <p>Controllo permessi…</p>
+      </main>
+    );
+  }
+
+  // UI: non admin -> blocco pagina import
+  if (!isAdmin) {
+    return (
+      <main style={{ fontFamily: "system-ui" }}>
+        <h1>📥 Import Excel</h1>
+
+        <div
+          style={{
+            marginTop: 12,
+            padding: 16,
+            borderRadius: 16,
+            background: "rgba(255,255,255,0.08)",
+            border: "1px solid rgba(255,255,255,0.14)",
+            color: "rgba(255,255,255,0.92)",
+            maxWidth: 720,
+          }}
+        >
+          <div style={{ fontWeight: 900, fontSize: 16 }}>Accesso negato</div>
+          <p style={{ margin: "8px 0 0", opacity: 0.9 }}>
+            Solo l’admin può importare o modificare l’anagrafica da Excel.
+            <br />
+            Puoi comunque usare <b>Movimenti</b> e <b>Giacenze</b> ed effettuare <b>Export</b>.
+          </p>
+        </div>
+
+        <p style={{ marginTop: 18 }}>
+          <a href="/giacenze">📦 Vai a Giacenze</a> · <a href="/movimenti">➕/➖ Movimenti</a> · <a href="/">Home</a>
+        </p>
+      </main>
+    );
+  }
+
+  // UI: admin -> upload
   return (
     <main style={{ fontFamily: "system-ui" }}>
       <h1>📥 Import Excel</h1>
       <p style={{ opacity: 0.9 }}>
         Carica il file Excel. I dati verranno salvati su <b>Supabase</b> e saranno condivisi tra tutti gli utenti loggati.
+        <br />
+        <b>Solo admin</b> può importare/aggiornare questi dati.
       </p>
 
       <input

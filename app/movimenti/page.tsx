@@ -62,7 +62,10 @@ export default function MovimentiPage() {
   const [picked, setPicked] = useState<DbItem | null>(null);
   const [suggestions, setSuggestions] = useState<DbItem[]>([]);
   const [stock, setStock] = useState<number | null>(null);
+
+  // storico + mappa code->name
   const [history, setHistory] = useState<DbMovement[]>([]);
+  const [nameMap, setNameMap] = useState<Record<string, string>>({});
 
   async function loadSuggestions(text: string) {
     const s = text.trim();
@@ -79,7 +82,7 @@ export default function MovimentiPage() {
       .limit(12);
 
     if (error) {
-      console.error(error);
+      console.error("Errore suggestions:", error);
       setSuggestions([]);
       return;
     }
@@ -95,7 +98,7 @@ export default function MovimentiPage() {
       .single();
 
     if (e1) {
-      console.error(e1);
+      console.error("Errore initial qty:", e1);
       setStock(null);
       return;
     }
@@ -108,7 +111,7 @@ export default function MovimentiPage() {
       .eq("code", code);
 
     if (e2) {
-      console.error(e2);
+      console.error("Errore movements for stock:", e2);
       setStock(initial);
       return;
     }
@@ -131,19 +134,49 @@ export default function MovimentiPage() {
     if (code) q = q.eq("code", code);
 
     const { data, error } = await q;
+
     if (error) {
-      console.error(error);
+      console.error("Errore loadHistory:", JSON.stringify(error, null, 2));
       setHistory([]);
+      setNameMap({});
       return;
     }
-    setHistory((data ?? []) as DbMovement[]);
+
+    const rows = (data ?? []) as DbMovement[];
+    setHistory(rows);
+
+    // Carico nomi materiali (items) per i codici presenti nello storico
+    const codes = Array.from(new Set(rows.map((r) => r.code).filter(Boolean)));
+    if (codes.length === 0) {
+      setNameMap({});
+      return;
+    }
+
+    const { data: itemsData, error: e2 } = await supabase
+      .from("items")
+      .select("code,name")
+      .in("code", codes);
+
+    if (e2) {
+      console.error("Errore caricamento nomi:", JSON.stringify(e2, null, 2));
+      setNameMap({});
+      return;
+    }
+
+    const map: Record<string, string> = {};
+    for (const it of itemsData ?? []) {
+      const c = (it as any).code as string;
+      const n = (it as any).name as string | null;
+      if (c) map[c] = n ?? "";
+    }
+    setNameMap(map);
   }
 
   useEffect(() => {
     setReady(true);
     loadHistory();
 
-    // prendo utente loggato per audit
+    // utente loggato per audit
     supabase.auth.getUser().then(({ data }) => {
       setUserEmail(data.user?.email ?? null);
       setUserId(data.user?.id ?? null);
@@ -193,7 +226,7 @@ export default function MovimentiPage() {
       qty: n,
       note: note.trim() || null,
 
-      // ✅ audit
+      // audit
       created_by: userId,
       created_by_email: userEmail,
     });
@@ -412,7 +445,9 @@ export default function MovimentiPage() {
             {msg && <p style={{ margin: 0, color: "white" }}>{msg}</p>}
           </div>
 
-          <h2 style={{ marginTop: 26, color: "white" }}>📜 Storico movimenti {picked ? `(solo ${picked.code})` : "(ultimi)"}</h2>
+          <h2 style={{ marginTop: 26, color: "white" }}>
+            📜 Storico movimenti {picked ? `(solo ${picked.code})` : "(ultimi)"}
+          </h2>
 
           <div style={{ overflowX: "auto", marginTop: 10 }}>
             <table
@@ -426,7 +461,7 @@ export default function MovimentiPage() {
             >
               <thead>
                 <tr>
-                  {["Data", "Tipo", "Materiale", "Quantità", "Note", "Inserito da"].map((h) => (
+                  {["Data", "Tipo", "Codice", "Descrizione", "Quantità", "Note", "Inserito da"].map((h) => (
                     <th
                       key={h}
                       style={{
@@ -445,19 +480,40 @@ export default function MovimentiPage() {
               <tbody>
                 {history.map((m) => (
                   <tr key={m.id}>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a", whiteSpace: "nowrap" }}>
+                    <td
+                      style={{
+                        padding: 10,
+                        borderBottom: "1px solid #f1f5f9",
+                        color: "#0f172a",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       {fmtDate(m.created_at)}
                     </td>
                     <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>
                       {m.type === "IN" ? "Entrata" : "Uscita"}
                     </td>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>{m.code}</td>
+                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>
+                      {m.code}
+                    </td>
+                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>
+                      {nameMap[m.code] ?? "-"}
+                    </td>
                     <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>
                       {m.type === "IN" ? "+" : "-"}
                       {m.qty}
                     </td>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>{m.note ?? ""}</td>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a", whiteSpace: "nowrap" }}>
+                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>
+                      {m.note ?? ""}
+                    </td>
+                    <td
+                      style={{
+                        padding: 10,
+                        borderBottom: "1px solid #f1f5f9",
+                        color: "#0f172a",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       {m.created_by_email ?? "-"}
                     </td>
                   </tr>
@@ -465,7 +521,7 @@ export default function MovimentiPage() {
 
                 {history.length === 0 && (
                   <tr>
-                    <td colSpan={6} style={{ padding: 12, color: "#0f172a" }}>
+                    <td colSpan={7} style={{ padding: 12, color: "#0f172a" }}>
                       Nessun movimento.
                     </td>
                   </tr>

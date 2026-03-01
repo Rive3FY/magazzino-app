@@ -4,14 +4,16 @@ import SideNav from "./_components/SideNav";
 import TopBar from "./_components/TopBar";
 import MobileNav from "./_components/MobileNav";
 
-export const viewport = {
-  width: "device-width",
-  initialScale: 1,
-};
+
 
 export const metadata = {
   title: "Gestionale Magazzino",
   description: "Movimenti e Giacenze",
+};
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

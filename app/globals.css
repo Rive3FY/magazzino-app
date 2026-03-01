@@ -381,3 +381,10 @@ a:hover{ text-decoration: underline; }
   .mobileOnly { display: block !important; }
   .content { padding-bottom: 88px; }
 }
+/* MobileNav visibile solo su mobile */
+.mobileOnly { display: none !important; }
+
+@media (max-width: 780px) {
+  .mobileOnly { display: block !important; }
+  .content { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
+}

@@ -167,63 +167,86 @@ export default function Home() {
   }
 
   async function startScan() {
-    setMsg(null);
-    setOpen(false);
+  setMsg(null);
+  setOpen(false);
 
-    scanLockedRef.current = false;
-    setScanning(true);
+  // sblocca per una nuova scansione
+  scanLockedRef.current = false;
 
-    // aspetta che <video> sia renderizzato
-    await new Promise((r) => setTimeout(r, 120));
+  // accendi UI
+  setScanning(true);
 
-    if (!readerRef.current) readerRef.current = new BrowserMultiFormatReader();
+  // aspetta che il <video> sia renderizzato
+  await new Promise((r) => setTimeout(r, 150));
 
-    try {
-      const videoEl = videoRef.current;
-      if (!videoEl) throw new Error("Video non disponibile");
+  // ✅ IMPORTANTISSIMO: reader nuovo ad ogni start
+  readerRef.current = new BrowserMultiFormatReader();
 
-      await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
-        if (!result) return;
+  // ✅ ignora i primi frame (spesso contengono un risultato vecchio)
+  const ignoreUntil = Date.now() + 600;
 
-        if (scanLockedRef.current) return;
-        scanLockedRef.current = true;
+  try {
+    const videoEl = videoRef.current;
+    if (!videoEl) throw new Error("Video non disponibile");
 
-        const text = result.getText();
+    await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
+      if (!result) return;
 
-        stopScan();
-        await pickItemByCode(text);
-      });
-    } catch (e: any) {
-      console.error(e);
-      setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
-      setScanning(false);
-    }
-  }
+      // ignora risultati subito dopo l'avvio
+      if (Date.now() < ignoreUntil) return;
 
-  function stopScan() {
-    try {
-      (readerRef.current as any)?.stopContinuousDecode?.();
-    } catch {}
+      // evita doppie letture
+      if (scanLockedRef.current) return;
+      scanLockedRef.current = true;
 
-    try {
-      const v = videoRef.current;
-      const stream = v?.srcObject as MediaStream | null;
-      if (stream) stream.getTracks().forEach((t) => t.stop());
-      if (v) v.srcObject = null;
-    } catch {}
+      const text = result.getText();
 
+      stopScan();
+      await pickItemByCode(text);
+    });
+  } catch (e: any) {
+    console.error(e);
+    setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
     setScanning(false);
   }
+}
+
+  function stopScan() {
+  // ✅ chiudi decoder (compatibile con versioni diverse)
+  try {
+    (readerRef.current as any)?.reset?.();
+  } catch {}
+  try {
+    (readerRef.current as any)?.stopContinuousDecode?.();
+  } catch {}
+
+  // ✅ spegni proprio la camera
+  try {
+    const v = videoRef.current;
+    const stream = v?.srcObject as MediaStream | null;
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    if (v) v.srcObject = null;
+  } catch {}
+
+  // ✅ IMPORTANTISSIMO: rilascia il reader (così al prossimo start è fresco)
+  readerRef.current = null;
+
+  setScanning(false);
+}
 
   function resetSearch() {
-    stopScan();
-    setSearch("");
-    setSuggestions([]);
-    setPicked(null);
-    setStock(null);
-    setOpen(false);
-    setMsg(null);
-  }
+  stopScan();
+
+  // ✅ QUESTO è quello che devi aggiungere
+  scanLockedRef.current = false;
+
+  setSearch("");
+  setSuggestions([]);
+  setPicked(null);
+  setStock(null);
+  setOpen(false);
+  setMsg(null);
+}
 
   // Load dashboard data
   useEffect(() => {

@@ -1,7 +1,7 @@
 "use client";
 
 import * as XLSX from "xlsx";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 
 type Row = {
@@ -58,11 +58,11 @@ export default function AdminPanelClient() {
   const [loadingMov, setLoadingMov] = useState(true);
   const [movements, setMovements] = useState<Movement[]>([]);
 
-  // filtri base
+  // filtri movimenti
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [typeFilter, setTypeFilter] = useState<"ALL" | "IN" | "OUT">("ALL");
-  const [dateFrom, setDateFrom] = useState(""); // yyyy-mm-dd
-  const [dateTo, setDateTo] = useState("");     // yyyy-mm-dd
-  const [codeSearch, setCodeSearch] = useState("");
+  const [codeFilter, setCodeFilter] = useState("");
 
   async function loadMovements() {
     setLoadingMov(true);
@@ -78,10 +78,11 @@ export default function AdminPanelClient() {
     if (dateFrom) q = q.gte("created_at", `${dateFrom}T00:00:00`);
     if (dateTo) q = q.lte("created_at", `${dateTo}T23:59:59`);
 
-    const s = codeSearch.trim();
-    if (s) q = q.ilike("code", `%${s}%`);
+    const c = codeFilter.trim();
+    if (c) q = q.ilike("code", `%${c}%`);
 
     const { data, error } = await q;
+
     if (error) {
       console.error(error);
       setMovements([]);
@@ -99,16 +100,12 @@ export default function AdminPanelClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    loadMovements();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [typeFilter, dateFrom, dateTo]);
-
   async function deleteMovement(id: string) {
     const ok = confirm("Eliminare questo movimento?");
     if (!ok) return;
 
     const { error } = await supabase.from("movements").delete().eq("id", id);
+
     if (error) {
       alert("Non posso eliminare: " + error.message);
       return;
@@ -166,6 +163,7 @@ export default function AdminPanelClient() {
       }
 
       const { error } = await supabase.from("items").upsert(items, { onConflict: "code" });
+
       if (error) {
         setImportMsg("Import bloccato ❌. Dettaglio: " + error.message);
         return;
@@ -179,8 +177,6 @@ export default function AdminPanelClient() {
     }
   }
 
-  const shown = useMemo(() => movements, [movements]);
-
   return (
     <main className="panel">
       <div className="pageBar">
@@ -193,11 +189,11 @@ export default function AdminPanelClient() {
 
       {/* IMPORT */}
       <div style={{ padding: 12, borderBottom: "1px solid #d9e1ea" }}>
-        <h2 style={{ margin: "0 0 8px", fontSize: 16 }}>Import anagrafica da Excel</h2>
+        <h2 style={{ margin: "0 0 10px", fontSize: 16 }}>Import anagrafica Excel (solo admin)</h2>
 
-        <div className="filters" style={{ gridTemplateColumns: "2fr 1fr 1fr 2fr" }}>
+        <div className="filters" style={{ gridTemplateColumns: "2fr 1fr 2fr" }}>
           <div className="field" style={{ gridColumn: "span 2" }}>
-            <label>File Excel</label>
+            <label>Seleziona file</label>
             <input
               className="input"
               type="file"
@@ -212,25 +208,9 @@ export default function AdminPanelClient() {
 
           <div className="field">
             <label>Stato</label>
-            <div
-              style={{
-                border: "1px solid #cfd8e3",
-                borderRadius: 4,
-                background: "#f8fafc",
-                padding: "9px 10px",
-                fontSize: 13,
-                color: "#1f2937",
-              }}
-            >
+            <div className="input" style={{ background: "#f8fafc" }}>
               {importBusy ? "Importazione…" : "Pronto"}
             </div>
-          </div>
-
-          <div className="field">
-            <label>&nbsp;</label>
-            <button className="btn btnPrimary" type="button" disabled>
-              {importBusy ? "Import in corso…" : "Seleziona un file"}
-            </button>
           </div>
         </div>
 
@@ -248,17 +228,15 @@ export default function AdminPanelClient() {
           <button className="btn" onClick={loadMovements}>Aggiorna</button>
         </div>
 
-        <div className="filters" style={{ marginTop: 10, gridTemplateColumns: "1fr 1fr 1fr 1fr" }}>
+        <div className="filters" style={{ marginTop: 10, gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr" }}>
           <div className="field">
             <label>Data da</label>
             <input className="input" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
           </div>
-
           <div className="field">
             <label>Data a</label>
             <input className="input" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
           </div>
-
           <div className="field">
             <label>Tipo</label>
             <select className="select" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as any)}>
@@ -267,18 +245,13 @@ export default function AdminPanelClient() {
               <option value="OUT">Uscita</option>
             </select>
           </div>
-
           <div className="field">
             <label>Codice</label>
-            <input
-              className="input"
-              value={codeSearch}
-              onChange={(e) => setCodeSearch(e.target.value)}
-              placeholder="Filtra per codice…"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") loadMovements();
-              }}
-            />
+            <input className="input" value={codeFilter} onChange={(e) => setCodeFilter(e.target.value)} placeholder="es. 123" />
+          </div>
+          <div className="field">
+            <label>&nbsp;</label>
+            <button className="btn btnPrimary" onClick={loadMovements}>Applica</button>
           </div>
         </div>
 
@@ -304,10 +277,10 @@ export default function AdminPanelClient() {
             <tbody>
               {loadingMov ? (
                 <tr><td colSpan={7}>Caricamento…</td></tr>
-              ) : shown.length === 0 ? (
+              ) : movements.length === 0 ? (
                 <tr><td colSpan={7}>Nessun movimento.</td></tr>
               ) : (
-                shown.map((m) => (
+                movements.map((m) => (
                   <tr key={m.id}>
                     <td>{fmtDate(m.created_at)}</td>
                     <td>{m.type === "IN" ? <span className="badgeIn">Entrata</span> : <span className="badgeOut">Uscita</span>}</td>
@@ -326,7 +299,7 @@ export default function AdminPanelClient() {
         </div>
 
         <div style={{ marginTop: 8, color: "#6b7280", fontSize: 12 }}>
-          Nota: per sicurezza, la cancellazione è bloccata anche da RLS (solo admin).
+          La cancellazione è permessa solo agli admin (controllo anche lato Supabase RLS).
         </div>
       </div>
     </main>

@@ -1,4 +1,5 @@
 import { createClient } from "../_lib/supabase/server";
+import AdminPanelClient from "./AdminPanelClient";
 
 export const metadata = {
   title: "Admin - Gestionale Magazzino",
@@ -36,8 +37,6 @@ export default async function AdminPage() {
       </main>
     );
   }
-
-  const AdminPanelClient = (await import("./AdminPanelClient")).default;
 
   return <AdminPanelClient />;
 }

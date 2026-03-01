@@ -1,7 +1,7 @@
 "use client";
 
 import * as XLSX from "xlsx";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 
 type Row = {
@@ -30,6 +30,16 @@ type Movement = {
   created_by_email: string | null;
 };
 
+type AdminUserRow = {
+  user_id: string;
+  email: string | null;
+  badge_number: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  is_admin: boolean;
+  profile_updated_at: string | null;
+};
+
 function toNumber(v: unknown): number {
   const s = String(v ?? "").trim().replace(",", ".");
   const n = typeof v === "number" ? v : Number(s);
@@ -49,6 +59,9 @@ function fmtDate(iso: string) {
 export default function AdminPanelClient() {
   const supabase = createClient();
 
+  // ID utente loggato (per bloccare revoca a sé stesso in UI)
+  const [myUserId, setMyUserId] = useState<string | null>(null);
+
   // IMPORT
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [importBusy, setImportBusy] = useState(false);
@@ -57,12 +70,23 @@ export default function AdminPanelClient() {
   const [movMsg, setMovMsg] = useState<string | null>(null);
   const [loadingMov, setLoadingMov] = useState(true);
   const [movements, setMovements] = useState<Movement[]>([]);
-
-  // filtri movimenti
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [typeFilter, setTypeFilter] = useState<"ALL" | "IN" | "OUT">("ALL");
   const [codeFilter, setCodeFilter] = useState("");
+
+  // OPERATORI
+  const [usersMsg, setUsersMsg] = useState<string | null>(null);
+  const [loadingUsers, setLoadingUsers] = useState(true);
+  const [users, setUsers] = useState<AdminUserRow[]>([]);
+  const [userSearch, setUserSearch] = useState("");
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setMyUserId(data.user?.id ?? null);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function loadMovements() {
     setLoadingMov(true);
@@ -95,8 +119,26 @@ export default function AdminPanelClient() {
     setLoadingMov(false);
   }
 
+  async function loadUsers() {
+    setLoadingUsers(true);
+    setUsersMsg(null);
+
+    const { data, error } = await supabase.rpc("admin_list_users");
+    if (error) {
+      console.error(error);
+      setUsers([]);
+      setUsersMsg("Errore caricamento operatori: " + error.message);
+      setLoadingUsers(false);
+      return;
+    }
+
+    setUsers((data ?? []) as AdminUserRow[]);
+    setLoadingUsers(false);
+  }
+
   useEffect(() => {
     loadMovements();
+    loadUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -113,6 +155,41 @@ export default function AdminPanelClient() {
 
     setMovMsg("Movimento eliminato ✅");
     await loadMovements();
+  }
+
+  async function grantAdmin(userId: string) {
+    const ok = confirm("Rendere questo utente ADMIN?");
+    if (!ok) return;
+
+    const { error } = await supabase.rpc("admin_grant_admin", { target_user: userId });
+    if (error) {
+      alert("Errore: " + error.message);
+      return;
+    }
+
+    setUsersMsg("Admin assegnato ✅");
+    await loadUsers();
+  }
+
+  async function revokeAdmin(userId: string) {
+    const ok = confirm("Revocare ADMIN a questo utente?");
+    if (!ok) return;
+
+    const { error } = await supabase.rpc("admin_revoke_admin", { target_user: userId });
+    if (error) {
+      const msg =
+        error.message.includes("cannot_revoke_self")
+          ? "Non puoi revocare l’admin a te stesso."
+          : error.message.includes("cannot_remove_last_admin")
+          ? "Non puoi rimuovere l’ultimo admin."
+          : "Errore: " + error.message;
+
+      alert(msg);
+      return;
+    }
+
+    setUsersMsg("Admin revocato ✅");
+    await loadUsers();
   }
 
   async function onFile(file: File) {
@@ -177,6 +254,20 @@ export default function AdminPanelClient() {
     }
   }
 
+  const filteredUsers = useMemo(() => {
+    const s = userSearch.trim().toLowerCase();
+    if (!s) return users;
+
+    return users.filter((u) => {
+      const full = `${u.first_name ?? ""} ${u.last_name ?? ""}`.toLowerCase();
+      return (
+        (u.email ?? "").toLowerCase().includes(s) ||
+        (u.badge_number ?? "").toLowerCase().includes(s) ||
+        full.includes(s)
+      );
+    });
+  }, [users, userSearch]);
+
   return (
     <main className="panel">
       <div className="pageBar">
@@ -184,6 +275,85 @@ export default function AdminPanelClient() {
         <div className="pageBarRight" style={{ display: "flex", gap: 8 }}>
           <a className="btn" href="/giacenze">Giacenze</a>
           <a className="btn" href="/movimenti">Movimenti</a>
+        </div>
+      </div>
+
+      {/* OPERATORI */}
+      <div style={{ padding: 12, borderBottom: "1px solid #d9e1ea" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <h2 style={{ margin: 0, fontSize: 16 }}>Operatori (registrati) & ruoli Admin</h2>
+          <button className="btn" onClick={loadUsers}>Aggiorna</button>
+        </div>
+
+        <div className="filters" style={{ marginTop: 10, gridTemplateColumns: "2fr 1fr" }}>
+          <div className="field">
+            <label>Cerca (email / badge / nome)</label>
+            <input
+              className="input"
+              value={userSearch}
+              onChange={(e) => setUserSearch(e.target.value)}
+              placeholder="es. demo1 / 1024 / Rossi"
+            />
+          </div>
+          <div className="field">
+            <label>&nbsp;</label>
+            <button className="btn btnPrimary" onClick={loadUsers}>Ricarica elenco</button>
+          </div>
+        </div>
+
+        {usersMsg ? (
+          <div style={{ marginTop: 10, fontWeight: 800, color: usersMsg.includes("✅") ? "#065f46" : "#991b1b" }}>
+            {usersMsg}
+          </div>
+        ) : null}
+
+        <div className="tableWrap" style={{ marginTop: 10 }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Badge</th>
+                <th>Nome</th>
+                <th>Admin</th>
+                <th>Azione</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {loadingUsers ? (
+                <tr><td colSpan={5}>Caricamento…</td></tr>
+              ) : filteredUsers.length === 0 ? (
+                <tr><td colSpan={5}>Nessun operatore.</td></tr>
+              ) : (
+                filteredUsers.map((u) => {
+                  const fullName = `${u.first_name ?? ""} ${u.last_name ?? ""}`.trim() || "-";
+                  return (
+                    <tr key={u.user_id}>
+                      <td>{u.email ?? "-"}</td>
+                      <td>{u.badge_number ?? "-"}</td>
+                      <td>{fullName}</td>
+                      <td>{u.is_admin ? "✅" : "—"}</td>
+                      <td>
+                        {u.is_admin ? (
+                          u.user_id === myUserId ? (
+                            <span style={{ color: "#6b7280", fontSize: 12 }}>Sei tu</span>
+                          ) : (
+                            <button className="btn" onClick={() => revokeAdmin(u.user_id)}>Revoca Admin</button>
+                          )
+                        ) : (
+                          <button className="btn btnPrimary" onClick={() => grantAdmin(u.user_id)}>Rendi Admin</button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ marginTop: 8, color: "#6b7280", fontSize: 12 }}>
+          Nota: i ruoli Admin sono gestiti lato database (RPC + security definer). Nessuna password “admin” nel frontend.
         </div>
       </div>
 
@@ -299,7 +469,7 @@ export default function AdminPanelClient() {
         </div>
 
         <div style={{ marginTop: 8, color: "#6b7280", fontSize: 12 }}>
-          La cancellazione è permessa solo agli admin (controllo anche lato Supabase RLS).
+          La cancellazione è permessa solo agli admin (controllo lato DB).
         </div>
       </div>
     </main>

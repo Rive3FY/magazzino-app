@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
-import { useSearchParams } from "next/navigation";
+import { BrowserMultiFormatReader } from "@zxing/browser";
 
 type DbItem = {
   code: string;
@@ -53,7 +53,6 @@ function toIsoEndOfDay(d: string) {
 
 export default function MovimentiPage() {
   const supabase = createClient();
-  const searchParams = useSearchParams();
 
   const [ready, setReady] = useState(false);
 
@@ -91,6 +90,30 @@ export default function MovimentiPage() {
   const [fType, setFType] = useState<"ALL" | "IN" | "OUT">("ALL");
   const [fWarehouse, setFWarehouse] = useState<string>("ALL");
   const [warehouses, setWarehouses] = useState<WarehouseOpt[]>([]);
+
+  // scanner
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const scanLockedRef = useRef(false);
+  const lastScanRef = useRef<{ code: string; ts: number } | null>(null);
+
+  // ✅ refs per realtime (evita “stale state”)
+  const pickedCodeRef = useRef<string | null>(null);
+  const filtersRef = useRef({
+    fFrom: "",
+    fTo: "",
+    fType: "ALL" as "ALL" | "IN" | "OUT",
+    fWarehouse: "ALL" as string,
+  });
+
+  useEffect(() => {
+    pickedCodeRef.current = picked?.code ?? null;
+  }, [picked?.code]);
+
+  useEffect(() => {
+    filtersRef.current = { fFrom, fTo, fType, fWarehouse };
+  }, [fFrom, fTo, fType, fWarehouse]);
 
   async function loadSuggestions(text: string) {
     const s = text.trim();
@@ -151,7 +174,10 @@ export default function MovimentiPage() {
   }
 
   async function loadWarehouses() {
-    const { data, error } = await supabase.from("items").select("warehouse,warehouse_desc").limit(1000);
+    const { data, error } = await supabase
+      .from("items")
+      .select("warehouse,warehouse_desc")
+      .limit(1000);
 
     if (error) {
       console.error("loadWarehouses:", error);
@@ -175,6 +201,7 @@ export default function MovimentiPage() {
     setWarehouses(opts);
   }
 
+  // ✅ carica storico usando gli state (per bottoni, UI)
   async function loadHistory(code?: string) {
     let q = supabase
       .from("movements")
@@ -184,6 +211,7 @@ export default function MovimentiPage() {
 
     if (code) q = q.eq("code", code);
 
+    // filtri
     const isoFrom = toIsoStartOfDay(fFrom);
     const isoTo = toIsoEndOfDay(fTo);
     if (isoFrom) q = q.gte("created_at", isoFrom);
@@ -209,11 +237,68 @@ export default function MovimentiPage() {
       return;
     }
 
-    const { data: itemsData, error: e2 } = await supabase.from("items").select("code,name").in("code", codes);
+    const { data: itemsData, error: e2 } = await supabase
+      .from("items")
+      .select("code,name")
+      .in("code", codes);
 
     if (e2) {
       console.error("items nameMap error:", e2);
       setNameMap({});
+      return;
+    }
+
+    const map: Record<string, string> = {};
+    for (const it of itemsData ?? []) {
+      const c = (it as any).code as string;
+      const n = (it as any).name as string | null;
+      if (c) map[c] = n ?? "";
+    }
+    setNameMap(map);
+  }
+
+  // ✅ carica storico usando refs (per realtime: sempre valori aggiornati)
+  async function loadHistoryLive(code?: string) {
+    const f = filtersRef.current;
+
+    let q = supabase
+      .from("movements")
+      .select("id,created_at,type,code,qty,note,created_by_email,warehouse")
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    if (code) q = q.eq("code", code);
+
+    const isoFrom = toIsoStartOfDay(f.fFrom);
+    const isoTo = toIsoEndOfDay(f.fTo);
+    if (isoFrom) q = q.gte("created_at", isoFrom);
+    if (isoTo) q = q.lte("created_at", isoTo);
+    if (f.fType !== "ALL") q = q.eq("type", f.fType);
+    if (f.fWarehouse !== "ALL") q = q.eq("warehouse", f.fWarehouse);
+
+    const { data, error } = await q;
+
+    if (error) {
+      console.error("loadHistoryLive error:", error);
+      return;
+    }
+
+    const rows = (data ?? []) as DbMovement[];
+    setHistory(rows);
+
+    const codes = Array.from(new Set(rows.map((r) => r.code).filter(Boolean)));
+    if (codes.length === 0) {
+      setNameMap({});
+      return;
+    }
+
+    const { data: itemsData, error: e2 } = await supabase
+      .from("items")
+      .select("code,name")
+      .in("code", codes);
+
+    if (e2) {
+      console.error("items nameMap (live) error:", e2);
       return;
     }
 
@@ -242,6 +327,12 @@ export default function MovimentiPage() {
     const code = scannedCode.trim();
     if (!code) return;
 
+    // anti-duplicato
+    const prev = lastScanRef.current;
+    const now = Date.now();
+    if (prev && prev.code === code && now - prev.ts < 1500) return;
+    lastScanRef.current = { code, ts: now };
+
     setType("OUT");
     setQty("");
     setMsg(null);
@@ -269,16 +360,73 @@ export default function MovimentiPage() {
     }
 
     await pickItem(item as DbItem);
+
+    setTimeout(() => {
+      const ae = document.activeElement as HTMLElement | null;
+      const typing = ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA");
+      if (!typing) qtyRef.current?.focus();
+    }, 120);
   }
 
-  // ✅ Intercetta ?code=XXXX (ritorno da /scan)
-  useEffect(() => {
-    const code = searchParams.get("code");
-    if (code) pickItemByCode(code);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  async function startScan() {
+    setMsg(null);
+    setOpen(false);
+
+    scanLockedRef.current = false;
+
+    setScanning(true);
+    await new Promise((r) => setTimeout(r, 120));
+
+    // reader nuovo a ogni start
+    readerRef.current = new BrowserMultiFormatReader();
+
+    // ignora i primi frame
+    const ignoreUntil = Date.now() + 600;
+
+    try {
+      const videoEl = videoRef.current;
+      if (!videoEl) throw new Error("Video non disponibile");
+
+      await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
+        if (!result) return;
+        if (Date.now() < ignoreUntil) return;
+        if (scanLockedRef.current) return;
+
+        scanLockedRef.current = true;
+
+        const text = result.getText();
+
+        stopScan();
+        await pickItemByCode(text);
+      });
+    } catch (e: any) {
+      console.error(e);
+      setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
+      setScanning(false);
+    }
+  }
+
+  function stopScan() {
+    try {
+      (readerRef.current as any)?.reset?.();
+    } catch {}
+    try {
+      (readerRef.current as any)?.stopContinuousDecode?.();
+    } catch {}
+
+    try {
+      const v = videoRef.current;
+      const stream = v?.srcObject as MediaStream | null;
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      if (v) v.srcObject = null;
+    } catch {}
+
+    readerRef.current = null;
+    setScanning(false);
+  }
 
   function clearAll() {
+    stopScan();
     setSearch("");
     setOpen(false);
     setSuggestions([]);
@@ -347,6 +495,7 @@ export default function MovimentiPage() {
     }
   }
 
+  // init
   useEffect(() => {
     setReady(true);
     loadWarehouses();
@@ -381,10 +530,12 @@ export default function MovimentiPage() {
 
     return () => {
       document.removeEventListener("mousedown", onDocMouseDown);
+      stopScan();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // debounce suggestions
   useEffect(() => {
     setActiveIndex(0);
     const t = setTimeout(() => {
@@ -394,6 +545,43 @@ export default function MovimentiPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, open]);
 
+  // ✅ REALTIME LIVE (INSERT + DELETE)
+  useEffect(() => {
+    if (!ready) return;
+
+    const channel = supabase
+      .channel("movements-live-v1")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "movements" }, async (payload) => {
+        const row = payload.new as any;
+
+        const pickedCode = pickedCodeRef.current;
+        if (pickedCode && row.code !== pickedCode) return;
+
+        await loadHistoryLive(pickedCode ?? undefined);
+
+        if (pickedCode && row.code === pickedCode) {
+          await computeStockFor(pickedCode);
+        }
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "movements" }, async (payload) => {
+        const oldRow = payload.old as any;
+
+        const pickedCode = pickedCodeRef.current;
+        if (pickedCode && oldRow?.code && oldRow.code !== pickedCode) return;
+
+        await loadHistoryLive(pickedCode ?? undefined);
+
+        if (pickedCode && oldRow?.code === pickedCode) {
+          await computeStockFor(pickedCode);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [ready]);
+
   const active = useMemo(() => suggestions[activeIndex], [suggestions, activeIndex]);
 
   return (
@@ -401,8 +589,12 @@ export default function MovimentiPage() {
       <div className="pageBar">
         <div className="pageBarTitle">Magazzino - Movimenti</div>
         <div className="pageBarActions">
-          <a className="btn" href="/giacenze">Giacenze</a>
-          <a className="btn" href="/import">Import</a>
+          <a className="btn" href="/giacenze">
+            Giacenze
+          </a>
+          <a className="btn" href="/import">
+            Import
+          </a>
         </div>
       </div>
 
@@ -437,14 +629,18 @@ export default function MovimentiPage() {
                 <select className="input" value={fWarehouse} onChange={(e) => setFWarehouse(e.target.value)}>
                   <option value="ALL">Tutti</option>
                   {warehouses.map((w) => (
-                    <option key={w.key} value={w.key}>{w.label}</option>
+                    <option key={w.key} value={w.key}>
+                      {w.label}
+                    </option>
                   ))}
                 </select>
               </div>
             </div>
 
             <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
-              <button className="btn" onClick={() => loadHistory(picked?.code)}>Applica filtri</button>
+              <button className="btn" onClick={() => loadHistory(picked?.code)}>
+                Applica filtri
+              </button>
               <button
                 className="btn"
                 onClick={() => {
@@ -476,10 +672,12 @@ export default function MovimentiPage() {
               </button>
 
               <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap" }}>
-                {/* ✅ scanner radicale */}
-                <a className="btn" href="/scan?target=movimenti">Scanner</a>
-
-                <button className="btn" type="button" onClick={clearAll}>Pulisci</button>
+                <button className="btn" type="button" onClick={() => (scanning ? stopScan() : startScan())}>
+                  {scanning ? "Chiudi camera" : "Scanner"}
+                </button>
+                <button className="btn" type="button" onClick={clearAll}>
+                  Pulisci
+                </button>
               </div>
             </div>
 
@@ -559,6 +757,13 @@ export default function MovimentiPage() {
               )}
             </div>
 
+            {scanning && (
+              <div style={{ marginTop: 12 }}>
+                <video ref={videoRef} style={{ width: "100%", borderRadius: 12, background: "black" }} muted playsInline />
+                <div style={{ fontSize: 12, opacity: 0.85, marginTop: 6 }}>Inquadra il codice a barre con la fotocamera.</div>
+              </div>
+            )}
+
             <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10, marginTop: 12 }}>
               <div style={{ gridColumn: "span 8" }}>
                 <label className="label">Note (opz.)</label>
@@ -603,7 +808,12 @@ export default function MovimentiPage() {
           <div className="card" style={{ padding: 12, marginTop: 12 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
               <div style={{ fontWeight: 900 }}>Storico movimenti {picked ? `(solo ${picked.code})` : "(ultimi)"}</div>
-              <button className="btn" onClick={() => loadHistory(picked?.code)}>Aggiorna</button>
+
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button className="btn" onClick={() => loadHistory(picked?.code)}>
+                  Aggiorna
+                </button>
+              </div>
             </div>
 
             <div style={{ overflowX: "auto", marginTop: 10 }}>
@@ -621,24 +831,28 @@ export default function MovimentiPage() {
                     <th>Azioni</th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {history.map((m) => (
                     <tr key={m.id}>
                       <td>{fmtDate(m.created_at)}</td>
                       <td>
-                        <span className={`badge ${m.type === "IN" ? "badgeIn" : "badgeOut"}`}>
-                          {m.type === "IN" ? "Entrata" : "Uscita"}
-                        </span>
+                        <span className={`badge ${m.type === "IN" ? "badgeIn" : "badgeOut"}`}>{m.type === "IN" ? "Entrata" : "Uscita"}</span>
                       </td>
                       <td>{m.code}</td>
                       <td>{nameMap[m.code] ?? "-"}</td>
                       <td>{m.warehouse ?? "-"}</td>
-                      <td>{m.type === "IN" ? "+" : "-"}{m.qty}</td>
+                      <td>
+                        {m.type === "IN" ? "+" : "-"}
+                        {m.qty}
+                      </td>
                       <td>{m.note ?? ""}</td>
                       <td>{m.created_by_email ?? "-"}</td>
                       <td>
                         {isAdmin ? (
-                          <button className="btn" onClick={() => deleteMovement(m.id)}>Elimina</button>
+                          <button className="btn" onClick={() => deleteMovement(m.id)}>
+                            Elimina
+                          </button>
                         ) : (
                           <span style={{ opacity: 0.6 }}>—</span>
                         )}
@@ -648,7 +862,9 @@ export default function MovimentiPage() {
 
                   {history.length === 0 && (
                     <tr>
-                      <td colSpan={9} style={{ padding: 12, color: "#0f172a" }}>Nessun movimento.</td>
+                      <td colSpan={9} style={{ padding: 12, color: "#0f172a" }}>
+                        Nessun movimento.
+                      </td>
                     </tr>
                   )}
                 </tbody>

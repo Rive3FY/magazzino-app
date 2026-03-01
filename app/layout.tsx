@@ -1,7 +1,7 @@
 import "./globals.css";
 import { createClient } from "./_lib/supabase/server";
 import SideNav from "./_components/SideNav";
-import TopBar from "./_components/TopBar.tsx";
+import TopBar from "./_components/TopBar";
 
 export const metadata = {
   title: "Gestionale Magazzino",

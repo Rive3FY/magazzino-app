@@ -2,7 +2,7 @@ import "./globals.css";
 import { createClient } from "./_lib/supabase/server";
 import SideNav from "./_components/SideNav";
 import TopBar from "./_components/TopBar";
-import MobileNav from "./_components/MobileNav";
+
 
 
 
@@ -59,7 +59,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         </div>
 
         {/* ✅ menu in basso su mobile */}
-        <MobileNav />
+        
       </body>
     </html>
   );

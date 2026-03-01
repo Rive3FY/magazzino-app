@@ -294,20 +294,7 @@ export default function Home() {
 
   return (
     <div>
-      {/* Debug visivo: se NON lo vedi su mobile, stai aprendo un deploy diverso/cached */}
-      <div
-        style={{
-          padding: 8,
-          borderRadius: 12,
-          background: "rgba(255,255,0,0.35)",
-          border: "1px solid rgba(0,0,0,0.12)",
-          color: "#0f172a",
-          fontWeight: 900,
-          marginBottom: 12,
-        }}
-      >
-        ✅ Dashboard aggiornata (se non lo vedi su mobile: cache / url diverso)
-      </div>
+      
 
       <div
         style={{

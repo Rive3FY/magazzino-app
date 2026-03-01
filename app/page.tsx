@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "./_lib/supabase/client";
-import { useSearchParams } from "next/navigation";
+import { BrowserMultiFormatReader } from "@zxing/browser";
 
 type Movement = {
   id: string;
@@ -12,6 +12,7 @@ type Movement = {
   qty: number;
   note: string | null;
   created_by_email: string | null;
+  created_by_name: string | null; // ✅
 };
 
 type DbItem = {
@@ -43,7 +44,6 @@ function fmtDate(iso: string) {
 
 export default function Home() {
   const supabase = createClient();
-  const searchParams = useSearchParams();
 
   // dashboard data
   const [loading, setLoading] = useState(true);
@@ -61,6 +61,14 @@ export default function Home() {
   const [msg, setMsg] = useState<string | null>(null);
 
   const boxRef = useRef<HTMLDivElement | null>(null);
+
+  // scanner
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+
+  const [scanning, setScanning] = useState(false);
+  const scanLockedRef = useRef(false);
+  const lastScanRef = useRef<{ code: string; ts: number } | null>(null);
 
   async function loadSuggestions(text: string) {
     const s = text.trim();
@@ -158,7 +166,70 @@ export default function Home() {
     await pickItem(item as DbItem);
   }
 
+  function stopScan() {
+    try {
+      (readerRef.current as any)?.reset?.();
+    } catch {}
+    try {
+      (readerRef.current as any)?.stopContinuousDecode?.();
+    } catch {}
+    readerRef.current = null;
+
+    try {
+      const v = videoRef.current;
+      const stream = v?.srcObject as MediaStream | null;
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      if (v) v.srcObject = null;
+    } catch {}
+
+    setScanning(false);
+  }
+
+  async function startScan() {
+    setMsg(null);
+    setOpen(false);
+
+    stopScan();
+    scanLockedRef.current = false;
+    lastScanRef.current = null;
+
+    setScanning(true);
+    await new Promise((r) => setTimeout(r, 200));
+
+    try {
+      const videoEl = videoRef.current;
+      if (!videoEl) throw new Error("Video non disponibile");
+
+      readerRef.current = new BrowserMultiFormatReader();
+
+      await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
+        if (!result) return;
+        if (scanLockedRef.current) return;
+
+        const text = String(result.getText?.() ?? "").trim();
+        if (!text) return;
+
+        const prev = lastScanRef.current;
+        const now = Date.now();
+        if (prev && prev.code === text && now - prev.ts < 1500) return;
+        lastScanRef.current = { code: text, ts: now };
+
+        scanLockedRef.current = true;
+
+        stopScan();
+        await pickItemByCode(text);
+      });
+    } catch (e: any) {
+      setMsg("Errore camera: " + (e?.message ?? "sconosciuto"));
+      stopScan();
+    }
+  }
+
   function resetSearch() {
+    stopScan();
+    scanLockedRef.current = false;
+    lastScanRef.current = null;
+
     setSearch("");
     setSuggestions([]);
     setPicked(null);
@@ -166,13 +237,6 @@ export default function Home() {
     setOpen(false);
     setMsg(null);
   }
-
-  // ✅ ritorno da /scan → /?code=XXXX
-  useEffect(() => {
-    const code = searchParams.get("code");
-    if (code) pickItemByCode(code);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
 
   // dashboard load
   useEffect(() => {
@@ -185,9 +249,10 @@ export default function Home() {
         .from("items")
         .select("code", { count: "exact", head: true });
 
+      // ✅ aggiunto created_by_name
       const { data: movs, error: eMovs } = await supabase
         .from("movements")
-        .select("id,created_at,type,code,qty,note,created_by_email")
+        .select("id,created_at,type,code,qty,note,created_by_email,created_by_name")
         .order("created_at", { ascending: false })
         .limit(100);
 
@@ -203,6 +268,7 @@ export default function Home() {
 
     return () => {
       alive = false;
+      stopScan();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -242,43 +308,21 @@ export default function Home() {
 
   return (
     <div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
-          gap: 12,
-          flexWrap: "wrap",
-        }}
-      >
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
           <h1 style={{ margin: 0 }}>Dashboard</h1>
-          <div style={{ opacity: 0.85, marginTop: 6 }}>
-            Panoramica rapida di anagrafica e operatività.
-          </div>
+          <div style={{ opacity: 0.85, marginTop: 6 }}>Panoramica rapida di anagrafica e operatività.</div>
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <a className="btn btnPrimary" href="/movimenti">
-             Nuovo movimento
-          </a>
-          <a className="btn" href="/giacenze">
-             Giacenze
-          </a>
+          <a className="btn btnPrimary" href="/movimenti"> Nuovo movimento</a>
+          <a className="btn" href="/giacenze"> Vai a giacenze</a>
         </div>
       </div>
 
       {/* ✅ CERCA MATERIALE + BARCODE */}
       <div className="glass" style={{ marginTop: 14 }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            flexWrap: "wrap",
-          }}
-        >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div>
             <div style={{ fontWeight: 900, fontSize: 16 }}> Cerca materiale</div>
             <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
@@ -287,13 +331,10 @@ export default function Home() {
           </div>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            {/* ✅ scanner stabile: pagina dedicata */}
-            <a className="btn" href="/scan?target=dashboard">
-               Scansiona barcode
-            </a>
-            <button className="btn" onClick={resetSearch}>
-              Pulisci
+            <button className="btn" onClick={() => (scanning ? stopScan() : startScan())}>
+              {scanning ? "⏹ Ferma scansione" : " Scansiona barcode"}
             </button>
+            <button className="btn" onClick={resetSearch}>Pulisci</button>
           </div>
         </div>
 
@@ -374,6 +415,13 @@ export default function Home() {
           )}
         </div>
 
+        {scanning && (
+          <div style={{ marginTop: 12 }}>
+            <video ref={videoRef} style={{ width: "100%", borderRadius: 12, background: "black" }} muted playsInline />
+            <div style={{ fontSize: 12, marginTop: 6, opacity: 0.9 }}>Inquadra il codice a barre con la fotocamera.</div>
+          </div>
+        )}
+
         {msg && <div style={{ marginTop: 10, fontWeight: 800 }}>{msg}</div>}
 
         {picked && (
@@ -396,12 +444,8 @@ export default function Home() {
 
             <div style={{ gridColumn: "span 3" }} className="glass">
               <div style={{ opacity: 0.85, fontSize: 12 }}>Giacenza attuale</div>
-              <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6 }}>
-                {stock === null ? "…" : stock}
-              </div>
-              <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>
-                (iniziale {picked.initial_qty ?? 0} + movimenti)
-              </div>
+              <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6 }}>{stock === null ? "…" : stock}</div>
+              <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>(iniziale {picked.initial_qty ?? 0} + movimenti)</div>
             </div>
           </div>
         )}
@@ -411,32 +455,22 @@ export default function Home() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 12, marginTop: 14 }}>
         <div className="glass" style={{ gridColumn: "span 4" }}>
           <div style={{ opacity: 0.85, fontSize: 12 }}>Materiali</div>
-          <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>
-            {loading ? "…" : itemsCount}
-          </div>
+          <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>{loading ? "…" : itemsCount}</div>
           <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>Codici in anagrafica</div>
         </div>
 
         <div className="glass" style={{ gridColumn: "span 4" }}>
           <div style={{ opacity: 0.85, fontSize: 12 }}>Movimenti oggi</div>
-          <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>
-            {loading ? "…" : movementsToday}
-          </div>
+          <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>{loading ? "…" : movementsToday}</div>
           <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>Entrate/uscite registrate oggi</div>
         </div>
 
         <div className="glass" style={{ gridColumn: "span 4" }}>
           <div style={{ opacity: 0.85, fontSize: 12 }}>Ultimo movimento</div>
           <div style={{ marginTop: 8, fontWeight: 800 }}>
-            {loading
-              ? "…"
-              : lastMovement
-              ? `${lastMovement.code} · ${lastMovement.type === "IN" ? "Entrata" : "Uscita"}`
-              : "—"}
+            {loading ? "…" : lastMovement ? `${lastMovement.code} · ${lastMovement.type === "IN" ? "Entrata" : "Uscita"}` : "—"}
           </div>
-          <div style={{ opacity: 0.85, fontSize: 12, marginTop: 6 }}>
-            {loading ? "" : lastMovement ? fmtDate(lastMovement.created_at) : ""}
-          </div>
+          <div style={{ opacity: 0.85, fontSize: 12, marginTop: 6 }}>{loading ? "" : lastMovement ? fmtDate(lastMovement.created_at) : ""}</div>
         </div>
       </div>
 
@@ -444,9 +478,7 @@ export default function Home() {
       <div style={{ marginTop: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <h2 style={{ margin: 0 }}>Ultimi movimenti</h2>
-          <a className="btn" href="/movimenti">
-            Vedi tutto
-          </a>
+          <a className="btn" href="/movimenti">Vedi tutto</a>
         </div>
 
         <div style={{ overflowX: "auto", marginTop: 10 }}>
@@ -489,7 +521,9 @@ export default function Home() {
                       {m.qty}
                     </td>
                     <td>{m.note ?? ""}</td>
-                    <td>{m.created_by_email ?? "-"}</td>
+
+                    {/* ✅ nome con fallback su email */}
+                    <td>{m.created_by_name ?? m.created_by_email ?? "-"}</td>
                   </tr>
                 ))
               )}

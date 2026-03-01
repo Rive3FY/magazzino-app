@@ -21,6 +21,7 @@ type DbMovement = {
   qty: number;
   note: string | null;
   created_by_email: string | null;
+  created_by_name: string | null; // ✅
   warehouse: string | null;
 };
 
@@ -98,23 +99,6 @@ export default function MovimentiPage() {
   const scanLockedRef = useRef(false);
   const lastScanRef = useRef<{ code: string; ts: number } | null>(null);
 
-  // ✅ refs per realtime (evita “stale state”)
-  const pickedCodeRef = useRef<string | null>(null);
-  const filtersRef = useRef({
-    fFrom: "",
-    fTo: "",
-    fType: "ALL" as "ALL" | "IN" | "OUT",
-    fWarehouse: "ALL" as string,
-  });
-
-  useEffect(() => {
-    pickedCodeRef.current = picked?.code ?? null;
-  }, [picked?.code]);
-
-  useEffect(() => {
-    filtersRef.current = { fFrom, fTo, fType, fWarehouse };
-  }, [fFrom, fTo, fType, fWarehouse]);
-
   async function loadSuggestions(text: string) {
     const s = text.trim();
     if (!s) {
@@ -174,10 +158,7 @@ export default function MovimentiPage() {
   }
 
   async function loadWarehouses() {
-    const { data, error } = await supabase
-      .from("items")
-      .select("warehouse,warehouse_desc")
-      .limit(1000);
+    const { data, error } = await supabase.from("items").select("warehouse,warehouse_desc").limit(1000);
 
     if (error) {
       console.error("loadWarehouses:", error);
@@ -201,11 +182,10 @@ export default function MovimentiPage() {
     setWarehouses(opts);
   }
 
-  // ✅ carica storico usando gli state (per bottoni, UI)
   async function loadHistory(code?: string) {
     let q = supabase
       .from("movements")
-      .select("id,created_at,type,code,qty,note,created_by_email,warehouse")
+      .select("id,created_at,type,code,qty,note,created_by_email,created_by_name,warehouse") // ✅
       .order("created_at", { ascending: false })
       .limit(200);
 
@@ -237,68 +217,11 @@ export default function MovimentiPage() {
       return;
     }
 
-    const { data: itemsData, error: e2 } = await supabase
-      .from("items")
-      .select("code,name")
-      .in("code", codes);
+    const { data: itemsData, error: e2 } = await supabase.from("items").select("code,name").in("code", codes);
 
     if (e2) {
       console.error("items nameMap error:", e2);
       setNameMap({});
-      return;
-    }
-
-    const map: Record<string, string> = {};
-    for (const it of itemsData ?? []) {
-      const c = (it as any).code as string;
-      const n = (it as any).name as string | null;
-      if (c) map[c] = n ?? "";
-    }
-    setNameMap(map);
-  }
-
-  // ✅ carica storico usando refs (per realtime: sempre valori aggiornati)
-  async function loadHistoryLive(code?: string) {
-    const f = filtersRef.current;
-
-    let q = supabase
-      .from("movements")
-      .select("id,created_at,type,code,qty,note,created_by_email,warehouse")
-      .order("created_at", { ascending: false })
-      .limit(200);
-
-    if (code) q = q.eq("code", code);
-
-    const isoFrom = toIsoStartOfDay(f.fFrom);
-    const isoTo = toIsoEndOfDay(f.fTo);
-    if (isoFrom) q = q.gte("created_at", isoFrom);
-    if (isoTo) q = q.lte("created_at", isoTo);
-    if (f.fType !== "ALL") q = q.eq("type", f.fType);
-    if (f.fWarehouse !== "ALL") q = q.eq("warehouse", f.fWarehouse);
-
-    const { data, error } = await q;
-
-    if (error) {
-      console.error("loadHistoryLive error:", error);
-      return;
-    }
-
-    const rows = (data ?? []) as DbMovement[];
-    setHistory(rows);
-
-    const codes = Array.from(new Set(rows.map((r) => r.code).filter(Boolean)));
-    if (codes.length === 0) {
-      setNameMap({});
-      return;
-    }
-
-    const { data: itemsData, error: e2 } = await supabase
-      .from("items")
-      .select("code,name")
-      .in("code", codes);
-
-    if (e2) {
-      console.error("items nameMap (live) error:", e2);
       return;
     }
 
@@ -327,7 +250,6 @@ export default function MovimentiPage() {
     const code = scannedCode.trim();
     if (!code) return;
 
-    // anti-duplicato
     const prev = lastScanRef.current;
     const now = Date.now();
     if (prev && prev.code === code && now - prev.ts < 1500) return;
@@ -377,10 +299,7 @@ export default function MovimentiPage() {
     setScanning(true);
     await new Promise((r) => setTimeout(r, 120));
 
-    // reader nuovo a ogni start
     readerRef.current = new BrowserMultiFormatReader();
-
-    // ignora i primi frame
     const ignoreUntil = Date.now() + 600;
 
     try {
@@ -393,7 +312,6 @@ export default function MovimentiPage() {
         if (scanLockedRef.current) return;
 
         scanLockedRef.current = true;
-
         const text = result.getText();
 
         stopScan();
@@ -449,12 +367,27 @@ export default function MovimentiPage() {
 
     if (type === "OUT") {
       const current = stock ?? 0;
-      if (current - n < 0) {
-        return setMsg(`Uscita non possibile: giacenza ${current} → diventerebbe ${current - n}.`);
-      }
+      if (current - n < 0) return setMsg(`Uscita non possibile: giacenza ${current} → diventerebbe ${current - n}.`);
     }
 
     const wh = picked.warehouse ?? "UNKNOWN";
+
+    // ✅ prende Nome Cognome dalla tabella profiles
+    let createdByName: string | null = null;
+    try {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("first_name,last_name")
+        .eq("id", userId)
+        .maybeSingle();
+
+      const first = profile?.first_name?.trim() ?? "";
+      const last = profile?.last_name?.trim() ?? "";
+      const full = `${first} ${last}`.trim();
+      if (full) createdByName = full;
+    } catch {}
+
+    if (!createdByName) createdByName = userEmail; // fallback
 
     const { error } = await supabase.from("movements").insert({
       type,
@@ -463,6 +396,7 @@ export default function MovimentiPage() {
       note: note.trim() || null,
       created_by: userId,
       created_by_email: userEmail,
+      created_by_name: createdByName, // ✅
       warehouse: wh,
     });
 
@@ -544,43 +478,6 @@ export default function MovimentiPage() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, open]);
-
-  // ✅ REALTIME LIVE (INSERT + DELETE)
-  useEffect(() => {
-    if (!ready) return;
-
-    const channel = supabase
-      .channel("movements-live-v1")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "movements" }, async (payload) => {
-        const row = payload.new as any;
-
-        const pickedCode = pickedCodeRef.current;
-        if (pickedCode && row.code !== pickedCode) return;
-
-        await loadHistoryLive(pickedCode ?? undefined);
-
-        if (pickedCode && row.code === pickedCode) {
-          await computeStockFor(pickedCode);
-        }
-      })
-      .on("postgres_changes", { event: "DELETE", schema: "public", table: "movements" }, async (payload) => {
-        const oldRow = payload.old as any;
-
-        const pickedCode = pickedCodeRef.current;
-        if (pickedCode && oldRow?.code && oldRow.code !== pickedCode) return;
-
-        await loadHistoryLive(pickedCode ?? undefined);
-
-        if (pickedCode && oldRow?.code === pickedCode) {
-          await computeStockFor(pickedCode);
-        }
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [ready]);
 
   const active = useMemo(() => suggestions[activeIndex], [suggestions, activeIndex]);
 
@@ -772,14 +669,7 @@ export default function MovimentiPage() {
 
               <div style={{ gridColumn: "span 3" }}>
                 <label className="label">Quantità</label>
-                <input
-                  ref={qtyRef}
-                  className="input"
-                  value={qty}
-                  onChange={(e) => setQty(e.target.value)}
-                  inputMode="decimal"
-                  placeholder="es. 5"
-                />
+                <input ref={qtyRef} className="input" value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="es. 5" />
               </div>
 
               <div style={{ gridColumn: "span 1", display: "flex", alignItems: "end" }}>
@@ -808,12 +698,9 @@ export default function MovimentiPage() {
           <div className="card" style={{ padding: 12, marginTop: 12 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
               <div style={{ fontWeight: 900 }}>Storico movimenti {picked ? `(solo ${picked.code})` : "(ultimi)"}</div>
-
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button className="btn" onClick={() => loadHistory(picked?.code)}>
-                  Aggiorna
-                </button>
-              </div>
+              <button className="btn" onClick={() => loadHistory(picked?.code)}>
+                Aggiorna
+              </button>
             </div>
 
             <div style={{ overflowX: "auto", marginTop: 10 }}>
@@ -847,7 +734,10 @@ export default function MovimentiPage() {
                         {m.qty}
                       </td>
                       <td>{m.note ?? ""}</td>
-                      <td>{m.created_by_email ?? "-"}</td>
+
+                      {/* ✅ QUI MOSTRA NOME */}
+                      <td>{m.created_by_name ?? m.created_by_email ?? "-"}</td>
+
                       <td>
                         {isAdmin ? (
                           <button className="btn" onClick={() => deleteMovement(m.id)}>

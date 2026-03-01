@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "./_lib/supabase/client";
-import { BrowserMultiFormatReader } from "@zxing/browser";
+import { useSearchParams } from "next/navigation";
 
 type Movement = {
   id: string;
@@ -43,6 +43,7 @@ function fmtDate(iso: string) {
 
 export default function Home() {
   const supabase = createClient();
+  const searchParams = useSearchParams();
 
   // dashboard data
   const [loading, setLoading] = useState(true);
@@ -60,15 +61,6 @@ export default function Home() {
   const [msg, setMsg] = useState<string | null>(null);
 
   const boxRef = useRef<HTMLDivElement | null>(null);
-
-  // scanner
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-
-  const [scanning, setScanning] = useState(false);
-  const scanLockedRef = useRef(false);
-  const lastScanRef = useRef<{ code: string; ts: number } | null>(null);
 
   async function loadSuggestions(text: string) {
     const s = text.trim();
@@ -166,82 +158,21 @@ export default function Home() {
     await pickItem(item as DbItem);
   }
 
-  function stopScan() {
-  // ✅ ferma decoder
-  try {
-    (readerRef.current as any)?.reset?.();
-  } catch {}
-  try {
-    (readerRef.current as any)?.stopContinuousDecode?.();
-  } catch {}
-  readerRef.current = null;
-
-  // ✅ spegni stream camera
-  try {
-    const v = videoRef.current;
-    const stream = v?.srcObject as MediaStream | null;
-    if (stream) stream.getTracks().forEach((t) => t.stop());
-    if (v) v.srcObject = null;
-  } catch {}
-
-  setScanning(false);
-}
-
-  async function startScan() {
-  setMsg(null);
-  setOpen(false);
-
-  // 🔥 reset totale prima di riaprire
-  stopScan();
-
-  scanLockedRef.current = false;
-  lastScanRef.current = null;
-
-  setScanning(true);
-
-  await new Promise((r) => setTimeout(r, 200));
-
-  try {
-    const videoEl = videoRef.current;
-    if (!videoEl) throw new Error("Video non disponibile");
-
-    // 🔥 READER SEMPRE NUOVO (fondamentale su iOS)
-    readerRef.current = new BrowserMultiFormatReader();
-
-    await readerRef.current.decodeFromVideoDevice(
-      undefined,
-      videoEl,
-      async (result) => {
-        if (!result) return;
-        if (scanLockedRef.current) return;
-
-        const text = String(result.getText?.() ?? "").trim();
-        if (!text) return;
-
-        scanLockedRef.current = true;
-
-        stopScan();
-        await pickItemByCode(text);
-      }
-    );
-  } catch (e: any) {
-    setMsg("Errore camera: " + (e?.message ?? "sconosciuto"));
-    stopScan();
-  }
-}
-
   function resetSearch() {
-  stopScan();
-  scanLockedRef.current = false;
-  lastScanRef.current = null;
+    setSearch("");
+    setSuggestions([]);
+    setPicked(null);
+    setStock(null);
+    setOpen(false);
+    setMsg(null);
+  }
 
-  setSearch("");
-  setSuggestions([]);
-  setPicked(null);
-  setStock(null);
-  setOpen(false);
-  setMsg(null);
-}
+  // ✅ ritorno da /scan → /?code=XXXX
+  useEffect(() => {
+    const code = searchParams.get("code");
+    if (code) pickItemByCode(code);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   // dashboard load
   useEffect(() => {
@@ -272,7 +203,6 @@ export default function Home() {
 
     return () => {
       alive = false;
-      stopScan();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -312,21 +242,43 @@ export default function Home() {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
         <div>
           <h1 style={{ margin: 0 }}>Dashboard</h1>
-          <div style={{ opacity: 0.85, marginTop: 6 }}>Panoramica rapida di anagrafica e operatività.</div>
+          <div style={{ opacity: 0.85, marginTop: 6 }}>
+            Panoramica rapida di anagrafica e operatività.
+          </div>
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <a className="btn btnPrimary" href="/movimenti">➕/➖ Nuovo movimento</a>
-          <a className="btn" href="/giacenze">📦 Vai a giacenze</a>
+          <a className="btn btnPrimary" href="/movimenti">
+            ➕/➖ Nuovo movimento
+          </a>
+          <a className="btn" href="/giacenze">
+            📦 Vai a giacenze
+          </a>
         </div>
       </div>
 
       {/* ✅ CERCA MATERIALE + BARCODE */}
       <div className="glass" style={{ marginTop: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
           <div>
             <div style={{ fontWeight: 900, fontSize: 16 }}>🔎 Cerca materiale</div>
             <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
@@ -335,10 +287,13 @@ export default function Home() {
           </div>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button className="btn" onClick={() => (scanning ? stopScan() : startScan())}>
-              {scanning ? "⏹ Ferma scansione" : "📷 Scansiona barcode"}
+            {/* ✅ scanner stabile: pagina dedicata */}
+            <a className="btn" href="/scan?target=dashboard">
+              📷 Scansiona barcode
+            </a>
+            <button className="btn" onClick={resetSearch}>
+              Pulisci
             </button>
-            <button className="btn" onClick={resetSearch}>Pulisci</button>
           </div>
         </div>
 
@@ -419,20 +374,6 @@ export default function Home() {
           )}
         </div>
 
-        {scanning && (
-          <div style={{ marginTop: 12 }}>
-            <video
-              ref={videoRef}
-              style={{ width: "100%", borderRadius: 12, background: "black" }}
-              muted
-              playsInline
-            />
-            <div style={{ fontSize: 12, marginTop: 6, opacity: 0.9 }}>
-              Inquadra il codice a barre con la fotocamera.
-            </div>
-          </div>
-        )}
-
         {msg && <div style={{ marginTop: 10, fontWeight: 800 }}>{msg}</div>}
 
         {picked && (
@@ -481,9 +422,7 @@ export default function Home() {
           <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>
             {loading ? "…" : movementsToday}
           </div>
-          <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>
-            Entrate/uscite registrate oggi
-          </div>
+          <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>Entrate/uscite registrate oggi</div>
         </div>
 
         <div className="glass" style={{ gridColumn: "span 4" }}>
@@ -505,7 +444,9 @@ export default function Home() {
       <div style={{ marginTop: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <h2 style={{ margin: 0 }}>Ultimi movimenti</h2>
-          <a className="btn" href="/movimenti">Vedi tutto</a>
+          <a className="btn" href="/movimenti">
+            Vedi tutto
+          </a>
         </div>
 
         <div style={{ overflowX: "auto", marginTop: 10 }}>

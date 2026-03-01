@@ -64,7 +64,7 @@ a:hover{ text-decoration: underline; }
 
 .sidebarVersion{
   font-size: 12px;
-  opacity: 0.9;
+  opacity: 0;
   margin-top: 6px;
 }
 

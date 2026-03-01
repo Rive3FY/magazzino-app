@@ -31,6 +31,9 @@ export default function GiacenzePage() {
   const supabase = createClient();
 
   const [q, setQ] = useState("");
+  const [wh, setWh] = useState<string>("ALL");
+  const [whOptions, setWhOptions] = useState<Array<{ code: string; label: string }>>([]);
+
   const [page, setPage] = useState(1);
 
   const [items, setItems] = useState<DbItem[]>([]);
@@ -40,11 +43,53 @@ export default function GiacenzePage() {
   const [loading, setLoading] = useState(true);
   const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE));
 
+  // carica lista magazzini (da items)
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      const { data, error } = await supabase
+        .from("items")
+        .select("warehouse,warehouse_desc")
+        .not("warehouse", "is", null)
+        .limit(5000);
+
+      if (!alive) return;
+
+      if (error) {
+        console.error("load warehouses error:", error);
+        setWhOptions([]);
+        return;
+      }
+
+      const map = new Map<string, string>();
+      for (const r of data ?? []) {
+        const code = (r as any).warehouse as string | null;
+        const desc = (r as any).warehouse_desc as string | null;
+        if (!code) continue;
+        map.set(code, [code, desc].filter(Boolean).join(" - "));
+      }
+
+      const opts = Array.from(map.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([code, label]) => ({ code, label }));
+
+      setWhOptions(opts);
+    })();
+
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function load() {
     setLoading(true);
 
     const search = q.trim();
     let query = supabase.from("items").select("*", { count: "exact" });
+
+    if (wh !== "ALL") query = query.eq("warehouse", wh);
 
     if (search) {
       query = query.or(`code.ilike.%${search}%,name.ilike.%${search}%`);
@@ -53,7 +98,9 @@ export default function GiacenzePage() {
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 
-    const { data, error, count: c } = await query.order("code", { ascending: true }).range(from, to);
+    const { data, error, count: c } = await query
+      .order("code", { ascending: true })
+      .range(from, to);
 
     if (error) {
       console.error(error);
@@ -68,6 +115,7 @@ export default function GiacenzePage() {
     setItems(list);
     setCount(c ?? 0);
 
+    // calcolo stock per SOLO gli item della pagina
     const codes = list.map((i) => i.code);
     if (codes.length === 0) {
       setStockMap({});
@@ -75,7 +123,10 @@ export default function GiacenzePage() {
       return;
     }
 
-    const { data: movs, error: e2 } = await supabase.from("movements").select("id,type,code,qty").in("code", codes);
+    const { data: movs, error: e2 } = await supabase
+      .from("movements")
+      .select("id,type,code,qty")
+      .in("code", codes);
 
     if (e2) {
       console.error(e2);
@@ -103,19 +154,22 @@ export default function GiacenzePage() {
     setLoading(false);
   }
 
+  // ricarica quando cambia page
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
 
+  // quando cambia ricerca o magazzino torno a pagina 1
   useEffect(() => {
     setPage(1);
-  }, [q]);
+  }, [q, wh]);
 
+  // ricarica quando cambiano filtri (q/wh)
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
+  }, [q, wh]);
 
   const rows = useMemo(() => {
     return items.map((it) => ({
@@ -140,12 +194,11 @@ export default function GiacenzePage() {
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Giacenze");
-    XLSX.writeFile(wb, `giacenze_pagina_${page}.xlsx`);
+    XLSX.writeFile(wb, `giacenze_${wh === "ALL" ? "tutti" : wh}_pagina_${page}.xlsx`);
   }
 
   return (
     <main className="panel">
-      {/* Barra teal stile ERP */}
       <div className="pageBar">
         <div className="pageBarTitle">Magazzino - Elaborazione giacenze</div>
         <div className="pageBarRight">
@@ -155,8 +208,19 @@ export default function GiacenzePage() {
         </div>
       </div>
 
-      {/* Filtri sopra tabella */}
       <div className="filters">
+        <div className="field">
+          <label>Magazzino</label>
+          <select className="select" value={wh} onChange={(e) => setWh(e.target.value)}>
+            <option value="ALL">Tutti</option>
+            {whOptions.map((o) => (
+              <option key={o.code} value={o.code}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div className="field" style={{ gridColumn: "span 2" }}>
           <label>Filtro articoli</label>
           <input
@@ -169,35 +233,16 @@ export default function GiacenzePage() {
 
         <div className="field">
           <label>&nbsp;</label>
-          <button className="btn btnPrimary" onClick={() => load()}>
-            Elabora
-          </button>
-        </div>
-
-        <div className="field">
-          <label>&nbsp;</label>
-          <button className="btn btnBlue" onClick={() => load()}>
-            Aggiorna
-          </button>
-        </div>
-
-        <div className="field">
-          <label>&nbsp;</label>
           <button className="btn btnOrange" onClick={exportXlsx}>
             Esporta
           </button>
         </div>
       </div>
 
-      {/* Riga azioni + paginazione (stile gestionale) */}
       <div className="actionsRow">
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <a className="btn" href="/movimenti">
-            Movimenti
-          </a>
-          <a className="btn" href="/import">
-            Import
-          </a>
+          <a className="btn" href="/movimenti">Movimenti</a>
+          <a className="btn" href="/import">Import</a>
         </div>
 
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -215,7 +260,6 @@ export default function GiacenzePage() {
         </div>
       </div>
 
-      {/* Tabella */}
       <div className="tableWrap">
         <table className="table">
           <thead>

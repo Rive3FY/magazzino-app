@@ -43,14 +43,23 @@ export default function MovimentiPage() {
 
   const [ready, setReady] = useState(false);
 
+  // inserimento movimento
   const [type, setType] = useState<"IN" | "OUT">("IN");
   const [qty, setQty] = useState("");
   const [note, setNote] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
 
+  // utente/permessi
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+
+  // filtri storico
+  const [dateFrom, setDateFrom] = useState(""); // yyyy-mm-dd
+  const [dateTo, setDateTo] = useState("");     // yyyy-mm-dd
+  const [typeFilter, setTypeFilter] = useState<"ALL" | "IN" | "OUT">("ALL");
+  const [wh, setWh] = useState<string>("ALL");
+  const [whOptions, setWhOptions] = useState<Array<{ code: string; label: string }>>([]);
 
   // autocomplete
   const [search, setSearch] = useState("");
@@ -62,8 +71,6 @@ export default function MovimentiPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const [scanning, setScanning] = useState(false);
-
-  // evita doppia lettura
   const scanLockedRef = useRef(false);
 
   // focus quantità
@@ -73,9 +80,48 @@ export default function MovimentiPage() {
   const [suggestions, setSuggestions] = useState<DbItem[]>([]);
   const [stock, setStock] = useState<number | null>(null);
 
-  // storico + map code->name
   const [history, setHistory] = useState<DbMovement[]>([]);
   const [nameMap, setNameMap] = useState<Record<string, string>>({});
+
+  // carica lista magazzini (da items)
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      const { data, error } = await supabase
+        .from("items")
+        .select("warehouse,warehouse_desc")
+        .not("warehouse", "is", null)
+        .limit(5000);
+
+      if (!alive) return;
+
+      if (error) {
+        console.error("load warehouses error:", error);
+        setWhOptions([]);
+        return;
+      }
+
+      const map = new Map<string, string>();
+      for (const r of data ?? []) {
+        const code = (r as any).warehouse as string | null;
+        const desc = (r as any).warehouse_desc as string | null;
+        if (!code) continue;
+        map.set(code, [code, desc].filter(Boolean).join(" - "));
+      }
+
+      const opts = Array.from(map.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([code, label]) => ({ code, label }));
+
+      setWhOptions(opts);
+    })();
+
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function loadSuggestions(text: string) {
     const s = text.trim();
@@ -134,6 +180,26 @@ export default function MovimentiPage() {
     setStock(initial + delta);
   }
 
+  // helper: se filtro magazzino e non ho colonna warehouse in movements,
+  // filtro tramite items: prendo i codici del magazzino e li applico a movements.
+  async function codesForWarehouse(warehouseCode: string): Promise<string[] | null> {
+    if (warehouseCode === "ALL") return null;
+
+    const { data, error } = await supabase
+      .from("items")
+      .select("code")
+      .eq("warehouse", warehouseCode)
+      .limit(5000);
+
+    if (error) {
+      console.error("codesForWarehouse error:", error);
+      return [];
+    }
+
+    const codes = (data ?? []).map((r) => (r as any).code as string).filter(Boolean);
+    return codes;
+  }
+
   async function loadHistory(code?: string) {
     let q = supabase
       .from("movements")
@@ -142,6 +208,20 @@ export default function MovimentiPage() {
       .limit(200);
 
     if (code) q = q.eq("code", code);
+
+    if (typeFilter !== "ALL") q = q.eq("type", typeFilter);
+
+    if (dateFrom) q = q.gte("created_at", `${dateFrom}T00:00:00`);
+    if (dateTo) q = q.lte("created_at", `${dateTo}T23:59:59`);
+
+    // filtro magazzino (via items->codes)
+    const codes = await codesForWarehouse(wh);
+    if (codes && codes.length === 0) {
+      setHistory([]);
+      setNameMap({});
+      return;
+    }
+    if (codes && codes.length > 0) q = q.in("code", codes);
 
     const { data, error } = await q;
 
@@ -155,8 +235,8 @@ export default function MovimentiPage() {
     const rows = (data ?? []) as DbMovement[];
     setHistory(rows);
 
-    const codes = Array.from(new Set(rows.map((r) => r.code).filter(Boolean)));
-    if (codes.length === 0) {
+    const uniqCodes = Array.from(new Set(rows.map((r) => r.code).filter(Boolean)));
+    if (uniqCodes.length === 0) {
       setNameMap({});
       return;
     }
@@ -164,7 +244,7 @@ export default function MovimentiPage() {
     const { data: itemsData, error: e2 } = await supabase
       .from("items")
       .select("code,name")
-      .in("code", codes);
+      .in("code", uniqCodes);
 
     if (e2) {
       console.error("items nameMap error:", e2);
@@ -193,7 +273,6 @@ export default function MovimentiPage() {
     const code = scannedCode.trim();
     if (!code) return;
 
-    // flusso prelievo: OUT automatico + reset quantità
     setType("OUT");
     setQty("");
 
@@ -226,7 +305,6 @@ export default function MovimentiPage() {
       const ae = document.activeElement as HTMLElement | null;
       const isTypingElsewhere =
         ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA") && ae !== qtyRef.current;
-
       if (!isTypingElsewhere) qtyRef.current?.focus();
     }, 120);
   }
@@ -234,7 +312,6 @@ export default function MovimentiPage() {
   async function startScan() {
     setMsg(null);
     setOpen(false);
-
     scanLockedRef.current = false;
     setScanning(true);
 
@@ -248,12 +325,10 @@ export default function MovimentiPage() {
 
       await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
         if (!result) return;
-
         if (scanLockedRef.current) return;
         scanLockedRef.current = true;
 
         const text = result.getText();
-
         stopScan();
         await pickItemByCode(text);
       });
@@ -268,14 +343,12 @@ export default function MovimentiPage() {
     try {
       (readerRef.current as any)?.stopContinuousDecode?.();
     } catch {}
-
     try {
       const v = videoRef.current;
       const stream = v?.srcObject as MediaStream | null;
       if (stream) stream.getTracks().forEach((t) => t.stop());
       if (v) v.srcObject = null;
     } catch {}
-
     setScanning(false);
   }
 
@@ -316,6 +389,12 @@ export default function MovimentiPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // quando cambiano i filtri dello storico, ricarico (se ho picked -> solo quel codice)
+  useEffect(() => {
+    loadHistory(picked?.code);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateFrom, dateTo, typeFilter, wh]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -395,30 +474,87 @@ export default function MovimentiPage() {
         </div>
       </div>
 
-      {/* Sezione inserimento movimento */}
-      <div className="filters">
+      {/* FILTRI STORICO (ERP) */}
+      <div className="filters" style={{ gridTemplateColumns: "1fr 1fr 1fr 2fr" }}>
         <div className="field">
-          <label>Tipo</label>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              type="button"
-              className={`btn ${type === "IN" ? "btnPrimary" : ""}`}
-              onClick={() => setType("IN")}
-            >
-              Entrata
-            </button>
-            <button
-              type="button"
-              className={`btn ${type === "OUT" ? "btnPrimary" : ""}`}
-              onClick={() => setType("OUT")}
-            >
-              Uscita
-            </button>
-          </div>
+          <label>Data da</label>
+          <input className="input" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
         </div>
 
-        <div className="field" style={{ gridColumn: "span 2" }} ref={boxRef}>
-          <label>Materiale (codice o descrizione)</label>
+        <div className="field">
+          <label>Data a</label>
+          <input className="input" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+        </div>
+
+        <div className="field">
+          <label>Tipo</label>
+          <select className="select" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as any)}>
+            <option value="ALL">Tutti</option>
+            <option value="IN">Entrata</option>
+            <option value="OUT">Uscita</option>
+          </select>
+        </div>
+
+        <div className="field">
+          <label>Magazzino</label>
+          <select className="select" value={wh} onChange={(e) => setWh(e.target.value)}>
+            <option value="ALL">Tutti</option>
+            {whOptions.map((o) => (
+              <option key={o.code} value={o.code}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* INSERIMENTO MOVIMENTO */}
+      <div className="actionsRow" style={{ borderTop: "1px solid #d9e1ea" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <button
+            type="button"
+            className={`btn ${type === "IN" ? "btnPrimary" : ""}`}
+            onClick={() => setType("IN")}
+          >
+            Entrata
+          </button>
+          <button
+            type="button"
+            className={`btn ${type === "OUT" ? "btnPrimary" : ""}`}
+            onClick={() => setType("OUT")}
+          >
+            Uscita
+          </button>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <button type="button" className="btn" onClick={() => (scanning ? stopScan() : startScan())}>
+            {scanning ? "Ferma scanner" : "Scanner"}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              stopScan();
+              setSearch("");
+              setPicked(null);
+              setStock(null);
+              setSuggestions([]);
+              setOpen(false);
+              setMsg(null);
+              // ricarico storico con filtri correnti
+              loadHistory();
+            }}
+          >
+            Pulisci
+          </button>
+        </div>
+      </div>
+
+      {/* Autocomplete materiale */}
+      <div className="actionsRow" style={{ position: "relative" }} ref={boxRef}>
+        <div style={{ flex: 1, minWidth: 280 }}>
+          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>Materiale (codice o descrizione)</div>
           <input
             className="input"
             value={search}
@@ -449,13 +585,12 @@ export default function MovimentiPage() {
             placeholder="Filtra per codice, descrizione..."
           />
 
-          {/* Dropdown suggerimenti */}
           {open && search.trim() && (
             <div
               style={{
                 position: "absolute",
-                left: 0,
-                right: 0,
+                left: 12,
+                right: 12,
                 top: "100%",
                 marginTop: 6,
                 background: "white",
@@ -493,74 +628,12 @@ export default function MovimentiPage() {
           )}
         </div>
 
-        <div className="field">
-          <label>Scanner barcode</label>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => (scanning ? stopScan() : startScan())}
-            >
-              {scanning ? "Ferma" : "Scansiona"}
-            </button>
-
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                stopScan();
-                setSearch("");
-                setPicked(null);
-                setStock(null);
-                setSuggestions([]);
-                setOpen(false);
-                setMsg(null);
-              }}
-            >
-              Pulisci
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {scanning && (
-        <div style={{ padding: 12, borderBottom: "1px solid #d9e1ea" }}>
-          <video ref={videoRef} style={{ width: "100%", borderRadius: 6, background: "black" }} muted playsInline />
-          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
-            Inquadra il codice a barre con la fotocamera.
-          </div>
-        </div>
-      )}
-
-      {/* Dettagli articolo + campi quantità/note */}
-      <div className="actionsRow">
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          {picked ? (
-            <>
-              <div style={{ fontWeight: 900 }}>{picked.code}</div>
-              <div style={{ color: "#6b7280" }}>{picked.name}</div>
-              <div style={{ color: "#6b7280" }}>
-                Magazzino: {([picked.warehouse, picked.warehouse_desc].filter(Boolean).join(" - ") || "-")}
-              </div>
-              <div style={{ color: "#6b7280" }}>
-                UM: {picked.um ?? "-"} · Iniziale: {picked.initial_qty ?? 0} · Giacenza:{" "}
-                <b>{stock ?? 0}</b>
-              </div>
-            </>
-          ) : (
-            <div style={{ color: "#6b7280" }}>
-              Seleziona un materiale o scansiona un barcode.
-            </div>
-          )}
-        </div>
-
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "end" }}>
+          <div style={{ width: 160 }}>
             <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>Quantità</div>
             <input
               ref={qtyRef}
               className="input"
-              style={{ width: 160 }}
               value={qty}
               onChange={(e) => setQty(e.target.value)}
               inputMode="decimal"
@@ -570,37 +643,45 @@ export default function MovimentiPage() {
 
           <div style={{ minWidth: 260 }}>
             <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>Note (opz.)</div>
-            <input
-              className="input"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="DDT / commessa / cliente"
-            />
+            <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="DDT / commessa / cliente" />
           </div>
 
           <button className="btn btnPrimary" onClick={save}>
-            Salva movimento
+            Salva
           </button>
         </div>
       </div>
 
+      {scanning && (
+        <div style={{ padding: 12, borderTop: "1px solid #d9e1ea" }}>
+          <video ref={videoRef} style={{ width: "100%", borderRadius: 6, background: "black" }} muted playsInline />
+          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
+            Inquadra il codice a barre con la fotocamera.
+          </div>
+        </div>
+      )}
+
+      {picked && (
+        <div style={{ padding: "10px 12px", borderTop: "1px solid #d9e1ea", color: "#1f2937" }}>
+          <b>{picked.code}</b> — {picked.name} · Magazzino:{" "}
+          {([picked.warehouse, picked.warehouse_desc].filter(Boolean).join(" - ") || "-")} · UM: {picked.um ?? "-"} ·
+          Iniziale: {picked.initial_qty ?? 0} · Giacenza: <b>{stock ?? 0}</b>
+        </div>
+      )}
+
       {msg ? (
-        <div style={{ padding: "10px 12px", color: msg.includes("✅") ? "#065f46" : "#991b1b" }}>
+        <div style={{ padding: "10px 12px", color: msg.includes("✅") ? "#065f46" : "#991b1b", fontWeight: 700 }}>
           {msg}
         </div>
       ) : null}
 
-      {/* Storico */}
+      {/* STORICO */}
       <div style={{ padding: "10px 12px", borderTop: "1px solid #d9e1ea" }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <h2 style={{ margin: 0, fontSize: 16 }}>
             Storico movimenti {picked ? `(solo ${picked.code})` : "(ultimi)"}
           </h2>
-          {isAdmin ? (
-            <span style={{ fontSize: 12, color: "#6b7280" }}>Permessi: Admin</span>
-          ) : (
-            <span style={{ fontSize: 12, color: "#6b7280" }}>Permessi: Operatore</span>
-          )}
+          <span style={{ fontSize: 12, color: "#6b7280" }}>{isAdmin ? "Permessi: Admin" : "Permessi: Operatore"}</span>
         </div>
       </div>
 
@@ -632,13 +713,7 @@ export default function MovimentiPage() {
               history.map((m) => (
                 <tr key={m.id}>
                   <td>{fmtDate(m.created_at)}</td>
-                  <td>
-                    {m.type === "IN" ? (
-                      <span className="badgeIn">Entrata</span>
-                    ) : (
-                      <span className="badgeOut">Uscita</span>
-                    )}
-                  </td>
+                  <td>{m.type === "IN" ? <span className="badgeIn">Entrata</span> : <span className="badgeOut">Uscita</span>}</td>
                   <td>{m.code}</td>
                   <td>{nameMap[m.code] ?? "-"}</td>
                   <td>

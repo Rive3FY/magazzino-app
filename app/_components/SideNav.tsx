@@ -54,7 +54,7 @@ export default function SideNav() {
     <aside className="sidebar">
       <div className="sidebarHeader">
         <div className="sidebarBrand">GESTIONALE</div>
-        <div className="sidebarVersion">Versione: 2.06.08</div>
+        <div className="sidebarVersion">Versione: 2.06.09</div>
       </div>
 
       <nav className="sideNav">

@@ -369,3 +369,15 @@ a:hover{ text-decoration: underline; }
   .table { min-width: 720px; }
   .table thead th, .table tbody td { padding: 10px 10px; }
 }
+/* ===== Device-based visibility (affidabile) ===== */
+[data-device="desktop"] .mobileOnly { display: none !important; }
+[data-device="mobile"] .mobileOnly { display: block !important; }
+
+/* spazio in basso su mobile per non coprire contenuto */
+[data-device="mobile"] .content { padding-bottom: 88px; }
+.mobileOnly { display: none !important; }
+
+@media (max-width: 780px) {
+  .mobileOnly { display: block !important; }
+  .content { padding-bottom: 88px; }
+}

@@ -2,6 +2,12 @@ import "./globals.css";
 import { createClient } from "./_lib/supabase/server";
 import SideNav from "./_components/SideNav";
 import TopBar from "./_components/TopBar";
+import MobileNav from "./_components/MobileNav";
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
 
 export const metadata = {
   title: "Gestionale Magazzino",
@@ -49,6 +55,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             </div>
           </div>
         </div>
+
+        {/* ✅ menu in basso su mobile */}
+        <MobileNav />
       </body>
     </html>
   );

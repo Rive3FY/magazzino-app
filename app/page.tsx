@@ -167,76 +167,66 @@ export default function Home() {
   }
 
   function stopScan() {
-    // stop decoder
-    try {
-      (readerRef.current as any)?.reset?.();
-    } catch {}
-    try {
-      (readerRef.current as any)?.stopContinuousDecode?.();
-    } catch {}
-    readerRef.current = null;
+  // ✅ ferma decoder
+  try {
+    (readerRef.current as any)?.reset?.();
+  } catch {}
+  try {
+    (readerRef.current as any)?.stopContinuousDecode?.();
+  } catch {}
+  readerRef.current = null;
 
-    // stop stream
-    try {
-      const s = streamRef.current;
-      if (s) s.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    } catch {}
+  // ✅ spegni stream camera
+  try {
+    const v = videoRef.current;
+    const stream = v?.srcObject as MediaStream | null;
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    if (v) v.srcObject = null;
+  } catch {}
 
-    // detach video
-    try {
-      const v = videoRef.current;
-      if (v) v.srcObject = null;
-    } catch {}
-
-    setScanning(false);
-  }
+  setScanning(false);
+}
 
   async function startScan() {
-    setMsg(null);
-    setOpen(false);
+  setMsg(null);
+  setOpen(false);
 
-    // chiudi eventuale sessione appesa
-    stopScan();
+  // ✅ chiudi eventuale sessione precedente rimasta appesa
+  stopScan();
 
-    scanLockedRef.current = false;
-    setScanning(true);
+  // ✅ sblocca per nuova scansione
+  scanLockedRef.current = false;
+  setScanning(true);
 
-    // aspetta render <video>
-    await new Promise((r) => setTimeout(r, 150));
+  // aspetta render <video>
+  await new Promise((r) => setTimeout(r, 150));
 
-    try {
-      const videoEl = videoRef.current;
-      if (!videoEl) throw new Error("Video non disponibile");
+  // ✅ reader NUOVO ogni volta (evita “ultimo risultato”)
+  readerRef.current = new BrowserMultiFormatReader();
 
-      // apri camera (posteriore)
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-        audio: false,
-      });
+  // ✅ ignora i primi frame (spesso buffer/risultato vecchio)
+  const ignoreUntil = Date.now() + 650;
 
-      streamRef.current = stream;
-      videoEl.srcObject = stream;
+  try {
+    const videoEl = videoRef.current;
+    if (!videoEl) throw new Error("Video non disponibile");
 
-      // iOS/Android: play esplicito aiuta
-      await videoEl.play().catch(() => {});
-
-      // reader nuovo ogni volta
-      readerRef.current = new BrowserMultiFormatReader();
-
-      // ignora frame iniziali (stale)
-      const ignoreUntil = Date.now() + 650;
-
-      // decode dal video (più stabile del decodeFromVideoDevice)
-      (readerRef.current as any).decodeFromVideoElementContinuously(videoEl, async (result: any) => {
+    await readerRef.current.decodeFromVideoDevice(
+      undefined,
+      videoEl,
+      async (result) => {
         if (!result) return;
+
+        // ignora risultati subito dopo l'avvio
         if (Date.now() < ignoreUntil) return;
+
+        // evita doppie letture
         if (scanLockedRef.current) return;
 
         const text = String(result.getText?.() ?? "").trim();
         if (!text) return;
 
-        // evita ripetizione immediata stesso codice
+        // anti-duplicato rapido (stesso codice letto subito)
         const prev = lastScanRef.current;
         const now = Date.now();
         if (prev && prev.code === text && now - prev.ts < 1500) return;
@@ -246,26 +236,27 @@ export default function Home() {
 
         stopScan();
         await pickItemByCode(text);
-      });
-    } catch (e: any) {
-      console.error(e);
-      setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
-      stopScan();
-    }
+      }
+    );
+  } catch (e: any) {
+    console.error(e);
+    setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
+    stopScan();
   }
+}
 
   function resetSearch() {
-    stopScan();
-    scanLockedRef.current = false;
-    lastScanRef.current = null;
+  stopScan();
+  scanLockedRef.current = false;
+  lastScanRef.current = null;
 
-    setSearch("");
-    setSuggestions([]);
-    setPicked(null);
-    setStock(null);
-    setOpen(false);
-    setMsg(null);
-  }
+  setSearch("");
+  setSuggestions([]);
+  setPicked(null);
+  setStock(null);
+  setOpen(false);
+  setMsg(null);
+}
 
   // dashboard load
   useEffect(() => {

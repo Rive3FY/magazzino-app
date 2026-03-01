@@ -59,7 +59,6 @@ function fmtDate(iso: string) {
 export default function AdminPanelClient() {
   const supabase = createClient();
 
-  // ID utente loggato (per bloccare revoca a sé stesso in UI)
   const [myUserId, setMyUserId] = useState<string | null>(null);
 
   // IMPORT
@@ -80,6 +79,14 @@ export default function AdminPanelClient() {
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [userSearch, setUserSearch] = useState("");
+
+  // MODALE MODIFICA PROFILO
+  const [editOpen, setEditOpen] = useState(false);
+  const [editUser, setEditUser] = useState<AdminUserRow | null>(null);
+  const [editBadge, setEditBadge] = useState("");
+  const [editFirst, setEditFirst] = useState("");
+  const [editLast, setEditLast] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -124,6 +131,7 @@ export default function AdminPanelClient() {
     setUsersMsg(null);
 
     const { data, error } = await supabase.rpc("admin_list_users");
+
     if (error) {
       console.error(error);
       setUsers([]);
@@ -183,13 +191,53 @@ export default function AdminPanelClient() {
           : error.message.includes("cannot_remove_last_admin")
           ? "Non puoi rimuovere l’ultimo admin."
           : "Errore: " + error.message;
-
       alert(msg);
       return;
     }
 
     setUsersMsg("Admin revocato ✅");
     await loadUsers();
+  }
+
+  function openEdit(u: AdminUserRow) {
+    setEditUser(u);
+    setEditBadge(u.badge_number ?? "");
+    setEditFirst(u.first_name ?? "");
+    setEditLast(u.last_name ?? "");
+    setEditOpen(true);
+  }
+
+  async function saveEdit() {
+    if (!editUser) return;
+
+    setEditBusy(true);
+    try {
+      const { error } = await supabase.rpc("admin_update_profile", {
+        target_user: editUser.user_id,
+        p_badge: editBadge,
+        p_first_name: editFirst,
+        p_last_name: editLast,
+      });
+
+      if (error) {
+        const msg =
+          error.message.includes("not_admin")
+            ? "Operazione non permessa (non admin)."
+            : error.message.includes("profile_not_found")
+            ? "Profilo non trovato."
+            : "Errore: " + error.message;
+
+        alert(msg);
+        return;
+      }
+
+      setUsersMsg("Profilo aggiornato ✅");
+      setEditOpen(false);
+      setEditUser(null);
+      await loadUsers();
+    } finally {
+      setEditBusy(false);
+    }
   }
 
   async function onFile(file: File) {
@@ -327,13 +375,16 @@ export default function AdminPanelClient() {
               ) : (
                 filteredUsers.map((u) => {
                   const fullName = `${u.first_name ?? ""} ${u.last_name ?? ""}`.trim() || "-";
+
                   return (
                     <tr key={u.user_id}>
                       <td>{u.email ?? "-"}</td>
                       <td>{u.badge_number ?? "-"}</td>
                       <td>{fullName}</td>
                       <td>{u.is_admin ? "✅" : "—"}</td>
-                      <td>
+                      <td style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <button className="btn" onClick={() => openEdit(u)}>Modifica</button>
+
                         {u.is_admin ? (
                           u.user_id === myUserId ? (
                             <span style={{ color: "#6b7280", fontSize: 12 }}>Sei tu</span>
@@ -353,7 +404,7 @@ export default function AdminPanelClient() {
         </div>
 
         <div style={{ marginTop: 8, color: "#6b7280", fontSize: 12 }}>
-          Nota: i ruoli Admin sono gestiti lato database (RPC + security definer). Nessuna password “admin” nel frontend.
+          Nota: modifica profilo/ruoli gestiti via RPC. Nessuna password “admin” nel frontend.
         </div>
       </div>
 
@@ -472,6 +523,79 @@ export default function AdminPanelClient() {
           La cancellazione è permessa solo agli admin (controllo lato DB).
         </div>
       </div>
+
+      {/* MODALE EDIT */}
+      {editOpen && editUser && (
+        <div
+          onMouseDown={() => {
+            if (!editBusy) {
+              setEditOpen(false);
+              setEditUser(null);
+            }
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "grid",
+            placeItems: "center",
+            zIndex: 999,
+            padding: 16,
+          }}
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              width: "min(680px, 96vw)",
+              background: "white",
+              borderRadius: 10,
+              border: "1px solid #d1d5db",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
+              overflow: "hidden",
+            }}
+          >
+            <div style={{ padding: 12, borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", gap: 12 }}>
+              <div>
+                <div style={{ fontWeight: 900, color: "#111827" }}>Modifica Operatore</div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>{editUser.email ?? "-"}</div>
+              </div>
+              <button className="btn" onClick={() => { if (!editBusy) { setEditOpen(false); setEditUser(null); } }}>
+                Chiudi
+              </button>
+            </div>
+
+            <div style={{ padding: 12, display: "grid", gap: 10 }}>
+              <div className="filters" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+                <div className="field">
+                  <label>Badge</label>
+                  <input className="input" value={editBadge} onChange={(e) => setEditBadge(e.target.value)} placeholder="es. 014" />
+                </div>
+                <div className="field">
+                  <label>Nome</label>
+                  <input className="input" value={editFirst} onChange={(e) => setEditFirst(e.target.value)} placeholder="Nome" />
+                </div>
+                <div className="field">
+                  <label>Cognome</label>
+                  <input className="input" value={editLast} onChange={(e) => setEditLast(e.target.value)} placeholder="Cognome" />
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button className="btn" disabled={editBusy} onClick={() => { setEditOpen(false); setEditUser(null); }}>
+                  Annulla
+                </button>
+                <button className="btn btnPrimary" disabled={editBusy} onClick={saveEdit}>
+                  {editBusy ? "Salvataggio…" : "Salva"}
+                </button>
+              </div>
+
+              <div style={{ fontSize: 12, color: "#6b7280" }}>
+                Nota: badge/nome/cognome vengono salvati nel profilo dell’utente.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

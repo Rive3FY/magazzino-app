@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
-import BarcodeScanner from "../_components/BarcodeScanner";
+import { useSearchParams } from "next/navigation";
 
 type DbItem = {
   code: string;
@@ -53,6 +53,7 @@ function toIsoEndOfDay(d: string) {
 
 export default function MovimentiPage() {
   const supabase = createClient();
+  const searchParams = useSearchParams();
 
   const [ready, setReady] = useState(false);
 
@@ -115,7 +116,11 @@ export default function MovimentiPage() {
   }
 
   async function computeStockFor(code: string) {
-    const { data: item, error: e1 } = await supabase.from("items").select("initial_qty").eq("code", code).single();
+    const { data: item, error: e1 } = await supabase
+      .from("items")
+      .select("initial_qty")
+      .eq("code", code)
+      .single();
 
     if (e1) {
       console.error(e1);
@@ -125,7 +130,10 @@ export default function MovimentiPage() {
 
     const initial = Number((item as any)?.initial_qty ?? 0);
 
-    const { data: movs, error: e2 } = await supabase.from("movements").select("type,qty").eq("code", code);
+    const { data: movs, error: e2 } = await supabase
+      .from("movements")
+      .select("type,qty")
+      .eq("code", code);
 
     if (e2) {
       console.error(e2);
@@ -176,7 +184,6 @@ export default function MovimentiPage() {
 
     if (code) q = q.eq("code", code);
 
-    // filtri
     const isoFrom = toIsoStartOfDay(fFrom);
     const isoTo = toIsoEndOfDay(fTo);
     if (isoFrom) q = q.gte("created_at", isoFrom);
@@ -228,14 +235,13 @@ export default function MovimentiPage() {
     await computeStockFor(it.code);
     await loadHistory(it.code);
 
-    setTimeout(() => qtyRef.current?.focus(), 60);
+    setTimeout(() => qtyRef.current?.focus(), 50);
   }
 
   async function pickItemByCode(scannedCode: string) {
     const code = scannedCode.trim();
     if (!code) return;
 
-    // su scan: OUT rapido
     setType("OUT");
     setQty("");
     setMsg(null);
@@ -265,6 +271,13 @@ export default function MovimentiPage() {
     await pickItem(item as DbItem);
   }
 
+  // ✅ Intercetta ?code=XXXX (ritorno da /scan)
+  useEffect(() => {
+    const code = searchParams.get("code");
+    if (code) pickItemByCode(code);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   function clearAll() {
     setSearch("");
     setOpen(false);
@@ -286,7 +299,6 @@ export default function MovimentiPage() {
     const n = toNumber(qty);
     if (!Number.isFinite(n) || n <= 0) return setMsg("Quantità non valida (deve essere > 0).");
 
-    // blocco uscita sotto zero
     if (type === "OUT") {
       const current = stock ?? 0;
       if (current - n < 0) {
@@ -294,7 +306,6 @@ export default function MovimentiPage() {
       }
     }
 
-    // ✅ warehouse (se NOT NULL nel DB)
     const wh = picked.warehouse ?? "UNKNOWN";
 
     const { error } = await supabase.from("movements").insert({
@@ -316,7 +327,7 @@ export default function MovimentiPage() {
     await computeStockFor(picked.code);
     await loadHistory(picked.code);
 
-    setTimeout(() => qtyRef.current?.focus(), 80);
+    setTimeout(() => qtyRef.current?.focus(), 100);
   }
 
   async function deleteMovement(id: string) {
@@ -336,7 +347,6 @@ export default function MovimentiPage() {
     }
   }
 
-  // init
   useEffect(() => {
     setReady(true);
     loadWarehouses();
@@ -375,7 +385,6 @@ export default function MovimentiPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // debounce suggerimenti
   useEffect(() => {
     setActiveIndex(0);
     const t = setTimeout(() => {
@@ -428,18 +437,14 @@ export default function MovimentiPage() {
                 <select className="input" value={fWarehouse} onChange={(e) => setFWarehouse(e.target.value)}>
                   <option value="ALL">Tutti</option>
                   {warehouses.map((w) => (
-                    <option key={w.key} value={w.key}>
-                      {w.label}
-                    </option>
+                    <option key={w.key} value={w.key}>{w.label}</option>
                   ))}
                 </select>
               </div>
             </div>
 
             <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
-              <button className="btn" onClick={() => loadHistory(picked?.code)}>
-                Applica filtri
-              </button>
+              <button className="btn" onClick={() => loadHistory(picked?.code)}>Applica filtri</button>
               <button
                 className="btn"
                 onClick={() => {
@@ -454,7 +459,7 @@ export default function MovimentiPage() {
               </button>
 
               <div style={{ marginLeft: "auto", opacity: 0.75, fontSize: 12, alignSelf: "center" }}>
-                Permessi: {isAdmin ? "Admin" : "Operatore"} · Utente: {userEmail ?? "-"}
+                Permessi: {isAdmin ? "Admin" : "Operatore"}
               </div>
             </div>
           </div>
@@ -465,25 +470,17 @@ export default function MovimentiPage() {
               <button className={`btn ${type === "IN" ? "btnPrimary" : ""}`} onClick={() => setType("IN")} type="button">
                 Entrata
               </button>
+
               <button className={`btn ${type === "OUT" ? "btnPrimary" : ""}`} onClick={() => setType("OUT")} type="button">
                 Uscita
               </button>
 
               <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button className="btn" type="button" onClick={clearAll}>
-                  Pulisci
-                </button>
-              </div>
-            </div>
+                {/* ✅ scanner radicale */}
+                <a className="btn" href="/scan?target=movimenti">Scanner</a>
 
-            {/* ✅ SCANNER UNICO (iOS friendly) */}
-            <div style={{ marginTop: 12 }}>
-              <BarcodeScanner
-                onDetected={async (code) => {
-                  await pickItemByCode(code);
-                }}
-                onError={(m) => setMsg("Errore camera/scansione: " + m)}
-              />
+                <button className="btn" type="button" onClick={clearAll}>Pulisci</button>
+              </div>
             </div>
 
             <div ref={boxRef} style={{ position: "relative", marginTop: 12 }}>
@@ -570,7 +567,14 @@ export default function MovimentiPage() {
 
               <div style={{ gridColumn: "span 3" }}>
                 <label className="label">Quantità</label>
-                <input ref={qtyRef} className="input" value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="es. 5" />
+                <input
+                  ref={qtyRef}
+                  className="input"
+                  value={qty}
+                  onChange={(e) => setQty(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="es. 5"
+                />
               </div>
 
               <div style={{ gridColumn: "span 1", display: "flex", alignItems: "end" }}>
@@ -599,11 +603,7 @@ export default function MovimentiPage() {
           <div className="card" style={{ padding: 12, marginTop: 12 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
               <div style={{ fontWeight: 900 }}>Storico movimenti {picked ? `(solo ${picked.code})` : "(ultimi)"}</div>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button className="btn" onClick={() => loadHistory(picked?.code)}>
-                  Aggiorna
-                </button>
-              </div>
+              <button className="btn" onClick={() => loadHistory(picked?.code)}>Aggiorna</button>
             </div>
 
             <div style={{ overflowX: "auto", marginTop: 10 }}>
@@ -633,28 +633,22 @@ export default function MovimentiPage() {
                       <td>{m.code}</td>
                       <td>{nameMap[m.code] ?? "-"}</td>
                       <td>{m.warehouse ?? "-"}</td>
-                      <td>
-                        {m.type === "IN" ? "+" : "-"}
-                        {m.qty}
-                      </td>
+                      <td>{m.type === "IN" ? "+" : "-"}{m.qty}</td>
                       <td>{m.note ?? ""}</td>
                       <td>{m.created_by_email ?? "-"}</td>
                       <td>
                         {isAdmin ? (
-                          <button className="btn" onClick={() => deleteMovement(m.id)}>
-                            Elimina
-                          </button>
+                          <button className="btn" onClick={() => deleteMovement(m.id)}>Elimina</button>
                         ) : (
                           <span style={{ opacity: 0.6 }}>—</span>
                         )}
                       </td>
                     </tr>
                   ))}
+
                   {history.length === 0 && (
                     <tr>
-                      <td colSpan={9} style={{ padding: 12, color: "#0f172a" }}>
-                        Nessun movimento.
-                      </td>
+                      <td colSpan={9} style={{ padding: 12, color: "#0f172a" }}>Nessun movimento.</td>
                     </tr>
                   )}
                 </tbody>

@@ -193,11 +193,9 @@ export default function MovimentiPage() {
     const code = scannedCode.trim();
     if (!code) return;
 
-    // ✅ flusso prelievo: OUT automatico + reset quantità
+    // flusso prelievo: OUT automatico + reset quantità
     setType("OUT");
     setQty("");
-    // NON azzerare note automaticamente (altrimenti cancella mentre scrivi)
-    // setNote("");
 
     const { data: item, error } = await supabase
       .from("items")
@@ -224,7 +222,6 @@ export default function MovimentiPage() {
     await pickItem(item as DbItem);
     setMsg(null);
 
-    // ✅ focus quantità SOLO se non stai già scrivendo in un altro campo (es. Note)
     setTimeout(() => {
       const ae = document.activeElement as HTMLElement | null;
       const isTypingElsewhere =
@@ -238,12 +235,9 @@ export default function MovimentiPage() {
     setMsg(null);
     setOpen(false);
 
-    // sblocca per una nuova scansione
     scanLockedRef.current = false;
-
     setScanning(true);
 
-    // ✅ aspetta che React renderizzi il <video>
     await new Promise((r) => setTimeout(r, 120));
 
     if (!readerRef.current) readerRef.current = new BrowserMultiFormatReader();
@@ -255,15 +249,12 @@ export default function MovimentiPage() {
       await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
         if (!result) return;
 
-        // ✅ evita doppie letture
         if (scanLockedRef.current) return;
         scanLockedRef.current = true;
 
         const text = result.getText();
 
-        // ferma subito
         stopScan();
-
         await pickItemByCode(text);
       });
     } catch (e: any) {
@@ -278,7 +269,6 @@ export default function MovimentiPage() {
       (readerRef.current as any)?.stopContinuousDecode?.();
     } catch {}
 
-    // spegne proprio la camera
     try {
       const v = videoRef.current;
       const stream = v?.srcObject as MediaStream | null;
@@ -340,7 +330,6 @@ export default function MovimentiPage() {
     const n = toNumber(qty);
     if (!Number.isFinite(n) || n <= 0) return setMsg("Quantità non valida (deve essere > 0).");
 
-    // blocco uscita sotto zero
     if (type === "OUT") {
       const current = stock ?? 0;
       if (current - n < 0) {
@@ -366,7 +355,6 @@ export default function MovimentiPage() {
     await computeStockFor(picked.code);
     await loadHistory(picked.code);
 
-    // comodo: rimetti focus quantità
     setTimeout(() => qtyRef.current?.focus(), 100);
   }
 
@@ -398,368 +386,282 @@ export default function MovimentiPage() {
   const active = useMemo(() => suggestions[activeIndex], [suggestions, activeIndex]);
 
   return (
-    <main style={{ fontFamily: "system-ui" }}>
-      <h1>➕/➖ Movimenti</h1>
+    <main className="panel">
+      <div className="pageBar">
+        <div className="pageBarTitle">Magazzino - Movimenti</div>
+        <div className="pageBarRight" style={{ display: "flex", gap: 8 }}>
+          <a className="btn" href="/giacenze">Giacenze</a>
+          <a className="btn" href="/import">Import</a>
+        </div>
+      </div>
 
-      {!ready ? (
-        <p>Caricamento…</p>
-      ) : (
-        <>
-          <div
-            style={{
-              display: "grid",
-              gap: 12,
-              marginTop: 12,
-              maxWidth: 860,
-              background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.12)",
-              borderRadius: 16,
-              padding: 14,
-            }}
-          >
-            {/* Toggle IN/OUT */}
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button
-                onClick={() => setType("IN")}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  border: "1px solid rgba(255,255,255,0.25)",
-                  background: type === "IN" ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.10)",
-                  color: "white",
-                  cursor: "pointer",
-                  fontWeight: type === "IN" ? 800 : 600,
-                }}
-              >
-                ➕ Entrata
-              </button>
-              <button
-                onClick={() => setType("OUT")}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  border: "1px solid rgba(255,255,255,0.25)",
-                  background: type === "OUT" ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.10)",
-                  color: "white",
-                  cursor: "pointer",
-                  fontWeight: type === "OUT" ? 800 : 600,
-                }}
-              >
-                ➖ Uscita
-              </button>
-            </div>
-
-            {/* Autocomplete + Scanner */}
-            <div ref={boxRef} style={{ position: "relative" }}>
-              <label style={{ color: "white", fontSize: 13, opacity: 0.95 }}>
-                Materiale (scrivi per cercare) oppure scansiona
-                <input
-                  value={search}
-                  onChange={async (e) => {
-                    const v = e.target.value;
-                    setSearch(v);
-                    setOpen(true);
-                    setPicked(null);
-                    setStock(null);
-                    await loadSuggestions(v);
-                  }}
-                  onFocus={() => setOpen(true)}
-                  onKeyDown={(e) => {
-                    if (!open) return;
-
-                    if (e.key === "ArrowDown") {
-                      e.preventDefault();
-                      setActiveIndex((i) => Math.min(i + 1, suggestions.length - 1));
-                    } else if (e.key === "ArrowUp") {
-                      e.preventDefault();
-                      setActiveIndex((i) => Math.max(i - 1, 0));
-                    } else if (e.key === "Enter") {
-                      e.preventDefault();
-                      if (active) pickItem(active);
-                    } else if (e.key === "Escape") {
-                      setOpen(false);
-                    }
-                  }}
-                  placeholder="es. 12345 oppure bullone..."
-                  style={{
-                    display: "block",
-                    marginTop: 6,
-                    padding: 12,
-                    borderRadius: 12,
-                    border: "1px solid rgba(255,255,255,0.25)",
-                    background: "rgba(255,255,255,0.10)",
-                    color: "white",
-                    outline: "none",
-                    width: "100%",
-                  }}
-                />
-              </label>
-
-              <div style={{ display: "flex", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  onClick={() => (scanning ? stopScan() : startScan())}
-                  style={{
-                    padding: "10px 12px",
-                    borderRadius: 12,
-                    border: "1px solid rgba(255,255,255,0.25)",
-                    background: "rgba(255,255,255,0.16)",
-                    color: "white",
-                    cursor: "pointer",
-                    fontWeight: 800,
-                  }}
-                >
-                  {scanning ? "⏹ Ferma scansione" : "📷 Scansiona barcode"}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    stopScan();
-                    setSearch("");
-                    setPicked(null);
-                    setStock(null);
-                    setSuggestions([]);
-                    setOpen(false);
-                    setMsg(null);
-                  }}
-                  style={{
-                    padding: "10px 12px",
-                    borderRadius: 12,
-                    border: "1px solid rgba(255,255,255,0.25)",
-                    background: "rgba(255,255,255,0.10)",
-                    color: "white",
-                    cursor: "pointer",
-                    fontWeight: 700,
-                  }}
-                >
-                  Pulisci
-                </button>
-              </div>
-
-              {scanning && (
-                <div style={{ marginTop: 10 }}>
-                  <video
-                    ref={videoRef}
-                    style={{ width: "100%", borderRadius: 12, background: "black" }}
-                    muted
-                    playsInline
-                  />
-                  <div style={{ color: "white", fontSize: 12, marginTop: 6, opacity: 0.9 }}>
-                    Inquadra il codice a barre con la fotocamera.
-                  </div>
-                </div>
-              )}
-
-              {open && search.trim() && (
-                <div
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    right: 0,
-                    top: "100%",
-                    marginTop: 6,
-                    background: "rgba(255,255,255,0.95)",
-                    border: "1px solid rgba(15,23,42,0.10)",
-                    borderRadius: 14,
-                    boxShadow: "0 16px 40px rgba(0,0,0,0.20)",
-                    overflow: "hidden",
-                    zIndex: 50,
-                  }}
-                >
-                  {suggestions.length === 0 ? (
-                    <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
-                  ) : (
-                    suggestions.map((it, idx) => (
-                      <div
-                        key={it.code}
-                        onMouseEnter={() => setActiveIndex(idx)}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          pickItem(it);
-                        }}
-                        style={{
-                          padding: "10px 12px",
-                          cursor: "pointer",
-                          background: idx === activeIndex ? "#eef2ff" : "white",
-                          borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
-                        }}
-                      >
-                        <div style={{ fontWeight: 800, color: "#0f172a" }}>{it.code}</div>
-                        <div style={{ fontSize: 12, color: "#334155" }}>{it.name}</div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Dettagli materiale */}
-            {picked && (
-              <div style={{ color: "rgba(255,255,255,0.92)", fontSize: 13 }}>
-                <div>
-                  Magazzino:{" "}
-                  <b>{[picked.warehouse, picked.warehouse_desc].filter(Boolean).join(" - ") || "-"}</b>
-                </div>
-                <div style={{ marginTop: 4 }}>
-                  UM: <b>{picked.um ?? "-"}</b> · Iniziale: <b>{picked.initial_qty ?? 0}</b> · Giacenza:{" "}
-                  <b>{stock ?? 0}</b>
-                </div>
-              </div>
-            )}
-
-            {/* Inputs qty/note */}
-            <div style={{ display: "grid", gap: 10 }}>
-              <label style={{ color: "white", fontSize: 13 }}>
-                Quantità
-                <input
-                  ref={qtyRef}
-                  value={qty}
-                  onChange={(e) => setQty(e.target.value)}
-                  inputMode="decimal"
-                  placeholder="es. 5"
-                  style={{
-                    display: "block",
-                    marginTop: 6,
-                    padding: 12,
-                    borderRadius: 12,
-                    border: "1px solid rgba(255,255,255,0.25)",
-                    background: "rgba(255,255,255,0.10)",
-                    color: "white",
-                    outline: "none",
-                    width: "100%",
-                  }}
-                />
-              </label>
-
-              <label style={{ color: "white", fontSize: 13 }}>
-                Note (opzionale)
-                <input
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="es. DDT 123 / commessa / cliente"
-                  style={{
-                    display: "block",
-                    marginTop: 6,
-                    padding: 12,
-                    borderRadius: 12,
-                    border: "1px solid rgba(255,255,255,0.25)",
-                    background: "rgba(255,255,255,0.10)",
-                    color: "white",
-                    outline: "none",
-                    width: "100%",
-                  }}
-                />
-              </label>
-            </div>
-
+      {/* Sezione inserimento movimento */}
+      <div className="filters">
+        <div className="field">
+          <label>Tipo</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
-              onClick={save}
+              type="button"
+              className={`btn ${type === "IN" ? "btnPrimary" : ""}`}
+              onClick={() => setType("IN")}
+            >
+              Entrata
+            </button>
+            <button
+              type="button"
+              className={`btn ${type === "OUT" ? "btnPrimary" : ""}`}
+              onClick={() => setType("OUT")}
+            >
+              Uscita
+            </button>
+          </div>
+        </div>
+
+        <div className="field" style={{ gridColumn: "span 2" }} ref={boxRef}>
+          <label>Materiale (codice o descrizione)</label>
+          <input
+            className="input"
+            value={search}
+            onChange={async (e) => {
+              const v = e.target.value;
+              setSearch(v);
+              setOpen(true);
+              setPicked(null);
+              setStock(null);
+              await loadSuggestions(v);
+            }}
+            onFocus={() => setOpen(true)}
+            onKeyDown={(e) => {
+              if (!open) return;
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setActiveIndex((i) => Math.min(i + 1, suggestions.length - 1));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setActiveIndex((i) => Math.max(i - 1, 0));
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                if (active) pickItem(active);
+              } else if (e.key === "Escape") {
+                setOpen(false);
+              }
+            }}
+            placeholder="Filtra per codice, descrizione..."
+          />
+
+          {/* Dropdown suggerimenti */}
+          {open && search.trim() && (
+            <div
               style={{
-                padding: 12,
-                borderRadius: 12,
-                border: "1px solid rgba(255,255,255,0.25)",
-                background: "rgba(255,255,255,0.16)",
-                color: "white",
-                cursor: "pointer",
-                fontWeight: 800,
+                position: "absolute",
+                left: 0,
+                right: 0,
+                top: "100%",
+                marginTop: 6,
+                background: "white",
+                border: "1px solid #d9e1ea",
+                borderRadius: 6,
+                boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
+                overflow: "hidden",
+                zIndex: 50,
               }}
             >
-              Salva movimento
+              {suggestions.length === 0 ? (
+                <div style={{ padding: 10, color: "#1f2937" }}>Nessun risultato</div>
+              ) : (
+                suggestions.map((it, idx) => (
+                  <div
+                    key={it.code}
+                    onMouseEnter={() => setActiveIndex(idx)}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      pickItem(it);
+                    }}
+                    style={{
+                      padding: "10px 12px",
+                      cursor: "pointer",
+                      background: idx === activeIndex ? "#f3f6fb" : "white",
+                      borderTop: idx === 0 ? "none" : "1px solid #edf2f7",
+                    }}
+                  >
+                    <div style={{ fontWeight: 900 }}>{it.code}</div>
+                    <div style={{ fontSize: 12, color: "#6b7280" }}>{it.name}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="field">
+          <label>Scanner barcode</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => (scanning ? stopScan() : startScan())}
+            >
+              {scanning ? "Ferma" : "Scansiona"}
             </button>
 
-            {msg && <div style={{ color: "white" }}>{msg}</div>}
-          </div>
-
-          {/* Storico */}
-          <h2 style={{ marginTop: 20, color: "white" }}>
-            📜 Storico movimenti {picked ? `(solo ${picked.code})` : "(ultimi)"}
-          </h2>
-
-          <div style={{ overflowX: "auto", marginTop: 10 }}>
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                background: "rgba(255,255,255,0.90)",
-                borderRadius: 16,
-                overflow: "hidden",
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                stopScan();
+                setSearch("");
+                setPicked(null);
+                setStock(null);
+                setSuggestions([]);
+                setOpen(false);
+                setMsg(null);
               }}
             >
-              <thead>
-                <tr>
-                  {["Data", "Tipo", "Codice", "Descrizione", "Q.tà", "Note", "Inserito da", "Azioni"].map((h) => (
-                    <th
-                      key={h}
-                      style={{
-                        textAlign: "left",
-                        padding: 10,
-                        borderBottom: "1px solid #e5e7eb",
-                        color: "#0f172a",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-
-              <tbody>
-                {history.map((m) => (
-                  <tr key={m.id}>
-                    <td style={td}>{fmtDate(m.created_at)}</td>
-                    <td style={td}>{m.type === "IN" ? "Entrata" : "Uscita"}</td>
-                    <td style={td}>{m.code}</td>
-                    <td style={td}>{nameMap[m.code] ?? "-"}</td>
-                    <td style={td}>
-                      {m.type === "IN" ? "+" : "-"}
-                      {m.qty}
-                    </td>
-                    <td style={td}>{m.note ?? ""}</td>
-                    <td style={td}>{m.created_by_email ?? "-"}</td>
-                    <td style={td}>
-                      {isAdmin ? (
-                        <button
-                          onClick={() => deleteMovement(m.id)}
-                          style={{
-                            padding: "6px 10px",
-                            borderRadius: 10,
-                            border: "1px solid #dc2626",
-                            background: "#fee2e2",
-                            color: "#991b1b",
-                            cursor: "pointer",
-                            fontWeight: 700,
-                          }}
-                        >
-                          Elimina
-                        </button>
-                      ) : (
-                        <span style={{ color: "#64748b" }}>-</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-
-                {history.length === 0 && (
-                  <tr>
-                    <td colSpan={8} style={{ padding: 12, color: "#0f172a" }}>
-                      Nessun movimento.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+              Pulisci
+            </button>
           </div>
-        </>
+        </div>
+      </div>
+
+      {scanning && (
+        <div style={{ padding: 12, borderBottom: "1px solid #d9e1ea" }}>
+          <video ref={videoRef} style={{ width: "100%", borderRadius: 6, background: "black" }} muted playsInline />
+          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
+            Inquadra il codice a barre con la fotocamera.
+          </div>
+        </div>
       )}
+
+      {/* Dettagli articolo + campi quantità/note */}
+      <div className="actionsRow">
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          {picked ? (
+            <>
+              <div style={{ fontWeight: 900 }}>{picked.code}</div>
+              <div style={{ color: "#6b7280" }}>{picked.name}</div>
+              <div style={{ color: "#6b7280" }}>
+                Magazzino: {([picked.warehouse, picked.warehouse_desc].filter(Boolean).join(" - ") || "-")}
+              </div>
+              <div style={{ color: "#6b7280" }}>
+                UM: {picked.um ?? "-"} · Iniziale: {picked.initial_qty ?? 0} · Giacenza:{" "}
+                <b>{stock ?? 0}</b>
+              </div>
+            </>
+          ) : (
+            <div style={{ color: "#6b7280" }}>
+              Seleziona un materiale o scansiona un barcode.
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>Quantità</div>
+            <input
+              ref={qtyRef}
+              className="input"
+              style={{ width: 160 }}
+              value={qty}
+              onChange={(e) => setQty(e.target.value)}
+              inputMode="decimal"
+              placeholder="es. 5"
+            />
+          </div>
+
+          <div style={{ minWidth: 260 }}>
+            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>Note (opz.)</div>
+            <input
+              className="input"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="DDT / commessa / cliente"
+            />
+          </div>
+
+          <button className="btn btnPrimary" onClick={save}>
+            Salva movimento
+          </button>
+        </div>
+      </div>
+
+      {msg ? (
+        <div style={{ padding: "10px 12px", color: msg.includes("✅") ? "#065f46" : "#991b1b" }}>
+          {msg}
+        </div>
+      ) : null}
+
+      {/* Storico */}
+      <div style={{ padding: "10px 12px", borderTop: "1px solid #d9e1ea" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <h2 style={{ margin: 0, fontSize: 16 }}>
+            Storico movimenti {picked ? `(solo ${picked.code})` : "(ultimi)"}
+          </h2>
+          {isAdmin ? (
+            <span style={{ fontSize: 12, color: "#6b7280" }}>Permessi: Admin</span>
+          ) : (
+            <span style={{ fontSize: 12, color: "#6b7280" }}>Permessi: Operatore</span>
+          )}
+        </div>
+      </div>
+
+      <div className="tableWrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Tipo</th>
+              <th>Codice</th>
+              <th>Descrizione</th>
+              <th>Q.tà</th>
+              <th>Note</th>
+              <th>Inserito da</th>
+              <th>Azioni</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {!ready ? (
+              <tr>
+                <td colSpan={8}>Caricamento…</td>
+              </tr>
+            ) : history.length === 0 ? (
+              <tr>
+                <td colSpan={8}>Nessun movimento.</td>
+              </tr>
+            ) : (
+              history.map((m) => (
+                <tr key={m.id}>
+                  <td>{fmtDate(m.created_at)}</td>
+                  <td>
+                    {m.type === "IN" ? (
+                      <span className="badgeIn">Entrata</span>
+                    ) : (
+                      <span className="badgeOut">Uscita</span>
+                    )}
+                  </td>
+                  <td>{m.code}</td>
+                  <td>{nameMap[m.code] ?? "-"}</td>
+                  <td>
+                    {m.type === "IN" ? "+" : "-"}
+                    {m.qty}
+                  </td>
+                  <td>{m.note ?? ""}</td>
+                  <td>{m.created_by_email ?? "-"}</td>
+                  <td>
+                    {isAdmin ? (
+                      <button className="btn" onClick={() => deleteMovement(m.id)}>
+                        Elimina
+                      </button>
+                    ) : (
+                      <span style={{ color: "#6b7280" }}>-</span>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </main>
   );
 }
-
-const td: React.CSSProperties = {
-  padding: 10,
-  borderBottom: "1px solid #f1f5f9",
-  color: "#0f172a",
-  whiteSpace: "nowrap",
-};

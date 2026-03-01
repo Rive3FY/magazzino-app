@@ -35,7 +35,6 @@ export default function ImportPage() {
   const [checking, setChecking] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // ✅ controllo admin all'apertura pagina
   useEffect(() => {
     let alive = true;
 
@@ -87,7 +86,7 @@ export default function ImportPage() {
           const name = String(r["Descrizione Materiale"] ?? "").trim();
           if (!code || !name) return null;
 
-          const initial_qty = toNumber(r["TOTALE"]); // giacenza iniziale da TOTALE
+          const initial_qty = toNumber(r["TOTALE"]);
           const qty_free = toNumber(r["Qnt. a Mag. Libero"]);
           const qty_blocked = toNumber(r["Qnt. a Mag. bloccato"]);
           const qty_quality = toNumber(r["Controllo Qualità Magazzino"]);
@@ -118,11 +117,9 @@ export default function ImportPage() {
         return;
       }
 
-      // ✅ Upsert su code (chiave primaria)
       const { error } = await supabase.from("items").upsert(items, { onConflict: "code" });
 
       if (error) {
-        // Se non admin, Supabase blocca con RLS: qui mostriamo messaggio chiaro
         setMsg("Import bloccato ❌ (solo admin). Dettaglio: " + error.message);
         return;
       }
@@ -135,74 +132,104 @@ export default function ImportPage() {
     }
   }
 
-  // UI: loading controllo admin
-  if (checking) {
-    return (
-      <main style={{ fontFamily: "system-ui" }}>
-        <h1>📥 Import Excel</h1>
-        <p>Controllo permessi…</p>
-      </main>
-    );
-  }
-
-  // UI: non admin -> blocco pagina import
-  if (!isAdmin) {
-    return (
-      <main style={{ fontFamily: "system-ui" }}>
-        <h1>📥 Import Excel</h1>
-
-        <div
-          style={{
-            marginTop: 12,
-            padding: 16,
-            borderRadius: 16,
-            background: "rgba(255,255,255,0.08)",
-            border: "1px solid rgba(255,255,255,0.14)",
-            color: "rgba(255,255,255,0.92)",
-            maxWidth: 720,
-          }}
-        >
-          <div style={{ fontWeight: 900, fontSize: 16 }}>Accesso negato</div>
-          <p style={{ margin: "8px 0 0", opacity: 0.9 }}>
-            Solo l’admin può importare o modificare l’anagrafica da Excel.
-            <br />
-            Puoi comunque usare <b>Movimenti</b> e <b>Giacenze</b> ed effettuare <b>Export</b>.
-          </p>
-        </div>
-
-        <p style={{ marginTop: 18 }}>
-          <a href="/giacenze">📦 Vai a Giacenze</a> · <a href="/movimenti">➕/➖ Movimenti</a> · <a href="/">Home</a>
-        </p>
-      </main>
-    );
-  }
-
-  // UI: admin -> upload
+  // ===== UI =====
   return (
-    <main style={{ fontFamily: "system-ui" }}>
-      <h1>📥 Import Excel</h1>
-      <p style={{ opacity: 0.9 }}>
-        Carica il file Excel. I dati verranno salvati su <b>Supabase</b> e saranno condivisi tra tutti gli utenti loggati.
-        <br />
-        <b>Solo admin</b> può importare/aggiornare questi dati.
-      </p>
+    <main className="panel">
+      <div className="pageBar">
+        <div className="pageBarTitle">Magazzino - Import anagrafica da Excel</div>
+        <div className="pageBarRight" style={{ display: "flex", gap: 8 }}>
+          <a className="btn" href="/giacenze">Giacenze</a>
+          <a className="btn" href="/movimenti">Movimenti</a>
+        </div>
+      </div>
 
-      <input
-        type="file"
-        accept=".xlsx,.xls"
-        disabled={busy}
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) onFile(f);
-        }}
-      />
+      {checking ? (
+        <div style={{ padding: 12 }}>
+          Controllo permessi…
+        </div>
+      ) : !isAdmin ? (
+        <>
+          <div style={{ padding: 12, borderBottom: "1px solid #d9e1ea" }}>
+            <div style={{ fontWeight: 900, fontSize: 14 }}>Accesso negato</div>
+            <div style={{ marginTop: 6, color: "#6b7280", fontSize: 13 }}>
+              Solo l’admin può importare o modificare l’anagrafica da Excel.
+              <br />
+              Puoi comunque usare Movimenti e Giacenze ed effettuare Export.
+            </div>
+          </div>
 
-      {busy && <p style={{ marginTop: 12 }}>Import in corso…</p>}
-      {msg && <p style={{ marginTop: 12 }}>{msg}</p>}
+          <div className="actionsRow">
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <a className="btn" href="/giacenze">Vai a Giacenze</a>
+              <a className="btn" href="/movimenti">Vai a Movimenti</a>
+              <a className="btn" href="/">Dashboard</a>
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{ padding: 12, borderBottom: "1px solid #d9e1ea" }}>
+            <div style={{ fontSize: 13, color: "#6b7280" }}>
+              Carica il file Excel. I dati verranno salvati su Supabase e saranno condivisi tra tutti gli utenti loggati.
+              <br />
+              <b>Solo admin</b> può importare/aggiornare questi dati.
+            </div>
+          </div>
 
-      <p style={{ marginTop: 18 }}>
-        <a href="/giacenze">📦 Vai a Giacenze</a> · <a href="/movimenti">➕/➖ Movimenti</a> · <a href="/">Home</a>
-      </p>
+          <div className="filters" style={{ gridTemplateColumns: "2fr 1fr 1fr 2fr" }}>
+            <div className="field" style={{ gridColumn: "span 2" }}>
+              <label>File Excel</label>
+              <input
+                className="input"
+                type="file"
+                accept=".xlsx,.xls"
+                disabled={busy}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) onFile(f);
+                }}
+              />
+            </div>
+
+            <div className="field">
+              <label>&nbsp;</label>
+              <button className="btn btnPrimary" type="button" disabled={busy}>
+                {busy ? "Import in corso…" : "Importa"}
+              </button>
+              {/* Nota: il bottone sopra è solo estetico (l'import parte alla selezione file) */}
+            </div>
+
+            <div className="field" style={{ gridColumn: "span 1" }}>
+              <label>Stato</label>
+              <div
+                style={{
+                  border: "1px solid #cfd8e3",
+                  borderRadius: 4,
+                  background: "#f8fafc",
+                  padding: "9px 10px",
+                  fontSize: 13,
+                  color: "#1f2937",
+                }}
+              >
+                {busy ? "Importazione…" : "Pronto"}
+              </div>
+            </div>
+          </div>
+
+          {msg ? (
+            <div
+              style={{
+                padding: "10px 12px",
+                borderTop: "1px solid #d9e1ea",
+                color: msg.includes("✅") ? "#065f46" : "#991b1b",
+                fontWeight: 700,
+              }}
+            >
+              {msg}
+            </div>
+          ) : null}
+        </>
+      )}
     </main>
   );
 }

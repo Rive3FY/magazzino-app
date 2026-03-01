@@ -5,9 +5,6 @@ export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "../_lib/supabase/client";
-<a href="/logout" style={{ color: "white" }}>
-  🔓 Logout
-</a>
 
 const PAGE_SIZE = 25;
 
@@ -46,21 +43,17 @@ export default function GiacenzePage() {
   async function load() {
     setLoading(true);
 
-    // filtro: cerchiamo su code o name
     const search = q.trim();
     let query = supabase.from("items").select("*", { count: "exact" });
 
     if (search) {
-      // OR: code ilike OR name ilike
       query = query.or(`code.ilike.%${search}%,name.ilike.%${search}%`);
     }
 
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 
-    const { data, error, count: c } = await query
-      .order("code", { ascending: true })
-      .range(from, to);
+    const { data, error, count: c } = await query.order("code", { ascending: true }).range(from, to);
 
     if (error) {
       console.error(error);
@@ -75,7 +68,6 @@ export default function GiacenzePage() {
     setItems(list);
     setCount(c ?? 0);
 
-    // calcolo stock per SOLO gli item della pagina
     const codes = list.map((i) => i.code);
     if (codes.length === 0) {
       setStockMap({});
@@ -83,14 +75,10 @@ export default function GiacenzePage() {
       return;
     }
 
-    const { data: movs, error: e2 } = await supabase
-      .from("movements")
-      .select("id,type,code,qty")
-      .in("code", codes);
+    const { data: movs, error: e2 } = await supabase.from("movements").select("id,type,code,qty").in("code", codes);
 
     if (e2) {
       console.error(e2);
-      // se non riesce movimenti, mostriamo solo initial_qty
       const fallback: Record<string, number> = {};
       for (const it of list) fallback[it.code] = Number(it.initial_qty ?? 0);
       setStockMap(fallback);
@@ -115,7 +103,6 @@ export default function GiacenzePage() {
     setLoading(false);
   }
 
-  // ricarica quando cambia page o ricerca
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -157,142 +144,115 @@ export default function GiacenzePage() {
   }
 
   return (
-    <main style={{ fontFamily: "system-ui" }}>
-      <h1>📦 Giacenze</h1>
-
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Cerca (codice o descrizione)…"
-          style={{
-            padding: 10,
-            borderRadius: 12,
-            border: "1px solid rgba(255,255,255,0.25)",
-            background: "rgba(255,255,255,0.10)",
-            color: "white",
-            outline: "none",
-            minWidth: 280,
-          }}
-        />
-        <button
-          onClick={() => load()}
-          style={{
-            padding: "10px 14px",
-            borderRadius: 12,
-            border: "1px solid rgba(255,255,255,0.25)",
-            background: "rgba(255,255,255,0.10)",
-            color: "white",
-            cursor: "pointer",
-          }}
-        >
-          Aggiorna
-        </button>
-        <button
-          onClick={exportXlsx}
-          style={{
-            padding: "10px 14px",
-            borderRadius: 12,
-            border: "1px solid rgba(255,255,255,0.25)",
-            background: "rgba(255,255,255,0.10)",
-            color: "white",
-            cursor: "pointer",
-          }}
-        >
-          ⬇️ Export pagina
-        </button>
-
-        <a href="/movimenti" style={{ alignSelf: "center", color: "white" }}>
-          ➕/➖ Movimenti
-        </a>
-        <a href="/import" style={{ alignSelf: "center", color: "white" }}>
-          📥 Import
-        </a>
+    <main className="panel">
+      {/* Barra teal stile ERP */}
+      <div className="pageBar">
+        <div className="pageBarTitle">Magazzino - Elaborazione giacenze</div>
+        <div className="pageBarRight">
+          <button className="btn" onClick={() => load()} title="Aggiorna">
+            ⟳
+          </button>
+        </div>
       </div>
 
-      {loading ? (
-        <p>Caricamento…</p>
-      ) : (
-        <>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", background: "rgba(255,255,255,0.85)", borderRadius: 16, overflow: "hidden" }}>
-              <thead>
-                <tr>
-                  {["Materiale", "Descrizione", "Magazzino", "UM", "Libero", "Bloccato", "CQ", "TOTALE", "Attuale"].map((h) => (
-                    <th key={h} style={{ textAlign: "left", padding: 10, borderBottom: "1px solid #e5e7eb", whiteSpace: "nowrap", color: "#0f172a" }}>
-                      {h}
-                    </th>
-                  ))}
+      {/* Filtri sopra tabella */}
+      <div className="filters">
+        <div className="field" style={{ gridColumn: "span 2" }}>
+          <label>Filtro articoli</label>
+          <input
+            className="input"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Filtra per codice, descrizione..."
+          />
+        </div>
+
+        <div className="field">
+          <label>&nbsp;</label>
+          <button className="btn btnPrimary" onClick={() => load()}>
+            Elabora
+          </button>
+        </div>
+
+        <div className="field">
+          <label>&nbsp;</label>
+          <button className="btn btnBlue" onClick={() => load()}>
+            Aggiorna
+          </button>
+        </div>
+
+        <div className="field">
+          <label>&nbsp;</label>
+          <button className="btn btnOrange" onClick={exportXlsx}>
+            Esporta
+          </button>
+        </div>
+      </div>
+
+      {/* Riga azioni + paginazione (stile gestionale) */}
+      <div className="actionsRow">
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <a className="btn" href="/movimenti">
+            Movimenti
+          </a>
+          <a className="btn" href="/import">
+            Import
+          </a>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <button className="btn" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+            ←
+          </button>
+
+          <span style={{ fontSize: 13, color: "#6b7280" }}>
+            {page} / {totalPages} · Righe: {count}
+          </span>
+
+          <button className="btn" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+            →
+          </button>
+        </div>
+      </div>
+
+      {/* Tabella */}
+      <div className="tableWrap">
+        <table className="table">
+          <thead>
+            <tr>
+              {["Codice", "Descrizione", "Magazzino", "UM", "Carico", "Scarico", "CQ", "TOTALE", "Giacenza"].map((h) => (
+                <th key={h}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+
+          <tbody>
+            {loading ? (
+              <tr>
+                <td colSpan={9}>Caricamento…</td>
+              </tr>
+            ) : rows.length === 0 ? (
+              <tr>
+                <td colSpan={9}>Nessun risultato.</td>
+              </tr>
+            ) : (
+              rows.map((r) => (
+                <tr key={r.code}>
+                  <td>{r.code}</td>
+                  <td>{r.name}</td>
+                  <td>{[r.warehouse, r.warehouse_desc].filter(Boolean).join(" - ")}</td>
+                  <td>{r.um ?? ""}</td>
+                  <td>{r.qty_free ?? 0}</td>
+                  <td>{r.qty_blocked ?? 0}</td>
+                  <td>{r.qty_quality ?? 0}</td>
+                  <td style={{ fontWeight: 900 }}>{r.initial_qty ?? 0}</td>
+                  <td style={{ fontWeight: 900 }}>{r.stock ?? 0}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.code}>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", whiteSpace: "nowrap", color: "#0f172a" }}>{r.code}</td>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>{r.name}</td>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>
-                      {[r.warehouse, r.warehouse_desc].filter(Boolean).join(" - ")}
-                    </td>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>{r.um ?? ""}</td>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>{r.qty_free ?? 0}</td>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>{r.qty_blocked ?? 0}</td>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>{r.qty_quality ?? 0}</td>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>{r.initial_qty ?? 0}</td>
-                    <td style={{ padding: 10, borderBottom: "1px solid #f1f5f9", color: "#0f172a" }}>
-                      <b>{r.stock ?? 0}</b>
-                    </td>
-                  </tr>
-                ))}
-                {rows.length === 0 && (
-                  <tr>
-                    <td colSpan={9} style={{ padding: 12, color: "#0f172a" }}>
-                      Nessun risultato.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <div style={{ marginTop: 14, display: "flex", gap: 10, alignItems: "center", color: "white" }}>
-            <button
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              style={{
-                padding: "8px 12px",
-                borderRadius: 12,
-                border: "1px solid rgba(255,255,255,0.25)",
-                background: "rgba(255,255,255,0.10)",
-                color: "white",
-                cursor: page <= 1 ? "not-allowed" : "pointer",
-                opacity: page <= 1 ? 0.6 : 1,
-              }}
-            >
-              ← Precedente
-            </button>
-
-            <span>
-              Pagina <b>{page}</b> di <b>{totalPages}</b> · Totale righe: <b>{count}</b>
-            </span>
-
-            <button
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              style={{
-                padding: "8px 12px",
-                borderRadius: 12,
-                border: "1px solid rgba(255,255,255,0.25)",
-                background: "rgba(255,255,255,0.10)",
-                color: "white",
-                cursor: page >= totalPages ? "not-allowed" : "pointer",
-                opacity: page >= totalPages ? 0.6 : 1,
-              }}
-            >
-              Successiva →
-            </button>
-          </div>
-        </>
-      )}
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </main>
   );
 }

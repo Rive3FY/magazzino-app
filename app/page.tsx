@@ -1,244 +1,191 @@
-export default function Home() {
-  const shell: React.CSSProperties = {
-    display: "grid",
-    gap: 18,
-  };
+"use client";
 
-  const hero: React.CSSProperties = {
-    borderRadius: 28,
-    padding: 22,
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(255,255,255,0.06)",
-    boxShadow: "0 18px 50px rgba(0,0,0,0.22)",
-    backdropFilter: "blur(12px)",
-  };
+import { useEffect, useMemo, useState } from "react";
+import { createClient } from "./_lib/supabase/client";
 
-  const grid: React.CSSProperties = {
-    display: "grid",
-    gridTemplateColumns: "repeat(12, 1fr)",
-    gap: 14,
-  };
+type Movement = {
+  id: string;
+  created_at: string;
+  type: "IN" | "OUT";
+  code: string;
+  qty: number;
+  note: string | null;
+  created_by_email: string | null;
+};
 
-  const cardBase: React.CSSProperties = {
-    borderRadius: 22,
-    padding: 18,
-    textDecoration: "none",
-    display: "block",
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(255,255,255,0.06)",
-    boxShadow: "0 14px 34px rgba(0,0,0,0.18)",
-    backdropFilter: "blur(12px)",
-    color: "rgba(255,255,255,0.92)",
-  };
-
-  const cardTitle: React.CSSProperties = {
-    fontWeight: 900,
-    fontSize: 18,
-    letterSpacing: -0.2,
-    margin: 0,
-  };
-
-  const cardDesc: React.CSSProperties = {
-    margin: "8px 0 0",
-    fontSize: 13,
-    opacity: 0.82,
-    lineHeight: 1.35,
-  };
-
-  const pill: React.CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 8,
-    padding: "8px 10px",
-    borderRadius: 999,
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(255,255,255,0.06)",
-    fontSize: 13,
-    fontWeight: 800,
-    color: "rgba(255,255,255,0.92)",
-    textDecoration: "none",
-  };
-
-  const arrowBox: React.CSSProperties = {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
-    border: "1px solid rgba(255,255,255,0.14)",
-    background: "rgba(255,255,255,0.06)",
-    display: "grid",
-    placeItems: "center",
-    fontWeight: 900,
-    color: "rgba(255,255,255,0.9)",
-  };
-
-  const subtle: React.CSSProperties = {
-    color: "rgba(255,255,255,0.72)",
-    fontSize: 13,
-    margin: 0,
-    lineHeight: 1.4,
-  };
-
+function isSameDay(d: Date, ref: Date) {
   return (
-    <div style={shell}>
-      {/* HERO */}
-      <section style={hero}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: 30, letterSpacing: -0.6, fontWeight: 950 }}>
-              Gestionale Magazzino
-            </h1>
-            <p style={{ margin: "10px 0 0", ...subtle }}>
-              Movimenti, giacenze e import dati. Interfaccia ottimizzata per smartphone in magazzino.
-            </p>
-          </div>
-
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
-            <a href="/movimenti" style={pill}>⚡ Prelievo veloce</a>
-            <a href="/movimenti" style={pill}>➕ Entrata veloce</a>
-          </div>
-        </div>
-
-        {/* Mini stats / hint */}
-        <div
-          style={{
-            marginTop: 14,
-            display: "grid",
-            gap: 10,
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          }}
-        >
-          <div style={{ ...miniCard, borderColor: "rgba(96,165,250,0.25)" }}>
-            <div style={{ fontSize: 12, opacity: 0.72 }}>Scansione</div>
-            <div style={{ fontWeight: 900, marginTop: 3 }}>📷 Barcode da telefono</div>
-          </div>
-          <div style={{ ...miniCard, borderColor: "rgba(167,139,250,0.25)" }}>
-            <div style={{ fontSize: 12, opacity: 0.72 }}>Sicurezza</div>
-            <div style={{ fontWeight: 900, marginTop: 3 }}>🔒 Delete solo Admin</div>
-          </div>
-          <div style={{ ...miniCard, borderColor: "rgba(255,255,255,0.18)" }}>
-            <div style={{ fontSize: 12, opacity: 0.72 }}>Dati</div>
-            <div style={{ fontWeight: 900, marginTop: 3 }}>📥 Import da Excel</div>
-          </div>
-        </div>
-      </section>
-
-      {/* DASHBOARD */}
-      <section style={grid}>
-        {/* Movimenti */}
-        <a
-          href="/movimenti"
-          style={{
-            ...cardBase,
-            gridColumn: "span 12",
-            background:
-              "linear-gradient(135deg, rgba(96,165,250,0.18), rgba(255,255,255,0.06))",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-            <div>
-              <h2 style={cardTitle}>➕/➖ Movimenti</h2>
-              <p style={cardDesc}>
-                Entrate/uscite, scansione barcode, quantità, note e storico.
-              </p>
-            </div>
-            <div style={arrowBox}>→</div>
-          </div>
-
-          <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <span style={tag}>📷 Scansiona</span>
-            <span style={tag}>➖ Prelievo</span>
-            <span style={tag}>➕ Entrata</span>
-            <span style={tag}>📜 Storico</span>
-          </div>
-        </a>
-
-        {/* Giacenze */}
-        <a
-          href="/giacenze"
-          style={{
-            ...cardBase,
-            gridColumn: "span 12",
-            background:
-              "linear-gradient(135deg, rgba(167,139,250,0.18), rgba(255,255,255,0.06))",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-            <div>
-              <h2 style={cardTitle}>📦 Giacenze</h2>
-              <p style={cardDesc}>
-                Tabella completa, ricerca rapida, export e controllo disponibilità.
-              </p>
-            </div>
-            <div style={arrowBox}>→</div>
-          </div>
-
-          <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <span style={tag}>🔎 Ricerca</span>
-            <span style={tag}>📤 Export</span>
-            <span style={tag}>🧮 Calcolo</span>
-          </div>
-        </a>
-
-        {/* Import */}
-        <a
-          href="/import"
-          style={{
-            ...cardBase,
-            gridColumn: "span 12",
-            background:
-              "linear-gradient(135deg, rgba(255,255,255,0.10), rgba(255,255,255,0.06))",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-            <div>
-              <h2 style={cardTitle}>📥 Import</h2>
-              <p style={cardDesc}>
-                Carica anagrafica da Excel e aggiorna rapidamente i materiali.
-              </p>
-            </div>
-            <div style={arrowBox}>→</div>
-          </div>
-
-          <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <span style={tag}>📄 Excel</span>
-            <span style={tag}>✅ Validazione</span>
-            <span style={tag}>⚙️ Setup</span>
-          </div>
-        </a>
-      </section>
-
-      {/* Help footer */}
-      <section
-        style={{
-          borderRadius: 22,
-          padding: 16,
-          border: "1px solid rgba(255,255,255,0.12)",
-          background: "rgba(255,255,255,0.04)",
-          color: "rgba(255,255,255,0.8)",
-          fontSize: 13,
-        }}
-      >
-        💡 Suggerimento: in magazzino usa <b>Scansiona</b> → quantità → <b>Salva movimento</b>.
-      </section>
-    </div>
+    d.getFullYear() === ref.getFullYear() &&
+    d.getMonth() === ref.getMonth() &&
+    d.getDate() === ref.getDate()
   );
 }
 
-const miniCard: React.CSSProperties = {
-  borderRadius: 18,
-  padding: 12,
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(255,255,255,0.04)",
-};
+function fmtDate(iso: string) {
+  const d = new Date(iso);
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+}
 
-const tag: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  padding: "6px 10px",
-  borderRadius: 999,
-  border: "1px solid rgba(255,255,255,0.14)",
-  background: "rgba(255,255,255,0.06)",
-  fontSize: 12,
-  fontWeight: 800,
-  opacity: 0.95,
-};
+export default function Home() {
+  const supabase = createClient();
+
+  const [loading, setLoading] = useState(true);
+
+  const [itemsCount, setItemsCount] = useState<number>(0);
+  const [movements, setMovements] = useState<Movement[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      setLoading(true);
+
+      // 1) Count materiali (metodo veloce: count exact, senza scaricare righe)
+      const { count: cItems, error: eItems } = await supabase
+        .from("items")
+        .select("code", { count: "exact", head: true });
+
+      // 2) Ultimi movimenti (prendiamo 100 per calcolare "oggi" + mostrare ultimi 10)
+      const { data: movs, error: eMovs } = await supabase
+        .from("movements")
+        .select("id,created_at,type,code,qty,note,created_by_email")
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+      if (!alive) return;
+
+      if (eItems) console.error(eItems);
+      if (eMovs) console.error(eMovs);
+
+      setItemsCount(cItems ?? 0);
+      setMovements((movs ?? []) as Movement[]);
+
+      setLoading(false);
+    })();
+
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const today = new Date();
+  const movementsToday = useMemo(() => {
+    return movements.filter((m) => isSameDay(new Date(m.created_at), today)).length;
+  }, [movements]);
+
+  const lastMovement = movements[0] ?? null;
+  const last10 = movements.slice(0, 10);
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ margin: 0 }}>Dashboard</h1>
+          <div style={{ opacity: 0.85, marginTop: 6 }}>
+            Panoramica rapida di anagrafica e operatività.
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <a className="btn btnPrimary" href="/movimenti">➕/➖ Nuovo movimento</a>
+          <a className="btn" href="/giacenze">📦 Vai a giacenze</a>
+        </div>
+      </div>
+
+      {/* KPI */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 12, marginTop: 14 }}>
+        <div className="glass" style={{ gridColumn: "span 4" }}>
+          <div style={{ opacity: 0.85, fontSize: 12 }}>Materiali</div>
+          <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>
+            {loading ? "…" : itemsCount}
+          </div>
+          <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>Codici in anagrafica</div>
+        </div>
+
+        <div className="glass" style={{ gridColumn: "span 4" }}>
+          <div style={{ opacity: 0.85, fontSize: 12 }}>Movimenti oggi</div>
+          <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>
+            {loading ? "…" : movementsToday}
+          </div>
+          <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>Entrate/uscite registrate oggi</div>
+        </div>
+
+        <div className="glass" style={{ gridColumn: "span 4" }}>
+          <div style={{ opacity: 0.85, fontSize: 12 }}>Ultimo movimento</div>
+          <div style={{ marginTop: 8, fontWeight: 800 }}>
+            {loading ? "…" : lastMovement ? `${lastMovement.code} · ${lastMovement.type === "IN" ? "Entrata" : "Uscita"}` : "—"}
+          </div>
+          <div style={{ opacity: 0.85, fontSize: 12, marginTop: 6 }}>
+            {loading ? "" : lastMovement ? fmtDate(lastMovement.created_at) : ""}
+          </div>
+        </div>
+      </div>
+
+      {/* Ultimi movimenti */}
+      <div style={{ marginTop: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <h2 style={{ margin: 0 }}>Ultimi movimenti</h2>
+          <a className="btn" href="/movimenti">Vedi tutto</a>
+        </div>
+
+        <div style={{ overflowX: "auto", marginTop: 10 }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Tipo</th>
+                <th>Codice</th>
+                <th>Q.tà</th>
+                <th>Note</th>
+                <th>Inserito da</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={6} style={{ padding: 12, color: "#0f172a" }}>
+                    Caricamento…
+                  </td>
+                </tr>
+              ) : last10.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ padding: 12, color: "#0f172a" }}>
+                    Nessun movimento.
+                  </td>
+                </tr>
+              ) : (
+                last10.map((m) => (
+                  <tr key={m.id}>
+                    <td>{fmtDate(m.created_at)}</td>
+                    <td>
+                      <span className={`badge ${m.type === "IN" ? "badgeIn" : "badgeOut"}`}>
+                        {m.type === "IN" ? "Entrata" : "Uscita"}
+                      </span>
+                    </td>
+                    <td>{m.code}</td>
+                    <td>
+                      {m.type === "IN" ? "+" : "-"}
+                      {m.qty}
+                    </td>
+                    <td>{m.note ?? ""}</td>
+                    <td>{m.created_by_email ?? "-"}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 12, opacity: 0.8, fontSize: 12 }}>
+        Suggerimento: usa “Nuovo movimento” per registrare rapidamente entrate/uscite.
+      </div>
+    </div>
+  );
+}

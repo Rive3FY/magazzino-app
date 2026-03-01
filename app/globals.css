@@ -1,90 +1,317 @@
 /* =========================
-   RESET BASE
+   RESET
 ========================= */
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; padding: 0; }
 
-html, body {
-  height: 100%;
-  margin: 0;
-  padding: 0;
+:root{
+  --bg: #eef2f6;
+  --panel: #ffffff;
+  --border: #d9e1ea;
+  --text: #1f2937;
+  --muted: #6b7280;
+
+  --sidebar: #2f7f95;        /* teal come immagine */
+  --sidebar-dark: #286f83;
+  --sidebar-text: #ffffff;
+
+  --primary: #1f8aa6;
+  --primary-dark: #16768f;
+
+  --btn: #f8fafc;
+  --btn-border: #cfd8e3;
 }
 
 /* =========================
-   SFONDO PROFESSIONALE
+   BASE
 ========================= */
+body{
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
 
-body {
-  font-family: system-ui;
+/* Link standard ERP (niente viola) */
+a{ color: var(--primary-dark); text-decoration: none; }
+a:hover{ text-decoration: underline; }
+
+/* =========================
+   APP LAYOUT (ERP)
+========================= */
+.app{
+  display: grid;
+  grid-template-columns: 260px 1fr;
   min-height: 100vh;
-  color: rgba(255,255,255,0.95);
-  background: transparent;
-  position: relative;
 }
 
-/* Immagine sfondo separata (così possiamo applicare blur) */
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -2;
-
-  background-image: url("/terna-bg.jpg");
-  background-repeat: no-repeat;
-  background-position: center center;
-  background-size: cover;
-
-  transform: scale(1.05);           /* evita bordi col blur */
-  filter: blur(3px) brightness(0.7); /* 🔥 migliora leggibilità */
+.sidebar{
+  background: var(--sidebar);
+  color: var(--sidebar-text);
+  padding: 14px 12px;
+  border-right: 1px solid rgba(255,255,255,0.12);
 }
 
-/* Overlay scuro uniforme (molto più leggibile) */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-
-  background: rgba(11,18,32,0.65);
+.sidebarHeader{
+  padding: 6px 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.18);
+  margin-bottom: 12px;
 }
 
-/* Tutto il contenuto sopra overlay */
-body > * {
-  position: relative;
-  z-index: 1;
+.sidebarBrand{
+  font-weight: 900;
+  letter-spacing: 0.2px;
 }
 
-/* =========================
-   LAYOUT
-========================= */
-
-.app-container {
-  max-width: 1040px;
-  margin: 0 auto;
-  padding: 26px 16px 44px;
-}
-
-.app-footer {
-  max-width: 1040px;
-  margin: 0 auto;
-  padding: 0 16px 28px;
-  opacity: 0.8;
+.sidebarVersion{
   font-size: 12px;
+  opacity: 0.9;
+  margin-top: 6px;
 }
 
-/* =========================
-   GLASS EFFECT PER CARD
-   (aggiungi className="glass")
-========================= */
+.sideNav{
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
 
-.glass {
-  background: rgba(15, 20, 30, 0.65);
-  border: 1px solid rgba(255,255,255,0.12);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  box-shadow: 0 8px 30px rgba(0,0,0,0.4);
-  border-radius: 16px;
-  padding: 20px;
+.sideLink{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  color: rgba(255,255,255,0.95) !important;
+  text-decoration: none !important;
+  border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.08);
+  font-weight: 700;
+}
+
+.sideLink:hover{
+  background: rgba(255,255,255,0.14);
+}
+
+.sideLink.active{
+  background: rgba(255,255,255,0.20);
+  border-color: rgba(255,255,255,0.28);
+}
+
+.sidebarFooter{
+  margin-top: 14px;
+  padding: 10px 10px 0;
+  border-top: 1px solid rgba(255,255,255,0.18);
+  font-size: 12px;
+  opacity: 0.95;
+}
+
+/* Area destra */
+.main{
+  display: grid;
+  grid-template-rows: 54px 1fr;
+}
+
+/* Topbar chiara */
+.topbar{
+  background: #ffffff;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+}
+
+.topbarTitle{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 900;
+}
+
+.userArea{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.userPill{
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #f8fafc;
+}
+
+.content{
+  padding: 16px;
+}
+
+/* Pannello pagina (bianco) */
+.panel{
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 1px 6px rgba(15, 23, 42, 0.06);
+}
+
+/* Barra titolo pagina stile ERP (teal) */
+.pageBar{
+  background: var(--sidebar);
+  color: white;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(0,0,0,0.10);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pageBarTitle{
+  font-weight: 900;
+}
+
+.pageBarRight{
+  display: flex;
+  gap: 8px;
+}
+
+/* Filtri */
+.filters{
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: 1fr 1fr 2fr 2fr;
+  gap: 10px;
+}
+
+@media (max-width: 1100px){
+  .filters{ grid-template-columns: 1fr 1fr; }
+}
+
+.field label{
+  font-size: 12px;
+  color: var(--muted);
+  display: block;
+  margin-bottom: 6px;
+}
+
+.input, .select{
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--btn-border);
+  background: #ffffff;
+  color: var(--text);
+  outline: none;
+}
+
+.input:focus, .select:focus{
+  border-color: #9fb7c6;
+}
+
+/* Azioni */
+.actionsRow{
+  padding: 10px 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+}
+
+.btn{
+  padding: 9px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--btn-border);
+  background: var(--btn);
+  color: var(--text);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.btn:hover{ background: #ffffff; }
+
+.btnPrimary{
+  background: var(--primary);
+  border-color: var(--primary-dark);
+  color: white;
+}
+.btnPrimary:hover{ background: var(--primary-dark); }
+
+.btnBlue{
+  background: #2563eb;
+  border-color: #1d4ed8;
+  color: white;
+}
+.btnBlue:hover{ background: #1d4ed8; }
+
+.btnOrange{
+  background: #f59e0b;
+  border-color: #d97706;
+  color: #111827;
+}
+.btnOrange:hover{ background: #d97706; color: white; }
+
+/* =========================
+   TABLE ERP (densa)
+========================= */
+.tableWrap{
+  overflow: auto;
+}
+
+.table{
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table thead th{
+  position: sticky;
+  top: 0;
+  background: #f3f6fb;
+  border-bottom: 1px solid var(--border);
+  padding: 8px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table tbody td{
+  border-bottom: 1px solid #edf2f7;
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+
+.table tbody tr:hover{
+  background: #f8fafc;
+}
+
+.badgeIn{
+  display:inline-block;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+  background: #e7f7ef;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+}
+.badgeOut{
+  display:inline-block;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+  background: #fff1f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+/* Footer */
+.app-footer{
+  padding: 14px 16px;
+  font-size: 12px;
+  color: var(--muted);
 }

@@ -48,32 +48,23 @@ export default function Home() {
   const [itemsCount, setItemsCount] = useState<number>(0);
   const [movements, setMovements] = useState<Movement[]>([]);
 
-  // --- CERCA MATERIALE ---
+  // ---------- SEARCH ----------
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<DbItem[]>([]);
-  const [picked, setPicked] = useState<DbItem | null>(null);
-  const [stock, setStock] = useState<number | null>(null);
-  const [searchMsg, setSearchMsg] = useState<string | null>(null);
-
-  const boxRef = useRef<HTMLDivElement | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
 
-  // --- SCANNER ---
+  const [picked, setPicked] = useState<DbItem | null>(null);
+  const [stock, setStock] = useState<number | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const boxRef = useRef<HTMLDivElement | null>(null);
+
+  // ---------- SCANNER ----------
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const [scanning, setScanning] = useState(false);
   const scanLockedRef = useRef(false);
-
-  function resetSearch() {
-    stopScan();
-    setSearch("");
-    setSuggestions([]);
-    setPicked(null);
-    setStock(null);
-    setOpen(false);
-    setSearchMsg(null);
-  }
 
   async function loadSuggestions(text: string) {
     const s = text.trim();
@@ -87,7 +78,7 @@ export default function Home() {
       .select("code,name,um,warehouse,warehouse_desc,initial_qty")
       .or(`code.ilike.%${s}%,name.ilike.%${s}%`)
       .order("code", { ascending: true })
-      .limit(10);
+      .limit(12);
 
     if (error) {
       console.error(error);
@@ -129,6 +120,7 @@ export default function Home() {
       const v = Number((m as any).qty ?? 0);
       delta += (m as any).type === "IN" ? v : -v;
     }
+
     setStock(initial + delta);
   }
 
@@ -136,7 +128,7 @@ export default function Home() {
     setPicked(it);
     setSearch(`${it.code} — ${it.name}`);
     setOpen(false);
-    setSearchMsg(null);
+    setMsg(null);
     await computeStockFor(it.code);
   }
 
@@ -144,9 +136,9 @@ export default function Home() {
     const code = codeRaw.trim();
     if (!code) return;
 
-    setSearch(code);
+    setMsg(null);
     setOpen(false);
-    setSearchMsg(null);
+    setSearch(code);
 
     const { data: item, error } = await supabase
       .from("items")
@@ -156,16 +148,16 @@ export default function Home() {
 
     if (error) {
       console.error(error);
+      setMsg("Errore ricerca articolo: " + error.message);
       setPicked(null);
       setStock(null);
-      setSearchMsg("Errore ricerca articolo: " + error.message);
       return;
     }
 
     if (!item) {
+      setMsg(`Codice "${code}" non trovato in anagrafica.`);
       setPicked(null);
       setStock(null);
-      setSearchMsg(`Codice "${code}" non trovato in anagrafica.`);
       setOpen(true);
       await loadSuggestions(code);
       return;
@@ -175,14 +167,13 @@ export default function Home() {
   }
 
   async function startScan() {
-    setSearchMsg(null);
+    setMsg(null);
     setOpen(false);
 
-    // sblocca lettura
     scanLockedRef.current = false;
     setScanning(true);
 
-    // aspetta render video
+    // aspetta che <video> sia renderizzato
     await new Promise((r) => setTimeout(r, 120));
 
     if (!readerRef.current) readerRef.current = new BrowserMultiFormatReader();
@@ -204,7 +195,7 @@ export default function Home() {
       });
     } catch (e: any) {
       console.error(e);
-      setSearchMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
+      setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
       setScanning(false);
     }
   }
@@ -224,7 +215,17 @@ export default function Home() {
     setScanning(false);
   }
 
-  // Dashboard load
+  function resetSearch() {
+    stopScan();
+    setSearch("");
+    setSuggestions([]);
+    setPicked(null);
+    setStock(null);
+    setOpen(false);
+    setMsg(null);
+  }
+
+  // Load dashboard data
   useEffect(() => {
     let alive = true;
 
@@ -258,7 +259,7 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // click fuori suggerimenti
+  // Chiudi dropdown cliccando fuori
   useEffect(() => {
     function onDocMouseDown(e: MouseEvent) {
       if (!boxRef.current) return;
@@ -268,10 +269,9 @@ export default function Home() {
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, []);
 
-  // debounce suggerimenti (quando scrivi)
+  // Debounce suggerimenti
   useEffect(() => {
     setActiveIndex(0);
-    setSearchMsg(null);
     if (!open) return;
 
     const t = setTimeout(() => {
@@ -283,9 +283,10 @@ export default function Home() {
   }, [search, open]);
 
   const today = new Date();
-  const movementsToday = useMemo(() => {
-    return movements.filter((m) => isSameDay(new Date(m.created_at), today)).length;
-  }, [movements]);
+  const movementsToday = useMemo(
+    () => movements.filter((m) => isSameDay(new Date(m.created_at), today)).length,
+    [movements]
+  );
 
   const lastMovement = movements[0] ?? null;
   const last10 = movements.slice(0, 10);
@@ -293,6 +294,21 @@ export default function Home() {
 
   return (
     <div>
+      {/* Debug visivo: se NON lo vedi su mobile, stai aprendo un deploy diverso/cached */}
+      <div
+        style={{
+          padding: 8,
+          borderRadius: 12,
+          background: "rgba(255,255,0,0.35)",
+          border: "1px solid rgba(0,0,0,0.12)",
+          color: "#0f172a",
+          fontWeight: 900,
+          marginBottom: 12,
+        }}
+      >
+        ✅ Dashboard aggiornata (se non lo vedi su mobile: cache / url diverso)
+      </div>
+
       <div
         style={{
           display: "flex",
@@ -319,7 +335,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ✅ CERCA + BARCODE */}
+      {/* ✅ CERCA MATERIALE + BARCODE */}
       <div className="glass" style={{ marginTop: 14 }}>
         <div
           style={{
@@ -338,13 +354,9 @@ export default function Home() {
           </div>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button
-              className="btn"
-              onClick={() => (scanning ? stopScan() : startScan())}
-            >
+            <button className="btn" onClick={() => (scanning ? stopScan() : startScan())}>
               {scanning ? "⏹ Ferma scansione" : "📷 Scansiona barcode"}
             </button>
-
             <button className="btn" onClick={resetSearch}>
               Pulisci
             </button>
@@ -361,6 +373,7 @@ export default function Home() {
               setOpen(true);
               setPicked(null);
               setStock(null);
+              setMsg(null);
               if (!v.trim()) setSuggestions([]);
             }}
             onFocus={() => setOpen(true)}
@@ -376,7 +389,6 @@ export default function Home() {
               } else if (e.key === "Enter") {
                 e.preventDefault();
                 if (active) pickItem(active);
-                else if (search.trim()) setSearchMsg("Seleziona un materiale dalla lista.");
               } else if (e.key === "Escape") {
                 setOpen(false);
               }
@@ -442,17 +454,10 @@ export default function Home() {
           </div>
         )}
 
-        {searchMsg && <div style={{ marginTop: 10, fontWeight: 800 }}>{searchMsg}</div>}
+        {msg && <div style={{ marginTop: 10, fontWeight: 800 }}>{msg}</div>}
 
         {picked && (
-          <div
-            style={{
-              marginTop: 12,
-              display: "grid",
-              gridTemplateColumns: "repeat(12, 1fr)",
-              gap: 12,
-            }}
-          >
+          <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 12 }}>
             <div style={{ gridColumn: "span 6" }} className="glass">
               <div style={{ opacity: 0.85, fontSize: 12 }}>Materiale</div>
               <div style={{ fontSize: 18, fontWeight: 900, marginTop: 6 }}>{picked.code}</div>
@@ -505,7 +510,11 @@ export default function Home() {
         <div className="glass" style={{ gridColumn: "span 4" }}>
           <div style={{ opacity: 0.85, fontSize: 12 }}>Ultimo movimento</div>
           <div style={{ marginTop: 8, fontWeight: 800 }}>
-            {loading ? "…" : lastMovement ? `${lastMovement.code} · ${lastMovement.type === "IN" ? "Entrata" : "Uscita"}` : "—"}
+            {loading
+              ? "…"
+              : lastMovement
+              ? `${lastMovement.code} · ${lastMovement.type === "IN" ? "Entrata" : "Uscita"}`
+              : "—"}
           </div>
           <div style={{ opacity: 0.85, fontSize: 12, marginTop: 6 }}>
             {loading ? "" : lastMovement ? fmtDate(lastMovement.created_at) : ""}
@@ -555,10 +564,7 @@ export default function Home() {
                       </span>
                     </td>
                     <td>{m.code}</td>
-                    <td>
-                      {m.type === "IN" ? "+" : "-"}
-                      {m.qty}
-                    </td>
+                    <td>{m.type === "IN" ? "+" : "-"}{m.qty}</td>
                     <td>{m.note ?? ""}</td>
                     <td>{m.created_by_email ?? "-"}</td>
                   </tr>

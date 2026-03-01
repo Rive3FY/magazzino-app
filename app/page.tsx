@@ -44,11 +44,12 @@ function fmtDate(iso: string) {
 export default function Home() {
   const supabase = createClient();
 
+  // dashboard data
   const [loading, setLoading] = useState(true);
   const [itemsCount, setItemsCount] = useState<number>(0);
   const [movements, setMovements] = useState<Movement[]>([]);
 
-  // ---------- SEARCH ----------
+  // search
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<DbItem[]>([]);
@@ -60,11 +61,14 @@ export default function Home() {
 
   const boxRef = useRef<HTMLDivElement | null>(null);
 
-  // ---------- SCANNER ----------
+  // scanner
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
   const [scanning, setScanning] = useState(false);
   const scanLockedRef = useRef(false);
+  const lastScanRef = useRef<{ code: string; ts: number } | null>(null);
 
   async function loadSuggestions(text: string) {
     const s = text.trim();
@@ -136,10 +140,6 @@ export default function Home() {
     const code = codeRaw.trim();
     if (!code) return;
 
-    setMsg(null);
-    setOpen(false);
-    setSearch(code);
-
     const { data: item, error } = await supabase
       .from("items")
       .select("code,name,um,warehouse,warehouse_desc,initial_qty")
@@ -166,89 +166,108 @@ export default function Home() {
     await pickItem(item as DbItem);
   }
 
-  async function startScan() {
-  setMsg(null);
-  setOpen(false);
+  function stopScan() {
+    // stop decoder
+    try {
+      (readerRef.current as any)?.reset?.();
+    } catch {}
+    try {
+      (readerRef.current as any)?.stopContinuousDecode?.();
+    } catch {}
+    readerRef.current = null;
 
-  // sblocca per una nuova scansione
-  scanLockedRef.current = false;
+    // stop stream
+    try {
+      const s = streamRef.current;
+      if (s) s.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    } catch {}
 
-  // accendi UI
-  setScanning(true);
+    // detach video
+    try {
+      const v = videoRef.current;
+      if (v) v.srcObject = null;
+    } catch {}
 
-  // aspetta che il <video> sia renderizzato
-  await new Promise((r) => setTimeout(r, 150));
-
-  // ✅ IMPORTANTISSIMO: reader nuovo ad ogni start
-  readerRef.current = new BrowserMultiFormatReader();
-
-  // ✅ ignora i primi frame (spesso contengono un risultato vecchio)
-  const ignoreUntil = Date.now() + 600;
-
-  try {
-    const videoEl = videoRef.current;
-    if (!videoEl) throw new Error("Video non disponibile");
-
-    await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
-      if (!result) return;
-
-      // ignora risultati subito dopo l'avvio
-      if (Date.now() < ignoreUntil) return;
-
-      // evita doppie letture
-      if (scanLockedRef.current) return;
-      scanLockedRef.current = true;
-
-      const text = result.getText();
-
-      stopScan();
-      await pickItemByCode(text);
-    });
-  } catch (e: any) {
-    console.error(e);
-    setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
     setScanning(false);
   }
-}
 
-  function stopScan() {
-  // ✅ chiudi decoder (compatibile con versioni diverse)
-  try {
-    (readerRef.current as any)?.reset?.();
-  } catch {}
-  try {
-    (readerRef.current as any)?.stopContinuousDecode?.();
-  } catch {}
+  async function startScan() {
+    setMsg(null);
+    setOpen(false);
 
-  // ✅ spegni proprio la camera
-  try {
-    const v = videoRef.current;
-    const stream = v?.srcObject as MediaStream | null;
-    if (stream) stream.getTracks().forEach((t) => t.stop());
-    if (v) v.srcObject = null;
-  } catch {}
+    // chiudi eventuale sessione appesa
+    stopScan();
 
-  // ✅ IMPORTANTISSIMO: rilascia il reader (così al prossimo start è fresco)
-  readerRef.current = null;
+    scanLockedRef.current = false;
+    setScanning(true);
 
-  setScanning(false);
-}
+    // aspetta render <video>
+    await new Promise((r) => setTimeout(r, 150));
+
+    try {
+      const videoEl = videoRef.current;
+      if (!videoEl) throw new Error("Video non disponibile");
+
+      // apri camera (posteriore)
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+        audio: false,
+      });
+
+      streamRef.current = stream;
+      videoEl.srcObject = stream;
+
+      // iOS/Android: play esplicito aiuta
+      await videoEl.play().catch(() => {});
+
+      // reader nuovo ogni volta
+      readerRef.current = new BrowserMultiFormatReader();
+
+      // ignora frame iniziali (stale)
+      const ignoreUntil = Date.now() + 650;
+
+      // decode dal video (più stabile del decodeFromVideoDevice)
+      (readerRef.current as any).decodeFromVideoElementContinuously(videoEl, async (result: any) => {
+        if (!result) return;
+        if (Date.now() < ignoreUntil) return;
+        if (scanLockedRef.current) return;
+
+        const text = String(result.getText?.() ?? "").trim();
+        if (!text) return;
+
+        // evita ripetizione immediata stesso codice
+        const prev = lastScanRef.current;
+        const now = Date.now();
+        if (prev && prev.code === text && now - prev.ts < 1500) return;
+        lastScanRef.current = { code: text, ts: now };
+
+        scanLockedRef.current = true;
+
+        stopScan();
+        await pickItemByCode(text);
+      });
+    } catch (e: any) {
+      console.error(e);
+      setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
+      stopScan();
+    }
+  }
 
   function resetSearch() {
-  stopScan();
+    stopScan();
+    scanLockedRef.current = false;
+    lastScanRef.current = null;
 
-  // ✅ QUESTO è quello che devi aggiungere
-  scanLockedRef.current = false;
+    setSearch("");
+    setSuggestions([]);
+    setPicked(null);
+    setStock(null);
+    setOpen(false);
+    setMsg(null);
+  }
 
-  setSearch("");
-  setSuggestions([]);
-  setPicked(null);
-  setStock(null);
-  setOpen(false);
-  setMsg(null);
-}
-
-  // Load dashboard data
+  // dashboard load
   useEffect(() => {
     let alive = true;
 
@@ -282,7 +301,7 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Chiudi dropdown cliccando fuori
+  // close dropdown when clicking outside
   useEffect(() => {
     function onDocMouseDown(e: MouseEvent) {
       if (!boxRef.current) return;
@@ -292,14 +311,14 @@ export default function Home() {
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, []);
 
-  // Debounce suggerimenti
+  // debounce suggestions
   useEffect(() => {
     setActiveIndex(0);
     if (!open) return;
 
     const t = setTimeout(() => {
       loadSuggestions(search);
-    }, 250);
+    }, 220);
 
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -317,45 +336,21 @@ export default function Home() {
 
   return (
     <div>
-      
-
-      <div
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
-          gap: 12,
-          flexWrap: "wrap",
-        }}
-      >
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
           <h1 style={{ margin: 0 }}>Dashboard</h1>
-          <div style={{ opacity: 0.85, marginTop: 6 }}>
-            Panoramica rapida di anagrafica e operatività.
-          </div>
+          <div style={{ opacity: 0.85, marginTop: 6 }}>Panoramica rapida di anagrafica e operatività.</div>
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <a className="btn btnPrimary" href="/movimenti">
-            ➕/➖ Nuovo movimento
-          </a>
-          <a className="btn" href="/giacenze">
-            📦 Vai a giacenze
-          </a>
+          <a className="btn btnPrimary" href="/movimenti">➕/➖ Nuovo movimento</a>
+          <a className="btn" href="/giacenze">📦 Vai a giacenze</a>
         </div>
       </div>
 
       {/* ✅ CERCA MATERIALE + BARCODE */}
       <div className="glass" style={{ marginTop: 14 }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            flexWrap: "wrap",
-          }}
-        >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div>
             <div style={{ fontWeight: 900, fontSize: 16 }}>🔎 Cerca materiale</div>
             <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
@@ -367,9 +362,7 @@ export default function Home() {
             <button className="btn" onClick={() => (scanning ? stopScan() : startScan())}>
               {scanning ? "⏹ Ferma scansione" : "📷 Scansiona barcode"}
             </button>
-            <button className="btn" onClick={resetSearch}>
-              Pulisci
-            </button>
+            <button className="btn" onClick={resetSearch}>Pulisci</button>
           </div>
         </div>
 
@@ -574,7 +567,10 @@ export default function Home() {
                       </span>
                     </td>
                     <td>{m.code}</td>
-                    <td>{m.type === "IN" ? "+" : "-"}{m.qty}</td>
+                    <td>
+                      {m.type === "IN" ? "+" : "-"}
+                      {m.qty}
+                    </td>
                     <td>{m.note ?? ""}</td>
                     <td>{m.created_by_email ?? "-"}</td>
                   </tr>

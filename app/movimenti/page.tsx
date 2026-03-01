@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
-import { BrowserMultiFormatReader } from "@zxing/browser";
+import BarcodeScanner from "../_components/BarcodeScanner";
 
 type DbItem = {
   code: string;
@@ -91,13 +91,6 @@ export default function MovimentiPage() {
   const [fWarehouse, setFWarehouse] = useState<string>("ALL");
   const [warehouses, setWarehouses] = useState<WarehouseOpt[]>([]);
 
-  // scanner
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
-  const [scanning, setScanning] = useState(false);
-  const scanLockedRef = useRef(false);
-  const lastScanRef = useRef<{ code: string; ts: number } | null>(null);
-
   async function loadSuggestions(text: string) {
     const s = text.trim();
     if (!s) {
@@ -122,11 +115,7 @@ export default function MovimentiPage() {
   }
 
   async function computeStockFor(code: string) {
-    const { data: item, error: e1 } = await supabase
-      .from("items")
-      .select("initial_qty")
-      .eq("code", code)
-      .single();
+    const { data: item, error: e1 } = await supabase.from("items").select("initial_qty").eq("code", code).single();
 
     if (e1) {
       console.error(e1);
@@ -136,10 +125,7 @@ export default function MovimentiPage() {
 
     const initial = Number((item as any)?.initial_qty ?? 0);
 
-    const { data: movs, error: e2 } = await supabase
-      .from("movements")
-      .select("type,qty")
-      .eq("code", code);
+    const { data: movs, error: e2 } = await supabase.from("movements").select("type,qty").eq("code", code);
 
     if (e2) {
       console.error(e2);
@@ -157,10 +143,7 @@ export default function MovimentiPage() {
   }
 
   async function loadWarehouses() {
-    const { data, error } = await supabase
-      .from("items")
-      .select("warehouse,warehouse_desc")
-      .limit(1000);
+    const { data, error } = await supabase.from("items").select("warehouse,warehouse_desc").limit(1000);
 
     if (error) {
       console.error("loadWarehouses:", error);
@@ -219,10 +202,7 @@ export default function MovimentiPage() {
       return;
     }
 
-    const { data: itemsData, error: e2 } = await supabase
-      .from("items")
-      .select("code,name")
-      .in("code", codes);
+    const { data: itemsData, error: e2 } = await supabase.from("items").select("code,name").in("code", codes);
 
     if (e2) {
       console.error("items nameMap error:", e2);
@@ -245,24 +225,17 @@ export default function MovimentiPage() {
     setOpen(false);
     setMsg(null);
 
-    // Selezionando da lista NON cambia tipo, resta come lo hai impostato
     await computeStockFor(it.code);
     await loadHistory(it.code);
 
-    setTimeout(() => qtyRef.current?.focus(), 50);
+    setTimeout(() => qtyRef.current?.focus(), 60);
   }
 
   async function pickItemByCode(scannedCode: string) {
     const code = scannedCode.trim();
     if (!code) return;
 
-    // anti-duplicato (se ripremi scan e legge lo stesso subito)
-    const prev = lastScanRef.current;
-    const now = Date.now();
-    if (prev && prev.code === code && now - prev.ts < 1500) return;
-    lastScanRef.current = { code, ts: now };
-
-    // Quando scansiono, di solito serve fare OUT rapido (prelievo)
+    // su scan: OUT rapido
     setType("OUT");
     setQty("");
     setMsg(null);
@@ -290,78 +263,9 @@ export default function MovimentiPage() {
     }
 
     await pickItem(item as DbItem);
-
-    // focus qty se non stai scrivendo nelle note
-    setTimeout(() => {
-      const ae = document.activeElement as HTMLElement | null;
-      const typing = ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA");
-      if (!typing) qtyRef.current?.focus();
-    }, 120);
   }
-
-  async function startScan() {
-    setMsg(null);
-    setOpen(false);
-
-    scanLockedRef.current = false;
-
-    setScanning(true);
-    await new Promise((r) => setTimeout(r, 120));
-
-    // ✅ reader nuovo a ogni start (evita "ultimo risultato")
-    readerRef.current = new BrowserMultiFormatReader();
-
-    // ✅ ignora i primi frame (stale/buffer)
-    const ignoreUntil = Date.now() + 600;
-
-    try {
-      const videoEl = videoRef.current;
-      if (!videoEl) throw new Error("Video non disponibile");
-
-      await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
-        if (!result) return;
-        if (Date.now() < ignoreUntil) return;
-        if (scanLockedRef.current) return;
-
-        scanLockedRef.current = true;
-
-        const text = result.getText();
-
-        stopScan();
-        await pickItemByCode(text);
-      });
-    } catch (e: any) {
-      console.error(e);
-      setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
-      setScanning(false);
-    }
-  }
-
-  function stopScan() {
-  // ✅ stop decoder (compatibile con più versioni di @zxing/browser)
-  try {
-    (readerRef.current as any)?.reset?.();
-  } catch {}
-  try {
-    (readerRef.current as any)?.stopContinuousDecode?.();
-  } catch {}
-
-  // spegne la camera
-  try {
-    const v = videoRef.current;
-    const stream = v?.srcObject as MediaStream | null;
-    if (stream) stream.getTracks().forEach((t) => t.stop());
-    if (v) v.srcObject = null;
-  } catch {}
-
-  // ✅ rilascia anche il reader
-  readerRef.current = null;
-
-  setScanning(false);
-}
 
   function clearAll() {
-    stopScan();
     setSearch("");
     setOpen(false);
     setSuggestions([]);
@@ -390,7 +294,7 @@ export default function MovimentiPage() {
       }
     }
 
-    // ✅ FIX: se in DB warehouse è NOT NULL, lo passiamo sempre
+    // ✅ warehouse (se NOT NULL nel DB)
     const wh = picked.warehouse ?? "UNKNOWN";
 
     const { error } = await supabase.from("movements").insert({
@@ -412,7 +316,7 @@ export default function MovimentiPage() {
     await computeStockFor(picked.code);
     await loadHistory(picked.code);
 
-    setTimeout(() => qtyRef.current?.focus(), 100);
+    setTimeout(() => qtyRef.current?.focus(), 80);
   }
 
   async function deleteMovement(id: string) {
@@ -467,12 +371,11 @@ export default function MovimentiPage() {
 
     return () => {
       document.removeEventListener("mousedown", onDocMouseDown);
-      stopScan();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // aggiorna suggerimenti (debounce leggero)
+  // debounce suggerimenti
   useEffect(() => {
     setActiveIndex(0);
     const t = setTimeout(() => {
@@ -551,7 +454,7 @@ export default function MovimentiPage() {
               </button>
 
               <div style={{ marginLeft: "auto", opacity: 0.75, fontSize: 12, alignSelf: "center" }}>
-                Permessi: {isAdmin ? "Admin" : "Operatore"}
+                Permessi: {isAdmin ? "Admin" : "Operatore"} · Utente: {userEmail ?? "-"}
               </div>
             </div>
           </div>
@@ -559,30 +462,28 @@ export default function MovimentiPage() {
           {/* FORM MOVIMENTO */}
           <div className="card" style={{ padding: 12, marginTop: 12 }}>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-              <button
-                className={`btn ${type === "IN" ? "btnPrimary" : ""}`}
-                onClick={() => setType("IN")}
-                type="button"
-              >
+              <button className={`btn ${type === "IN" ? "btnPrimary" : ""}`} onClick={() => setType("IN")} type="button">
                 Entrata
               </button>
-
-              <button
-                className={`btn ${type === "OUT" ? "btnPrimary" : ""}`}
-                onClick={() => setType("OUT")}
-                type="button"
-              >
+              <button className={`btn ${type === "OUT" ? "btnPrimary" : ""}`} onClick={() => setType("OUT")} type="button">
                 Uscita
               </button>
 
               <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button className="btn" type="button" onClick={() => (scanning ? stopScan() : startScan())}>
-                  {scanning ? "Chiudi camera" : "Scanner"}
-                </button>
                 <button className="btn" type="button" onClick={clearAll}>
                   Pulisci
                 </button>
               </div>
+            </div>
+
+            {/* ✅ SCANNER UNICO (iOS friendly) */}
+            <div style={{ marginTop: 12 }}>
+              <BarcodeScanner
+                onDetected={async (code) => {
+                  await pickItemByCode(code);
+                }}
+                onError={(m) => setMsg("Errore camera/scansione: " + m)}
+              />
             </div>
 
             <div ref={boxRef} style={{ position: "relative", marginTop: 12 }}>
@@ -661,36 +562,15 @@ export default function MovimentiPage() {
               )}
             </div>
 
-            {scanning && (
-              <div style={{ marginTop: 12 }}>
-                <video ref={videoRef} style={{ width: "100%", borderRadius: 12, background: "black" }} muted playsInline />
-                <div style={{ fontSize: 12, opacity: 0.85, marginTop: 6 }}>
-                  Inquadra il codice a barre con la fotocamera.
-                </div>
-              </div>
-            )}
-
             <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10, marginTop: 12 }}>
               <div style={{ gridColumn: "span 8" }}>
                 <label className="label">Note (opz.)</label>
-                <input
-                  className="input"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="DDT / commessa / cliente"
-                />
+                <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="DDT / commessa / cliente" />
               </div>
 
               <div style={{ gridColumn: "span 3" }}>
                 <label className="label">Quantità</label>
-                <input
-                  ref={qtyRef}
-                  className="input"
-                  value={qty}
-                  onChange={(e) => setQty(e.target.value)}
-                  inputMode="decimal"
-                  placeholder="es. 5"
-                />
+                <input ref={qtyRef} className="input" value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="es. 5" />
               </div>
 
               <div style={{ gridColumn: "span 1", display: "flex", alignItems: "end" }}>
@@ -706,10 +586,8 @@ export default function MovimentiPage() {
                   <b>{picked.code}</b> · {picked.name}
                 </div>
                 <div style={{ marginTop: 4 }}>
-                  Magazzino:{" "}
-                  <b>{[picked.warehouse, picked.warehouse_desc].filter(Boolean).join(" - ") || "-"}</b>{" "}
-                  · UM: <b>{picked.um ?? "-"}</b> · Iniziale: <b>{picked.initial_qty ?? 0}</b> · Giacenza:{" "}
-                  <b>{stock ?? 0}</b>
+                  Magazzino: <b>{[picked.warehouse, picked.warehouse_desc].filter(Boolean).join(" - ") || "-"}</b> · UM:{" "}
+                  <b>{picked.um ?? "-"}</b> · Iniziale: <b>{picked.initial_qty ?? 0}</b> · Giacenza: <b>{stock ?? 0}</b>
                 </div>
               </div>
             )}
@@ -720,10 +598,7 @@ export default function MovimentiPage() {
           {/* STORICO */}
           <div className="card" style={{ padding: 12, marginTop: 12 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-              <div style={{ fontWeight: 900 }}>
-                Storico movimenti {picked ? `(solo ${picked.code})` : "(ultimi)"}
-              </div>
-
+              <div style={{ fontWeight: 900 }}>Storico movimenti {picked ? `(solo ${picked.code})` : "(ultimi)"}</div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <button className="btn" onClick={() => loadHistory(picked?.code)}>
                   Aggiorna
@@ -746,7 +621,6 @@ export default function MovimentiPage() {
                     <th>Azioni</th>
                   </tr>
                 </thead>
-
                 <tbody>
                   {history.map((m) => (
                     <tr key={m.id}>
@@ -776,7 +650,6 @@ export default function MovimentiPage() {
                       </td>
                     </tr>
                   ))}
-
                   {history.length === 0 && (
                     <tr>
                       <td colSpan={9} style={{ padding: 12, color: "#0f172a" }}>

@@ -191,46 +191,32 @@ export default function Home() {
   setMsg(null);
   setOpen(false);
 
-  // ✅ chiudi eventuale sessione precedente rimasta appesa
+  // 🔥 reset totale prima di riaprire
   stopScan();
 
-  // ✅ sblocca per nuova scansione
   scanLockedRef.current = false;
+  lastScanRef.current = null;
+
   setScanning(true);
 
-  // aspetta render <video>
-  await new Promise((r) => setTimeout(r, 150));
-
-  // ✅ reader NUOVO ogni volta (evita “ultimo risultato”)
-  readerRef.current = new BrowserMultiFormatReader();
-
-  // ✅ ignora i primi frame (spesso buffer/risultato vecchio)
-  const ignoreUntil = Date.now() + 650;
+  await new Promise((r) => setTimeout(r, 200));
 
   try {
     const videoEl = videoRef.current;
     if (!videoEl) throw new Error("Video non disponibile");
+
+    // 🔥 READER SEMPRE NUOVO (fondamentale su iOS)
+    readerRef.current = new BrowserMultiFormatReader();
 
     await readerRef.current.decodeFromVideoDevice(
       undefined,
       videoEl,
       async (result) => {
         if (!result) return;
-
-        // ignora risultati subito dopo l'avvio
-        if (Date.now() < ignoreUntil) return;
-
-        // evita doppie letture
         if (scanLockedRef.current) return;
 
         const text = String(result.getText?.() ?? "").trim();
         if (!text) return;
-
-        // anti-duplicato rapido (stesso codice letto subito)
-        const prev = lastScanRef.current;
-        const now = Date.now();
-        if (prev && prev.code === text && now - prev.ts < 1500) return;
-        lastScanRef.current = { code: text, ts: now };
 
         scanLockedRef.current = true;
 
@@ -239,8 +225,7 @@ export default function Home() {
       }
     );
   } catch (e: any) {
-    console.error(e);
-    setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
+    setMsg("Errore camera: " + (e?.message ?? "sconosciuto"));
     stopScan();
   }
 }

@@ -11,8 +11,9 @@ type Movement = {
   code: string;
   qty: number;
   note: string | null;
+  created_by: string | null;
   created_by_email: string | null;
-  created_by_name: string | null; // ✅
+  warehouse: string | null;
 };
 
 type DbItem = {
@@ -25,11 +26,7 @@ type DbItem = {
 };
 
 function isSameDay(d: Date, ref: Date) {
-  return (
-    d.getFullYear() === ref.getFullYear() &&
-    d.getMonth() === ref.getMonth() &&
-    d.getDate() === ref.getDate()
-  );
+  return d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth() && d.getDate() === ref.getDate();
 }
 
 function fmtDate(iso: string) {
@@ -50,6 +47,9 @@ export default function Home() {
   const [itemsCount, setItemsCount] = useState<number>(0);
   const [movements, setMovements] = useState<Movement[]>([]);
 
+  // user map (id -> "Nome Cognome · Badge X")
+  const [userMap, setUserMap] = useState<Record<string, string>>({});
+
   // search
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
@@ -65,7 +65,6 @@ export default function Home() {
   // scanner
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
-
   const [scanning, setScanning] = useState(false);
   const scanLockedRef = useRef(false);
   const lastScanRef = useRef<{ code: string; ts: number } | null>(null);
@@ -94,25 +93,15 @@ export default function Home() {
   }
 
   async function computeStockFor(code: string) {
-    const { data: item, error: e1 } = await supabase
-      .from("items")
-      .select("initial_qty")
-      .eq("code", code)
-      .single();
-
+    const { data: item, error: e1 } = await supabase.from("items").select("initial_qty").eq("code", code).single();
     if (e1) {
       console.error(e1);
       setStock(null);
       return;
     }
-
     const initial = Number((item as any)?.initial_qty ?? 0);
 
-    const { data: movs, error: e2 } = await supabase
-      .from("movements")
-      .select("type,qty")
-      .eq("code", code);
-
+    const { data: movs, error: e2 } = await supabase.from("movements").select("type,qty").eq("code", code);
     if (e2) {
       console.error(e2);
       setStock(initial);
@@ -124,7 +113,6 @@ export default function Home() {
       const v = Number((m as any).qty ?? 0);
       delta += (m as any).type === "IN" ? v : -v;
     }
-
     setStock(initial + delta);
   }
 
@@ -139,6 +127,11 @@ export default function Home() {
   async function pickItemByCode(codeRaw: string) {
     const code = codeRaw.trim();
     if (!code) return;
+
+    const prev = lastScanRef.current;
+    const now = Date.now();
+    if (prev && prev.code === code && now - prev.ts < 1500) return;
+    lastScanRef.current = { code, ts: now };
 
     const { data: item, error } = await supabase
       .from("items")
@@ -173,7 +166,6 @@ export default function Home() {
     try {
       (readerRef.current as any)?.stopContinuousDecode?.();
     } catch {}
-    readerRef.current = null;
 
     try {
       const v = videoRef.current;
@@ -182,6 +174,7 @@ export default function Home() {
       if (v) v.srcObject = null;
     } catch {}
 
+    readerRef.current = null;
     setScanning(false);
   }
 
@@ -201,18 +194,15 @@ export default function Home() {
       if (!videoEl) throw new Error("Video non disponibile");
 
       readerRef.current = new BrowserMultiFormatReader();
+      const ignoreUntil = Date.now() + 600;
 
       await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
         if (!result) return;
+        if (Date.now() < ignoreUntil) return;
         if (scanLockedRef.current) return;
 
         const text = String(result.getText?.() ?? "").trim();
         if (!text) return;
-
-        const prev = lastScanRef.current;
-        const now = Date.now();
-        if (prev && prev.code === text && now - prev.ts < 1500) return;
-        lastScanRef.current = { code: text, ts: now };
 
         scanLockedRef.current = true;
 
@@ -220,6 +210,7 @@ export default function Home() {
         await pickItemByCode(text);
       });
     } catch (e: any) {
+      console.error(e);
       setMsg("Errore camera: " + (e?.message ?? "sconosciuto"));
       stopScan();
     }
@@ -238,37 +229,93 @@ export default function Home() {
     setMsg(null);
   }
 
-  // dashboard load
+  async function refreshDashboard() {
+    setLoading(true);
+
+    const { count: cItems, error: eItems } = await supabase.from("items").select("code", { count: "exact", head: true });
+
+    const { data: movs, error: eMovs } = await supabase
+      .from("movements")
+      .select("id,created_at,type,code,qty,note,created_by,created_by_email,warehouse")
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    if (eItems) console.error(eItems);
+    if (eMovs) console.error(eMovs);
+
+    const rows = (movs ?? []) as Movement[];
+    setItemsCount(cItems ?? 0);
+    setMovements(rows);
+    setLoading(false);
+
+    // carica nomi/badge per "Inserito da"
+    const ids = Array.from(new Set(rows.map((r) => r.created_by).filter(Boolean) as string[]));
+    if (ids.length === 0) {
+      setUserMap({});
+      return;
+    }
+
+    const { data: prof, error: eP } = await supabase
+      .from("profiles")
+      .select("id,first_name,last_name,badge_number")
+      .in("id", ids);
+
+    if (eP) {
+      console.error("profiles load error:", eP);
+      setUserMap({});
+      return;
+    }
+
+    const map: Record<string, string> = {};
+    for (const p of prof ?? []) {
+      const id = (p as any).id as string;
+      const first = String((p as any).first_name ?? "").trim();
+      const last = String((p as any).last_name ?? "").trim();
+      const badge = String((p as any).badge_number ?? "").trim();
+      const full = [first, last].filter(Boolean).join(" ").trim();
+      const badgePart = badge ? ` · Badge ${badge}` : "";
+      map[id] = (full || "Operatore") + badgePart;
+    }
+    setUserMap(map);
+  }
+
+  // initial load
   useEffect(() => {
     let alive = true;
 
     (async () => {
-      setLoading(true);
-
-      const { count: cItems, error: eItems } = await supabase
-        .from("items")
-        .select("code", { count: "exact", head: true });
-
-      // ✅ aggiunto created_by_name
-      const { data: movs, error: eMovs } = await supabase
-        .from("movements")
-        .select("id,created_at,type,code,qty,note,created_by_email,created_by_name")
-        .order("created_at", { ascending: false })
-        .limit(100);
-
+      await refreshDashboard();
       if (!alive) return;
-
-      if (eItems) console.error(eItems);
-      if (eMovs) console.error(eMovs);
-
-      setItemsCount(cItems ?? 0);
-      setMovements((movs ?? []) as Movement[]);
-      setLoading(false);
     })();
 
     return () => {
       alive = false;
       stopScan();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ✅ realtime dashboard (movements live)
+  useEffect(() => {
+    let alive = true;
+    let timer: any = null;
+
+    const ch = supabase
+      .channel("dashboard-movements-live")
+      .on("postgres_changes", { event: "*", schema: "public", table: "movements" }, async () => {
+        if (!alive) return;
+        if (timer) clearTimeout(timer);
+
+        timer = setTimeout(async () => {
+          await refreshDashboard();
+        }, 250);
+      })
+      .subscribe();
+
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+      supabase.removeChannel(ch);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -315,8 +362,8 @@ export default function Home() {
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <a className="btn btnPrimary" href="/movimenti"> Nuovo movimento</a>
-          <a className="btn" href="/giacenze"> Vai a giacenze</a>
+          <a className="btn btnPrimary" href="/movimenti">➕/➖ Nuovo movimento</a>
+          <a className="btn" href="/giacenze">📦 Vai a giacenze</a>
         </div>
       </div>
 
@@ -324,7 +371,7 @@ export default function Home() {
       <div className="glass" style={{ marginTop: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div>
-            <div style={{ fontWeight: 900, fontSize: 16 }}> Cerca materiale</div>
+            <div style={{ fontWeight: 900, fontSize: 16 }}>🔎 Cerca materiale</div>
             <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
               Cerca per codice/descrizione oppure scansiona il barcode.
             </div>
@@ -332,7 +379,7 @@ export default function Home() {
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button className="btn" onClick={() => (scanning ? stopScan() : startScan())}>
-              {scanning ? "⏹ Ferma scansione" : " Scansiona barcode"}
+              {scanning ? "⏹ Ferma scansione" : "📷 Scansiona barcode"}
             </button>
             <button className="btn" onClick={resetSearch}>Pulisci</button>
           </div>
@@ -418,7 +465,9 @@ export default function Home() {
         {scanning && (
           <div style={{ marginTop: 12 }}>
             <video ref={videoRef} style={{ width: "100%", borderRadius: 12, background: "black" }} muted playsInline />
-            <div style={{ fontSize: 12, marginTop: 6, opacity: 0.9 }}>Inquadra il codice a barre con la fotocamera.</div>
+            <div style={{ fontSize: 12, marginTop: 6, opacity: 0.9 }}>
+              Inquadra il codice a barre con la fotocamera.
+            </div>
           </div>
         )}
 
@@ -444,8 +493,12 @@ export default function Home() {
 
             <div style={{ gridColumn: "span 3" }} className="glass">
               <div style={{ opacity: 0.85, fontSize: 12 }}>Giacenza attuale</div>
-              <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6 }}>{stock === null ? "…" : stock}</div>
-              <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>(iniziale {picked.initial_qty ?? 0} + movimenti)</div>
+              <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6 }}>
+                {stock === null ? "…" : stock}
+              </div>
+              <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>
+                (iniziale {picked.initial_qty ?? 0} + movimenti)
+              </div>
             </div>
           </div>
         )}
@@ -455,22 +508,34 @@ export default function Home() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 12, marginTop: 14 }}>
         <div className="glass" style={{ gridColumn: "span 4" }}>
           <div style={{ opacity: 0.85, fontSize: 12 }}>Materiali</div>
-          <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>{loading ? "…" : itemsCount}</div>
+          <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>
+            {loading ? "…" : itemsCount}
+          </div>
           <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>Codici in anagrafica</div>
         </div>
 
         <div className="glass" style={{ gridColumn: "span 4" }}>
           <div style={{ opacity: 0.85, fontSize: 12 }}>Movimenti oggi</div>
-          <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>{loading ? "…" : movementsToday}</div>
-          <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>Entrate/uscite registrate oggi</div>
+          <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>
+            {loading ? "…" : movementsToday}
+          </div>
+          <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>
+            Entrate/uscite registrate oggi
+          </div>
         </div>
 
         <div className="glass" style={{ gridColumn: "span 4" }}>
           <div style={{ opacity: 0.85, fontSize: 12 }}>Ultimo movimento</div>
           <div style={{ marginTop: 8, fontWeight: 800 }}>
-            {loading ? "…" : lastMovement ? `${lastMovement.code} · ${lastMovement.type === "IN" ? "Entrata" : "Uscita"}` : "—"}
+            {loading
+              ? "…"
+              : lastMovement
+              ? `${lastMovement.code} · ${lastMovement.type === "IN" ? "Entrata" : "Uscita"}`
+              : "—"}
           </div>
-          <div style={{ opacity: 0.85, fontSize: 12, marginTop: 6 }}>{loading ? "" : lastMovement ? fmtDate(lastMovement.created_at) : ""}</div>
+          <div style={{ opacity: 0.85, fontSize: 12, marginTop: 6 }}>
+            {loading ? "" : lastMovement ? fmtDate(lastMovement.created_at) : ""}
+          </div>
         </div>
       </div>
 
@@ -507,25 +572,26 @@ export default function Home() {
                   </td>
                 </tr>
               ) : (
-                last10.map((m) => (
-                  <tr key={m.id}>
-                    <td>{fmtDate(m.created_at)}</td>
-                    <td>
-                      <span className={`badge ${m.type === "IN" ? "badgeIn" : "badgeOut"}`}>
-                        {m.type === "IN" ? "Entrata" : "Uscita"}
-                      </span>
-                    </td>
-                    <td>{m.code}</td>
-                    <td>
-                      {m.type === "IN" ? "+" : "-"}
-                      {m.qty}
-                    </td>
-                    <td>{m.note ?? ""}</td>
-
-                    {/* ✅ nome con fallback su email */}
-                    <td>{m.created_by_name ?? m.created_by_email ?? "-"}</td>
-                  </tr>
-                ))
+                last10.map((m) => {
+                  const who = (m.created_by && userMap[m.created_by]) || m.created_by_email || "-";
+                  return (
+                    <tr key={m.id}>
+                      <td>{fmtDate(m.created_at)}</td>
+                      <td>
+                        <span className={`badge ${m.type === "IN" ? "badgeIn" : "badgeOut"}`}>
+                          {m.type === "IN" ? "Entrata" : "Uscita"}
+                        </span>
+                      </td>
+                      <td>{m.code}</td>
+                      <td>
+                        {m.type === "IN" ? "+" : "-"}
+                        {m.qty}
+                      </td>
+                      <td>{m.note ?? ""}</td>
+                      <td>{who}</td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

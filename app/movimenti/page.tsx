@@ -455,30 +455,7 @@ export default function MovimentiPage() {
       }
       setIsAdmin(!!isAdm);
     });
-    useEffect(() => {
-  let alive = true;
-
-  const channel = supabase
-    .channel("movements-live")
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "movements" },
-      async () => {
-        if (!alive) return;
-        // ricarica lo storico con l’eventuale filtro "picked"
-        await loadHistory(picked?.code);
-      }
-    )
-    .subscribe((status) => {
-      console.log("Realtime status:", status);
-    });
-
-  return () => {
-    alive = false;
-    supabase.removeChannel(channel);
-  };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [picked?.code]);
+    
 
     function onDocMouseDown(e: MouseEvent) {
       if (!boxRef.current) return;

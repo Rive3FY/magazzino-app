@@ -362,8 +362,8 @@ export default function Home() {
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <a className="btn btnPrimary" href="/movimenti">➕/➖ Nuovo movimento</a>
-          <a className="btn" href="/giacenze">📦 Vai a giacenze</a>
+          <a className="btn btnPrimary" href="/movimenti"> Nuovo movimento</a>
+          <a className="btn" href="/giacenze"> Vai a giacenze</a>
         </div>
       </div>
 
@@ -371,7 +371,7 @@ export default function Home() {
       <div className="glass" style={{ marginTop: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div>
-            <div style={{ fontWeight: 900, fontSize: 16 }}>🔎 Cerca materiale</div>
+            <div style={{ fontWeight: 900, fontSize: 16 }}> Cerca materiale</div>
             <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
               Cerca per codice/descrizione oppure scansiona il barcode.
             </div>
@@ -379,7 +379,7 @@ export default function Home() {
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button className="btn" onClick={() => (scanning ? stopScan() : startScan())}>
-              {scanning ? "⏹ Ferma scansione" : "📷 Scansiona barcode"}
+              {scanning ? "⏹ Ferma scansione" : " Scansiona barcode"}
             </button>
             <button className="btn" onClick={resetSearch}>Pulisci</button>
           </div>

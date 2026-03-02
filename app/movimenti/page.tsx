@@ -4,10 +4,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 
+type Warehouse = "PRM" | "REALE";
+
 type DbItem = {
   code: string;
   name: string;
   um: string | null;
+};
+
+type DbStockRow = {
+  code: string;
+  warehouse: Warehouse;
+  initial_qty: number | null;
 };
 
 type DbMovement = {
@@ -17,14 +25,14 @@ type DbMovement = {
   code: string;
   qty: number;
   note: string | null;
+  warehouse: Warehouse | null;
+  pending: boolean;
   created_by: string | null;
-  created_by_name: string | null;
   created_by_email: string | null;
-  warehouse: "PRM" | "REALE" | null;
-  pending: boolean | null;
+  created_by_name: string | null;
 };
 
-type WarehouseKey = "PRM" | "REALE" | "ALL";
+type StockBoth = { PRM: number; REALE: number };
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
@@ -41,14 +49,18 @@ function toNumber(v: string) {
   return Number.isFinite(n) ? n : NaN;
 }
 
-// date input helper (yyyy-mm-dd)
-function toIsoStartOfDay(d: string) {
-  if (!d) return null;
-  return new Date(`${d}T00:00:00.000`).toISOString();
+function n(v: any) {
+  const x = Number(v ?? 0);
+  return Number.isFinite(x) ? x : 0;
 }
-function toIsoEndOfDay(d: string) {
-  if (!d) return null;
-  return new Date(`${d}T23:59:59.999`).toISOString();
+
+function whereLabel(st: StockBoth) {
+  const a = st.PRM > 0;
+  const b = st.REALE > 0;
+  if (a && b) return "Entrambi";
+  if (a) return "PRM";
+  if (b) return "REALE";
+  return "Nessuno";
 }
 
 export default function MovimentiPage() {
@@ -64,7 +76,7 @@ export default function MovimentiPage() {
 
   // movimento form
   const [type, setType] = useState<"IN" | "OUT">("IN");
-  const [warehouse, setWarehouse] = useState<"PRM" | "REALE">("PRM");
+  const [warehouse, setWarehouse] = useState<Warehouse>("PRM");
   const [qty, setQty] = useState("");
   const [note, setNote] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
@@ -75,10 +87,14 @@ export default function MovimentiPage() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [suggestions, setSuggestions] = useState<DbItem[]>([]);
   const [picked, setPicked] = useState<DbItem | null>(null);
+
   const boxRef = useRef<HTMLDivElement | null>(null);
   const qtyRef = useRef<HTMLInputElement | null>(null);
 
-  // storico + map code->name
+  // stock
+  const [stock, setStock] = useState<StockBoth | null>(null);
+
+  // storico
   const [history, setHistory] = useState<DbMovement[]>([]);
   const [nameMap, setNameMap] = useState<Record<string, string>>({});
 
@@ -86,45 +102,51 @@ export default function MovimentiPage() {
   const [fFrom, setFFrom] = useState(""); // yyyy-mm-dd
   const [fTo, setFTo] = useState("");
   const [fType, setFType] = useState<"ALL" | "IN" | "OUT">("ALL");
-  const [fWarehouse, setFWarehouse] = useState<WarehouseKey>("ALL");
-  const [fPending, setFPending] = useState<"ALL" | "PENDING" | "CLOSED">("ALL");
+  const [fWarehouse, setFWarehouse] = useState<"ALL" | Warehouse>("ALL");
+  const [onlyPicked, setOnlyPicked] = useState(false);
+
+  // date helper
+  function toIsoStartOfDay(d: string) {
+    if (!d) return null;
+    return new Date(`${d}T00:00:00.000`).toISOString();
+  }
+  function toIsoEndOfDay(d: string) {
+    if (!d) return null;
+    return new Date(`${d}T23:59:59.999`).toISOString();
+  }
 
   // scanner
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const [scanning, setScanning] = useState(false);
   const scanLockedRef = useRef(false);
-  const lastScanRef = useRef<{ code: string; ts: number } | null>(null);
 
-  // MODAL chiusura
-  const [closeOpen, setCloseOpen] = useState(false);
+  // modal chiusura
   const [closing, setClosing] = useState<DbMovement | null>(null);
-  const [returnQty, setReturnQty] = useState(""); // opzionale
-  const [closeNote, setCloseNote] = useState(""); // opzionale
+  const [returnQty, setReturnQty] = useState("");
+  const [closeNote, setCloseNote] = useState("");
   const [busyClose, setBusyClose] = useState(false);
 
   function openCloseModal(m: DbMovement) {
     setClosing(m);
     setReturnQty("");
     setCloseNote("");
-    setCloseOpen(true);
+    setMsg(null);
   }
 
   function closeCloseModal() {
-    setCloseOpen(false);
     setClosing(null);
     setReturnQty("");
     setCloseNote("");
     setBusyClose(false);
   }
 
-  // 🔒 può chiudere solo OUT + pending=true
   function canCloseMovement(m: DbMovement) {
-    if (m.type !== "OUT") return false;
-    if (!m.pending) return false; // già chiuso
+    // admin sempre, altrimenti solo chi ha creato la riga (se created_by c’è)
     if (isAdmin) return true;
-    if (userId && m.created_by && userId === m.created_by) return true;
-    return false;
+    if (!userId) return false;
+    if (!m.created_by) return false;
+    return m.created_by === userId;
   }
 
   async function loadSuggestions(text: string) {
@@ -149,78 +171,58 @@ export default function MovimentiPage() {
         code: (error as any)?.code,
         raw: error,
       });
-      setSuggestions([]);
       setMsg("Errore ricerca: " + ((error as any)?.message ?? "sconosciuto"));
+      setSuggestions([]);
       return;
     }
 
     setSuggestions((data ?? []) as DbItem[]);
   }
 
-  async function loadHistory() {
-    let q = supabase
+  async function computeStockBoth(code: string) {
+    // base (item_stocks)
+    const { data: base, error: eBase } = await supabase
+      .from("item_stocks")
+      .select("code,warehouse,initial_qty")
+      .eq("code", code);
+
+    if (eBase) {
+      console.error("item_stocks error:", eBase);
+      setStock(null);
+      return;
+    }
+
+    let basePRM = 0;
+    let baseREALE = 0;
+    for (const r of (base ?? []) as DbStockRow[]) {
+      if (r.warehouse === "PRM") basePRM = n(r.initial_qty);
+      if (r.warehouse === "REALE") baseREALE = n(r.initial_qty);
+    }
+
+    // delta movements
+    const { data: movs, error: eMovs } = await supabase
       .from("movements")
-      .select(
-        "id,created_at,type,code,qty,note,created_by,created_by_name,created_by_email,warehouse,pending"
-      )
-      .order("created_at", { ascending: false })
-      .limit(200);
+      .select("warehouse,type,qty")
+      .eq("code", code);
 
-    // filtri
-    const isoFrom = toIsoStartOfDay(fFrom);
-    const isoTo = toIsoEndOfDay(fTo);
-    if (isoFrom) q = q.gte("created_at", isoFrom);
-    if (isoTo) q = q.lte("created_at", isoTo);
-    if (fType !== "ALL") q = q.eq("type", fType);
-    if (fWarehouse !== "ALL") q = q.eq("warehouse", fWarehouse);
-
-    if (fPending === "PENDING") q = q.eq("pending", true);
-    if (fPending === "CLOSED") q = q.eq("pending", false);
-
-    const { data, error } = await q;
-
-    if (error) {
-      console.error("loadHistory error:", {
-        message: (error as any)?.message,
-        details: (error as any)?.details,
-        hint: (error as any)?.hint,
-        code: (error as any)?.code,
-        raw: error,
-      });
-      setHistory([]);
-      setNameMap({});
-      setMsg("Errore storico: " + ((error as any)?.message ?? "sconosciuto"));
+    if (eMovs) {
+      console.error("movements stock error:", eMovs);
+      setStock({ PRM: basePRM, REALE: baseREALE });
       return;
     }
 
-    const rows = (data ?? []) as DbMovement[];
-    setHistory(rows);
-
-    // mappa code->name
-    const codes = Array.from(new Set(rows.map((r) => r.code).filter(Boolean)));
-    if (codes.length === 0) {
-      setNameMap({});
-      return;
+    let dPRM = 0;
+    let dREALE = 0;
+    for (const m of movs ?? []) {
+      const wh = (m as any).warehouse as Warehouse | null;
+      const t = (m as any).type as "IN" | "OUT";
+      const q = n((m as any).qty);
+      const signed = t === "IN" ? q : -q;
+      if (wh === "PRM") dPRM += signed;
+      if (wh === "REALE") dREALE += signed;
     }
 
-    const { data: itemsData, error: e2 } = await supabase
-      .from("items")
-      .select("code,name")
-      .in("code", codes);
-
-    if (e2) {
-      console.error("items nameMap error:", e2);
-      setNameMap({});
-      return;
-    }
-
-    const map: Record<string, string> = {};
-    for (const it of itemsData ?? []) {
-      const c = (it as any).code as string;
-      const n = (it as any).name as string | null;
-      if (c) map[c] = n ?? "";
-    }
-    setNameMap(map);
+    setStock({ PRM: basePRM + dPRM, REALE: baseREALE + dREALE });
   }
 
   async function pickItem(it: DbItem) {
@@ -228,23 +230,17 @@ export default function MovimentiPage() {
     setSearch(`${it.code} — ${it.name}`);
     setOpen(false);
     setMsg(null);
-
-    // ✅ storico SEMPRE globale (non filtrare per codice)
-    await loadHistory();
-
-    setTimeout(() => qtyRef.current?.focus(), 50);
+    await computeStockBoth(it.code);
+    setTimeout(() => qtyRef.current?.focus(), 80);
   }
 
-  async function pickItemByCode(scannedCode: string) {
-    const code = scannedCode.trim();
+  async function pickItemByCode(codeRaw: string) {
+    const code = codeRaw.trim();
     if (!code) return;
 
-    // anti-duplicato
-    const prev = lastScanRef.current;
-    const now = Date.now();
-    if (prev && prev.code === code && now - prev.ts < 1500) return;
-    lastScanRef.current = { code, ts: now };
-
+    // quando scansiono: di default prelievo (OUT) veloce
+    setType("OUT");
+    setQty("");
     setMsg(null);
 
     const { data: item, error } = await supabase
@@ -261,6 +257,7 @@ export default function MovimentiPage() {
 
     if (!item) {
       setPicked(null);
+      setStock(null);
       setMsg(`Codice "${code}" non trovato in anagrafica.`);
       setSearch(code);
       setOpen(true);
@@ -269,40 +266,6 @@ export default function MovimentiPage() {
     }
 
     await pickItem(item as DbItem);
-  }
-
-  async function startScan() {
-    setMsg(null);
-    setOpen(false);
-
-    stopScan();
-    scanLockedRef.current = false;
-
-    setScanning(true);
-    await new Promise((r) => setTimeout(r, 200));
-
-    readerRef.current = new BrowserMultiFormatReader();
-
-    try {
-      const videoEl = videoRef.current;
-      if (!videoEl) throw new Error("Video non disponibile");
-
-      await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
-        if (!result) return;
-        if (scanLockedRef.current) return;
-
-        const text = String(result.getText?.() ?? "").trim();
-        if (!text) return;
-
-        scanLockedRef.current = true;
-        stopScan();
-        await pickItemByCode(text);
-      });
-    } catch (e: any) {
-      console.error(e);
-      setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
-      stopScan();
-    }
   }
 
   function stopScan() {
@@ -324,16 +287,116 @@ export default function MovimentiPage() {
     setScanning(false);
   }
 
+  async function startScan() {
+    setMsg(null);
+    setOpen(false);
+
+    // reset “duro” prima di ripartire (iOS friendly)
+    stopScan();
+    scanLockedRef.current = false;
+
+    setScanning(true);
+    await new Promise((r) => setTimeout(r, 200));
+
+    try {
+      const videoEl = videoRef.current;
+      if (!videoEl) throw new Error("Video non disponibile");
+
+      readerRef.current = new BrowserMultiFormatReader();
+
+      await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
+        if (!result) return;
+        if (scanLockedRef.current) return;
+
+        const text = String(result.getText?.() ?? "").trim();
+        if (!text) return;
+
+        scanLockedRef.current = true;
+
+        stopScan();
+        await pickItemByCode(text);
+      });
+    } catch (e: any) {
+      console.error(e);
+      setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
+      stopScan();
+    }
+  }
+
   function clearAll() {
     stopScan();
     setSearch("");
     setOpen(false);
     setSuggestions([]);
     setPicked(null);
+    setStock(null);
     setQty("");
     setNote("");
     setMsg(null);
+    // NON cambiamo filtri storico
     loadHistory();
+  }
+
+  async function loadHistory() {
+    let q = supabase
+      .from("movements")
+      .select("id,created_at,type,code,qty,note,warehouse,pending,created_by,created_by_email,created_by_name")
+      .order("created_at", { ascending: false })
+      .limit(250);
+
+    // filtri
+    const isoFrom = toIsoStartOfDay(fFrom);
+    const isoTo = toIsoEndOfDay(fTo);
+    if (isoFrom) q = q.gte("created_at", isoFrom);
+    if (isoTo) q = q.lte("created_at", isoTo);
+    if (fType !== "ALL") q = q.eq("type", fType);
+    if (fWarehouse !== "ALL") q = q.eq("warehouse", fWarehouse);
+
+    // SOLO se l’utente lo decide esplicitamente
+    if (onlyPicked && picked?.code) q = q.eq("code", picked.code);
+
+    const { data, error } = await q;
+
+    if (error) {
+      console.error("loadHistory error:", {
+        message: (error as any)?.message,
+        details: (error as any)?.details,
+        hint: (error as any)?.hint,
+        code: (error as any)?.code,
+        raw: error,
+      });
+      setHistory([]);
+      setNameMap({});
+      return;
+    }
+
+    const rows = (data ?? []) as DbMovement[];
+    setHistory(rows);
+
+    const codes = Array.from(new Set(rows.map((r) => r.code).filter(Boolean)));
+    if (codes.length === 0) {
+      setNameMap({});
+      return;
+    }
+
+    const { data: itemsData, error: e2 } = await supabase
+      .from("items")
+      .select("code,name")
+      .in("code", codes);
+
+    if (e2) {
+      console.error("items nameMap error:", e2);
+      setNameMap({});
+      return;
+    }
+
+    const map: Record<string, string> = {};
+    for (const it of itemsData ?? []) {
+      const c = (it as any).code as string;
+      const nme = (it as any).name as string | null;
+      if (c) map[c] = nme ?? "";
+    }
+    setNameMap(map);
   }
 
   async function save() {
@@ -342,35 +405,42 @@ export default function MovimentiPage() {
     if (!userId) return setMsg("Devi essere loggato per salvare movimenti.");
     if (!picked) return setMsg("Seleziona un materiale (scrivi per cercare o scansiona).");
 
-    const nQty = toNumber(qty);
-    if (!Number.isFinite(nQty) || nQty <= 0) return setMsg("Quantità non valida (deve essere > 0).");
+    const q = toNumber(qty);
+    if (!Number.isFinite(q) || q <= 0) return setMsg("Quantità non valida (deve essere > 0).");
 
-    // ✅ OUT normale, ma lo salviamo "pending" finché non viene chiuso
-    const pending = type === "OUT";
+    // blocco uscita sotto zero (per magazzino selezionato)
+    if (type === "OUT") {
+      const s = stock ?? { PRM: 0, REALE: 0 };
+      const current = warehouse === "PRM" ? s.PRM : s.REALE;
+      if (current - q < 0) {
+        return setMsg(`Uscita non possibile: giacenza ${current} → diventerebbe ${current - q}.`);
+      }
+    }
 
     const payload = {
       type,
       code: picked.code,
-      qty: nQty,
+      qty: q,
       note: note.trim() || null,
+      warehouse,
+      // se hai trigger DB che imposta pending per OUT, va bene lo stesso; qui lo mettiamo esplicito:
+      pending: type === "OUT",
       created_by: userId,
       created_by_email: userEmail,
       created_by_name: userName,
-      warehouse,
-      pending,
     };
 
-    const { error } = await supabase.from("movements").insert(payload);
-
+    const { error } = await supabase.from("movements").insert(payload as any);
     if (error) return setMsg("Errore salvataggio: " + (error as any)?.message);
 
     setQty("");
     setNote("");
     setMsg("Movimento salvato ✅");
 
-    // ✅ storico globale
+    await computeStockBoth(picked.code);
     await loadHistory();
-    setTimeout(() => qtyRef.current?.focus(), 100);
+
+    setTimeout(() => qtyRef.current?.focus(), 80);
   }
 
   async function deleteMovement(id: string) {
@@ -383,27 +453,30 @@ export default function MovimentiPage() {
     if (!ok) return;
 
     const { error } = await supabase.from("movements").delete().eq("id", id);
-
     if (error) {
-      console.error("DELETE error:", error);
       alert("Non posso eliminare: " + (error as any)?.message);
       return;
     }
 
+    // aggiorno stock se serve
+    if (picked?.code) await computeStockBoth(picked.code);
     await loadHistory();
   }
 
   async function confirmClose() {
     if (!closing) return;
 
-    // blocco: chiusura solo se pending true
-    if (!closing.pending) {
-      setMsg("Questo movimento è già stato chiuso.");
+    const movement = closing;
+
+    // già chiuso → stop
+    if (movement.pending !== true) {
+      setMsg("Movimento già chiuso.");
       closeCloseModal();
       return;
     }
 
-    if (!canCloseMovement(closing)) {
+    // permessi
+    if (!canCloseMovement(movement)) {
       setMsg("Non hai i permessi per chiudere questo movimento.");
       closeCloseModal();
       return;
@@ -412,43 +485,53 @@ export default function MovimentiPage() {
     setBusyClose(true);
     setMsg(null);
 
-    const ret = toNumber(returnQty || "0");
-    const extraNote = closeNote.trim();
-
     try {
-      // 1) se rientra qualcosa, aggiungiamo una IN di rientro (stesso magazzino)
-      if (Number.isFinite(ret) && ret > 0) {
-        const { error: eIns } = await supabase.from("movements").insert({
+      const retQty = toNumber(returnQty || "0");
+      const extraNote = closeNote.trim();
+
+      // 1) eventuale rientro (IN)
+      if (Number.isFinite(retQty) && retQty > 0) {
+        const { error: insertError } = await supabase.from("movements").insert({
           type: "IN",
-          code: closing.code,
-          qty: ret,
-          warehouse: closing.warehouse,
+          code: movement.code,
+          qty: retQty,
+          warehouse: movement.warehouse,
           pending: false,
-          note: extraNote ? `Rientro parziale: ${extraNote}` : "Rientro parziale",
+          note: extraNote ? `Rientro: ${extraNote}` : "Rientro",
           created_by: userId,
           created_by_email: userEmail,
           created_by_name: userName,
-        });
+        } as any);
 
-        if (eIns) throw eIns;
+        if (insertError) throw insertError;
       }
 
-      // 2) chiudiamo la OUT: pending=false + nota append (se vuoi)
-      // (non tocchiamo la nota originale se non vuoi “sporcarla”)
-      const { error: eUpd } = await supabase
-  .from("movements")
-  .update({ pending: false })
-  .eq("id", closing.id)
-  .eq("pending", true); // ← QUESTA È LA CHIAVE
+      // 2) chiudo OUT (solo se pending=true)
+      const { data, error: updateError } = await supabase
+        .from("movements")
+        .update({ pending: false })
+        .eq("id", movement.id)
+        .eq("pending", true)
+        .select();
 
-      if (eUpd) throw eUpd;
+      if (updateError) throw updateError;
+
+      if (!data || data.length === 0) {
+        setMsg("Movimento già chiuso da un altro utente.");
+        closeCloseModal();
+        setBusyClose(false);
+        return;
+      }
 
       closeCloseModal();
-      setMsg("Movimento chiuso ✅");
+      setMsg("Movimento chiuso correttamente ✅");
+
+      // refresh
+      if (picked?.code) await computeStockBoth(picked.code);
       await loadHistory();
-    } catch (e: any) {
-      console.error("confirmClose error:", e);
-      setMsg("Errore chiusura: " + (e?.message ?? "sconosciuto"));
+    } catch (err: any) {
+      console.error("confirmClose error:", err);
+      setMsg("Errore chiusura: " + (err?.message ?? "sconosciuto"));
     } finally {
       setBusyClose(false);
     }
@@ -459,32 +542,35 @@ export default function MovimentiPage() {
     setReady(true);
     loadHistory();
 
-    supabase.auth.getUser().then(async ({ data }) => {
-      const email = data.user?.email ?? null;
-      const uid = data.user?.id ?? null;
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      const u = data.user;
+
+      const email = u?.email ?? null;
+      const uid = u?.id ?? null;
 
       setUserEmail(email);
       setUserId(uid);
 
-      if (!uid) {
-        setIsAdmin(false);
-        return;
-      }
-
-      // prova a prendere nome/cognome dal profilo
-      try {
+      // nome
+      if (uid) {
         const { data: prof } = await supabase
           .from("profiles")
           .select("first_name,last_name")
           .eq("id", uid)
           .maybeSingle();
 
-        const fn = (prof as any)?.first_name?.trim?.() ?? "";
-        const ln = (prof as any)?.last_name?.trim?.() ?? "";
-        const full = [fn, ln].filter(Boolean).join(" ").trim();
+        const first = (prof as any)?.first_name?.trim?.() ?? "";
+        const last = (prof as any)?.last_name?.trim?.() ?? "";
+        const full = [first, last].filter(Boolean).join(" ").trim();
         setUserName(full || email);
-      } catch {
+      } else {
         setUserName(email);
+      }
+
+      if (!uid) {
+        setIsAdmin(false);
+        return;
       }
 
       const { data: isAdm, error } = await supabase.rpc("is_admin");
@@ -494,59 +580,56 @@ export default function MovimentiPage() {
         return;
       }
       setIsAdmin(!!isAdm);
-    });
+    })();
 
-    // click fuori -> chiude dropdown
     function onDocMouseDown(e: MouseEvent) {
       if (!boxRef.current) return;
       if (!boxRef.current.contains(e.target as Node)) setOpen(false);
     }
     document.addEventListener("mousedown", onDocMouseDown);
 
-    // realtime
-    const ch = supabase
-      .channel("movements-live")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "movements" },
-        () => {
-          // ricarica lista mantenendo filtri
-          loadHistory();
-        }
-      )
-      .subscribe();
-
     return () => {
       document.removeEventListener("mousedown", onDocMouseDown);
       stopScan();
-      supabase.removeChannel(ch);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // debounce suggerimenti
+  // debounce suggestions
   useEffect(() => {
     setActiveIndex(0);
+    if (!open) return;
+
     const t = setTimeout(() => {
-      if (open) loadSuggestions(search);
+      loadSuggestions(search);
     }, 220);
+
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, open]);
 
   const active = useMemo(() => suggestions[activeIndex], [suggestions, activeIndex]);
 
+  const where = stock ? whereLabel(stock) : "";
+
+  // UI helpers
+  function rowStyle(m: DbMovement): React.CSSProperties {
+    if (m.type === "OUT" && m.pending === true) {
+      return {
+        background: "#f1f5f9",
+        opacity: 0.95,
+      };
+    }
+    return {};
+  }
+
   return (
     <main className="panel">
       <div className="pageBar">
-        <div className="pageBarTitle">Magazzino - Movimenti</div>
+        <div className="pageBarTitle">Magazzino · Movimenti</div>
         <div className="pageBarActions">
-          <a className="btn" href="/giacenze">
-            Giacenze
-          </a>
-          <a className="btn" href="/import">
-            Import
-          </a>
+          <a className="btn" href="/giacenze">Giacenze</a>
+          <a className="btn" href="/import">Import</a>
         </div>
       </div>
 
@@ -555,7 +638,7 @@ export default function MovimentiPage() {
       ) : (
         <>
           {/* FILTRI STORICO */}
-          <div className="filtersRow" style={{ padding: 12 }}>
+          <div className="card" style={{ padding: 12, marginTop: 12 }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
               <div style={{ gridColumn: "span 3" }}>
                 <label className="label">Data da</label>
@@ -586,12 +669,21 @@ export default function MovimentiPage() {
               </div>
 
               <div style={{ gridColumn: "span 2" }}>
-                <label className="label">Stato</label>
-                <select className="input" value={fPending} onChange={(e) => setFPending(e.target.value as any)}>
-                  <option value="ALL">Tutti</option>
-                  <option value="PENDING">Da chiudere</option>
-                  <option value="CLOSED">Confermati</option>
-                </select>
+                <label className="label">Solo selezionato</label>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setOnlyPicked((v) => !v)}
+                  style={{
+                    width: "100%",
+                    border: onlyPicked ? "1px solid #2563eb" : undefined,
+                    background: onlyPicked ? "rgba(37, 99, 235, 0.12)" : undefined,
+                    fontWeight: 800,
+                  }}
+                  title="Mostra solo i movimenti del materiale selezionato (non automatico)"
+                >
+                  {onlyPicked ? "Attivo" : "Disattivo"}
+                </button>
               </div>
             </div>
 
@@ -599,6 +691,7 @@ export default function MovimentiPage() {
               <button className="btn" onClick={() => loadHistory()}>
                 Applica filtri
               </button>
+
               <button
                 className="btn"
                 onClick={() => {
@@ -606,7 +699,7 @@ export default function MovimentiPage() {
                   setFTo("");
                   setFType("ALL");
                   setFWarehouse("ALL");
-                  setFPending("ALL");
+                  setOnlyPicked(false);
                   setTimeout(() => loadHistory(), 0);
                 }}
               >
@@ -622,19 +715,30 @@ export default function MovimentiPage() {
           {/* FORM MOVIMENTO */}
           <div className="card" style={{ padding: 12, marginTop: 12 }}>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-              <button className={`btn ${type === "IN" ? "btnPrimary" : ""}`} onClick={() => setType("IN")} type="button">
+              <button
+                className={`btn ${type === "IN" ? "btnPrimary" : ""}`}
+                onClick={() => setType("IN")}
+                type="button"
+              >
                 Entrata
               </button>
 
-              <button className={`btn ${type === "OUT" ? "btnPrimary" : ""}`} onClick={() => setType("OUT")} type="button">
+              <button
+                className={`btn ${type === "OUT" ? "btnPrimary" : ""}`}
+                onClick={() => setType("OUT")}
+                type="button"
+              >
                 Uscita
               </button>
 
-              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <label className="label" style={{ margin: 0 }}>
-                  Magazzino
-                </label>
-                <select className="input" value={warehouse} onChange={(e) => setWarehouse(e.target.value as any)} style={{ width: 160 }}>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <label className="label" style={{ margin: 0 }}>Magazzino</label>
+                <select
+                  className="input"
+                  value={warehouse}
+                  onChange={(e) => setWarehouse(e.target.value as Warehouse)}
+                  style={{ width: 160 }}
+                >
                   <option value="PRM">PRM</option>
                   <option value="REALE">REALE</option>
                 </select>
@@ -660,6 +764,7 @@ export default function MovimentiPage() {
                   setSearch(v);
                   setOpen(true);
                   setPicked(null);
+                  setStock(null);
                   setMsg(null);
                   if (!v.trim()) setSuggestions([]);
                 }}
@@ -727,15 +832,27 @@ export default function MovimentiPage() {
 
             {scanning && (
               <div style={{ marginTop: 12 }}>
-                <video ref={videoRef} style={{ width: "100%", borderRadius: 12, background: "black" }} muted playsInline />
-                <div style={{ fontSize: 12, opacity: 0.85, marginTop: 6 }}>Inquadra il codice a barre con la fotocamera.</div>
+                <video
+                  ref={videoRef}
+                  style={{ width: "100%", borderRadius: 12, background: "black" }}
+                  muted
+                  playsInline
+                />
+                <div style={{ fontSize: 12, opacity: 0.85, marginTop: 6 }}>
+                  Inquadra il codice a barre con la fotocamera.
+                </div>
               </div>
             )}
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10, marginTop: 12 }}>
               <div style={{ gridColumn: "span 8" }}>
                 <label className="label">Note (opz.)</label>
-                <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="DDT / commessa / cliente" />
+                <input
+                  className="input"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="DDT / commessa / cliente"
+                />
               </div>
 
               <div style={{ gridColumn: "span 3" }}>
@@ -757,13 +874,14 @@ export default function MovimentiPage() {
               </div>
             </div>
 
-            {picked && (
+            {picked && stock && (
               <div style={{ marginTop: 12, fontSize: 13, opacity: 0.95 }}>
                 <div>
-                  <b>{picked.code}</b> · {picked.name}
+                  <b>{picked.code}</b> · {picked.name} · UM <b>{picked.um ?? "-"}</b> · Dove: <b>{where}</b>
                 </div>
-                <div style={{ marginTop: 4, opacity: 0.9 }}>
-                  UM: <b>{picked.um ?? "-"}</b> · Magazzino selezionato: <b>{warehouse}</b>
+                <div style={{ marginTop: 6, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                  <span className="badge badgeIn">PRM: {stock.PRM}</span>
+                  <span className="badge badgeOut">REALE: {stock.REALE}</span>
                 </div>
               </div>
             )}
@@ -774,8 +892,7 @@ export default function MovimentiPage() {
           {/* STORICO */}
           <div className="card" style={{ padding: 12, marginTop: 12 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-              <div style={{ fontWeight: 900 }}>Storico movimenti (ultimi)</div>
-
+              <div style={{ fontWeight: 900 }}>Storico movimenti</div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <button className="btn" onClick={() => loadHistory()}>
                   Aggiorna
@@ -801,111 +918,99 @@ export default function MovimentiPage() {
                 </thead>
 
                 <tbody>
-                  {history.map((m) => {
-                    const isPending = m.type === "OUT" && !!m.pending;
+                  {history.map((m) => (
+                    <tr key={m.id} style={rowStyle(m)}>
+                      <td>{fmtDate(m.created_at)}</td>
+                      <td>
+                        <span className={`badge ${m.type === "IN" ? "badgeIn" : "badgeOut"}`}>
+                          {m.type === "IN" ? "Entrata" : "Uscita"}
+                        </span>
+                      </td>
+                      <td>{m.code}</td>
+                      <td>{nameMap[m.code] ?? "-"}</td>
+                      <td>{m.warehouse ?? "-"}</td>
+                      <td>
+                        {m.type === "IN" ? "+" : "-"}
+                        {m.qty}
+                      </td>
+                      <td>{m.note ?? ""}</td>
+                      <td>{m.created_by_name ?? m.created_by_email ?? "-"}</td>
 
-                    return (
-                      <tr
-                        key={m.id}
-                        style={{
-                          background: isPending ? "#f1f5f9" : "transparent",
-                          borderLeft: isPending ? "4px solid #94a3b8" : "4px solid transparent",
-                        }}
-                      >
-                        <td>{fmtDate(m.created_at)}</td>
-                        <td>
-                          <span className={`badge ${m.type === "IN" ? "badgeIn" : "badgeOut"}`}>
-                            {m.type === "IN" ? "Entrata" : "Uscita"}
-                          </span>
-                        </td>
-                        <td>{m.code}</td>
-                        <td>{nameMap[m.code] ?? "-"}</td>
-                        <td>{m.warehouse ?? "-"}</td>
-                        <td>
-                          {m.type === "IN" ? "+" : "-"}
-                          {m.qty}
-                        </td>
-                        <td>{m.note ?? ""}</td>
-                        <td>{m.created_by_name ?? m.created_by_email ?? "-"}</td>
-
-                        {/* STATO */}
-                        <td>
-                          {m.type === "OUT" ? (
-                            m.pending ? (
-                              <span
-                                style={{
-                                  fontSize: 12,
-                                  padding: "4px 10px",
-                                  borderRadius: 999,
-                                  background: "#e2e8f0",
-                                  color: "#334155",
-                                  fontWeight: 800,
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                Da chiudere
-                              </span>
-                            ) : (
-                              <span
-                                style={{
-                                  fontSize: 12,
-                                  padding: "4px 10px",
-                                  borderRadius: 999,
-                                  background: "#dcfce7",
-                                  color: "#166534",
-                                  fontWeight: 800,
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                Confermato
-                              </span>
-                            )
+                      {/* STATO */}
+                      <td>
+                        {m.type === "OUT" ? (
+                          m.pending === true ? (
+                            <span
+                              style={{
+                                fontSize: 12,
+                                padding: "4px 10px",
+                                borderRadius: 999,
+                                background: "#e2e8f0",
+                                color: "#334155",
+                                fontWeight: 900,
+                              }}
+                            >
+                              Da chiudere
+                            </span>
                           ) : (
-                            <span style={{ opacity: 0.6 }}>—</span>
-                          )}
-                        </td>
+                            <span
+                              style={{
+                                fontSize: 12,
+                                padding: "4px 10px",
+                                borderRadius: 999,
+                                background: "#dcfce7",
+                                color: "#166534",
+                                fontWeight: 900,
+                              }}
+                            >
+                              Confermato
+                            </span>
+                          )
+                        ) : (
+                          <span style={{ opacity: 0.6 }}>—</span>
+                        )}
+                      </td>
 
-                        {/* AZIONI */}
-                        <td style={{ display: "flex", gap: 8, alignItems: "center" }}>
-  {/* CHIUDI - solo OUT + pending */}
-  {m.type === "OUT" && m.pending && canCloseMovement(m) && (
-    <button
-      onClick={() => openCloseModal(m)}
-      style={{
-        padding: "6px 10px",
-        borderRadius: 10,
-        border: "1px solid #2563eb",
-        background: "#dbeafe",
-        color: "#1e40af",
-        cursor: "pointer",
-        fontWeight: 800,
-      }}
-    >
-      Chiudi
-    </button>
-  )}
+                      {/* AZIONI */}
+                      <td style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        {m.type === "OUT" && m.pending === true && canCloseMovement(m) && (
+                          <button
+                            onClick={() => openCloseModal(m)}
+                            style={{
+                              padding: "6px 10px",
+                              borderRadius: 10,
+                              border: "1px solid #2563eb",
+                              background: "#dbeafe",
+                              color: "#1e40af",
+                              cursor: "pointer",
+                              fontWeight: 800,
+                            }}
+                          >
+                            Chiudi
+                          </button>
+                        )}
 
-  {/* ELIMINA - sempre per admin */}
-  {isAdmin && (
-    <button
-      onClick={() => deleteMovement(m.id)}
-      style={{
-        padding: "6px 10px",
-        borderRadius: 10,
-        border: "1px solid #dc2626",
-        background: "#fee2e2",
-        color: "#991b1b",
-        cursor: "pointer",
-        fontWeight: 700,
-      }}
-    >
-      Elimina
-    </button>
-  )}
-</td>
-                      </tr>
-                    );
-                  })}
+                        {isAdmin ? (
+                          <button
+                            onClick={() => deleteMovement(m.id)}
+                            style={{
+                              padding: "6px 10px",
+                              borderRadius: 10,
+                              border: "1px solid #dc2626",
+                              background: "#fee2e2",
+                              color: "#991b1b",
+                              cursor: "pointer",
+                              fontWeight: 700,
+                            }}
+                          >
+                            Elimina
+                          </button>
+                        ) : (
+                          <span style={{ opacity: 0.6 }}>—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
 
                   {history.length === 0 && (
                     <tr>
@@ -920,7 +1025,7 @@ export default function MovimentiPage() {
           </div>
 
           {/* MODAL CHIUSURA */}
-          {closeOpen && closing && (
+          {closing && (
             <div
               style={{
                 position: "fixed",
@@ -929,96 +1034,98 @@ export default function MovimentiPage() {
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                zIndex: 200,
                 padding: 16,
+                zIndex: 999,
               }}
               onMouseDown={(e) => {
+                // chiudi cliccando fuori
                 if (e.target === e.currentTarget) closeCloseModal();
               }}
             >
               <div
                 style={{
-                  width: "min(560px, 100%)",
+                  width: "min(680px, 100%)",
                   background: "white",
                   borderRadius: 16,
-                  boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
+                  border: "1px solid rgba(15,23,42,0.12)",
+                  boxShadow: "0 30px 90px rgba(0,0,0,0.35)",
                   overflow: "hidden",
                 }}
               >
-                <div style={{ padding: 14, borderBottom: "1px solid #e2e8f0" }}>
-                  <div style={{ fontWeight: 900, color: "#0f172a" }}>Chiudi uscita</div>
+                <div style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>
+                  <div style={{ fontWeight: 950, color: "#0f172a" }}>Chiudi uscita</div>
                   <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>
-                    {closing.code} · {nameMap[closing.code] ?? ""} · {closing.warehouse ?? "-"}
+                    Codice <b>{closing.code}</b> · Magazzino <b>{closing.warehouse ?? "-"}</b> · Q.tà uscita <b>{closing.qty}</b>
                   </div>
                 </div>
 
                 <div style={{ padding: 14, display: "grid", gap: 10 }}>
-                  <div style={{ fontSize: 13, color: "#0f172a", fontWeight: 800 }}>
-                    Vuoi registrare un rientro (opzionale)?
-                  </div>
-
-                  <label style={{ fontSize: 12, color: "#334155", fontWeight: 700 }}>
-                    Quantità rientrata (opzionale)
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 800, color: "#0f172a" }}>
+                      Quantità rientrata (opzionale)
+                    </label>
                     <input
                       className="input"
                       value={returnQty}
                       onChange={(e) => setReturnQty(e.target.value)}
                       inputMode="decimal"
-                      placeholder="es. 2"
+                      placeholder="Es. 2"
                       style={{ marginTop: 6 }}
                     />
-                  </label>
+                    <div style={{ fontSize: 12, color: "#64748b", marginTop: 6 }}>
+                      Se lasci vuoto/0 → chiusura senza rientro.
+                    </div>
+                  </div>
 
-                  <label style={{ fontSize: 12, color: "#334155", fontWeight: 700 }}>
-                    Nota chiusura (opzionale)
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 800, color: "#0f172a" }}>
+                      Nota chiusura (opzionale)
+                    </label>
                     <input
                       className="input"
                       value={closeNote}
                       onChange={(e) => setCloseNote(e.target.value)}
-                      placeholder="es. rientro parziale / note"
+                      placeholder="Es. rientrati 2 pezzi"
                       style={{ marginTop: 6 }}
                     />
-                  </label>
-
-                  <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 6 }}>
-                    <button
-                      onClick={closeCloseModal}
-                      className="btn"
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #cbd5e1",
-                        background: "#f8fafc",
-                        color: "#0f172a",
-                        fontWeight: 800,
-                        cursor: "pointer",
-                      }}
-                      disabled={busyClose}
-                    >
-                      Annulla
-                    </button>
-
-                    <button
-                      onClick={confirmClose}
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #2563eb",
-                        background: "#dbeafe",
-                        color: "#1e40af",
-                        fontWeight: 900,
-                        cursor: "pointer",
-                        opacity: busyClose ? 0.7 : 1,
-                      }}
-                      disabled={busyClose}
-                    >
-                      {busyClose ? "Salvo..." : "Conferma chiusura"}
-                    </button>
                   </div>
+                </div>
 
-                  <div style={{ fontSize: 12, color: "#64748b" }}>
-                    Dopo la chiusura lo stato diventa <b>Confermato</b> e non sarà più richiudibile.
-                  </div>
+                <div
+                  style={{
+                    padding: 14,
+                    borderTop: "1px solid #e5e7eb",
+                    display: "flex",
+                    gap: 10,
+                    justifyContent: "flex-end",
+                    background: "#f8fafc",
+                  }}
+                >
+                  <button
+                    className="btn"
+                    onClick={closeCloseModal}
+                    disabled={busyClose}
+                    style={{ cursor: busyClose ? "not-allowed" : "pointer" }}
+                  >
+                    Annulla
+                  </button>
+
+                  <button
+                    onClick={confirmClose}
+                    disabled={busyClose}
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: 12,
+                      border: "1px solid #2563eb",
+                      background: "#2563eb",
+                      color: "white",
+                      cursor: busyClose ? "not-allowed" : "pointer",
+                      fontWeight: 900,
+                      opacity: busyClose ? 0.7 : 1,
+                    }}
+                  >
+                    {busyClose ? "Chiusura..." : "Conferma chiusura"}
+                  </button>
                 </div>
               </div>
             </div>

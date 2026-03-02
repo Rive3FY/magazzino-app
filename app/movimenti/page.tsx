@@ -436,14 +436,10 @@ export default function MovimentiPage() {
       // 2) chiudiamo la OUT: pending=false + nota append (se vuoi)
       // (non tocchiamo la nota originale se non vuoi “sporcarla”)
       const { error: eUpd } = await supabase
-        .from("movements")
-        .update({
-          pending: false,
-          // opzionale: se vuoi salvare che è stata chiusa (senza mettere id in note)
-          note: closing.note, // lasciamo invariata
-        })
-        .eq("id", closing.id)
-        .eq("pending", true); // 🔒 evita richiudere 2 volte
+  .from("movements")
+  .update({ pending: false })
+  .eq("id", closing.id)
+  .eq("pending", true); // ← QUESTA È LA CHIAVE
 
       if (eUpd) throw eUpd;
 
@@ -870,45 +866,43 @@ export default function MovimentiPage() {
                         </td>
 
                         {/* AZIONI */}
-                        <td>
-                          {m.type === "OUT" && m.pending ? (
-                            canCloseMovement(m) ? (
-                              <button
-                                onClick={() => openCloseModal(m)}
-                                style={{
-                                  padding: "6px 10px",
-                                  borderRadius: 10,
-                                  border: "1px solid #2563eb",
-                                  background: "#dbeafe",
-                                  color: "#1e40af",
-                                  cursor: "pointer",
-                                  fontWeight: 800,
-                                }}
-                              >
-                                Chiudi
-                              </button>
-                            ) : (
-                              <span style={{ opacity: 0.6 }}>—</span>
-                            )
-                          ) : isAdmin ? (
-                            <button
-                              onClick={() => deleteMovement(m.id)}
-                              style={{
-                                padding: "6px 10px",
-                                borderRadius: 10,
-                                border: "1px solid #dc2626",
-                                background: "#fee2e2",
-                                color: "#991b1b",
-                                cursor: "pointer",
-                                fontWeight: 700,
-                              }}
-                            >
-                              Elimina
-                            </button>
-                          ) : (
-                            <span style={{ opacity: 0.6 }}>—</span>
-                          )}
-                        </td>
+                        <td style={{ display: "flex", gap: 8, alignItems: "center" }}>
+  {/* CHIUDI - solo OUT + pending */}
+  {m.type === "OUT" && m.pending && canCloseMovement(m) && (
+    <button
+      onClick={() => openCloseModal(m)}
+      style={{
+        padding: "6px 10px",
+        borderRadius: 10,
+        border: "1px solid #2563eb",
+        background: "#dbeafe",
+        color: "#1e40af",
+        cursor: "pointer",
+        fontWeight: 800,
+      }}
+    >
+      Chiudi
+    </button>
+  )}
+
+  {/* ELIMINA - sempre per admin */}
+  {isAdmin && (
+    <button
+      onClick={() => deleteMovement(m.id)}
+      style={{
+        padding: "6px 10px",
+        borderRadius: 10,
+        border: "1px solid #dc2626",
+        background: "#fee2e2",
+        color: "#991b1b",
+        cursor: "pointer",
+        fontWeight: 700,
+      }}
+    >
+      Elimina
+    </button>
+  )}
+</td>
                       </tr>
                     );
                   })}

@@ -20,8 +20,8 @@ type DbMovement = {
   code: string;
   qty: number;
   note: string | null;
+  created_by: string | null;
   created_by_email: string | null;
-  created_by_name: string | null; // ✅
   warehouse: string | null;
 };
 
@@ -83,7 +83,8 @@ export default function MovimentiPage() {
 
   // storico
   const [history, setHistory] = useState<DbMovement[]>([]);
-  const [nameMap, setNameMap] = useState<Record<string, string>>({});
+  const [nameMap, setNameMap] = useState<Record<string, string>>({}); // code -> item name
+  const [userMap, setUserMap] = useState<Record<string, string>>({}); // user_id -> "Nome Cognome · Badge X"
 
   // filtri storico
   const [fFrom, setFFrom] = useState(""); // yyyy-mm-dd
@@ -158,7 +159,10 @@ export default function MovimentiPage() {
   }
 
   async function loadWarehouses() {
-    const { data, error } = await supabase.from("items").select("warehouse,warehouse_desc").limit(1000);
+    const { data, error } = await supabase
+      .from("items")
+      .select("warehouse,warehouse_desc")
+      .limit(1000);
 
     if (error) {
       console.error("loadWarehouses:", error);
@@ -182,10 +186,47 @@ export default function MovimentiPage() {
     setWarehouses(opts);
   }
 
+  async function loadUsersForHistory(rows: DbMovement[]) {
+    const ids = Array.from(
+      new Set(rows.map((r) => r.created_by).filter(Boolean) as string[])
+    );
+    if (ids.length === 0) {
+      setUserMap({});
+      return;
+    }
+
+    // profiles: id, first_name, last_name, badge_number
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id,first_name,last_name,badge_number")
+      .in("id", ids);
+
+    if (error) {
+      console.error("profiles load error:", error);
+      setUserMap({});
+      return;
+    }
+
+    const map: Record<string, string> = {};
+    for (const p of data ?? []) {
+      const id = (p as any).id as string;
+      const first = String((p as any).first_name ?? "").trim();
+      const last = String((p as any).last_name ?? "").trim();
+      const badge = String((p as any).badge_number ?? "").trim();
+
+      const full = [first, last].filter(Boolean).join(" ").trim();
+      const badgePart = badge ? ` · Badge ${badge}` : "";
+
+      map[id] = (full || "Operatore") + badgePart;
+    }
+
+    setUserMap(map);
+  }
+
   async function loadHistory(code?: string) {
     let q = supabase
       .from("movements")
-      .select("id,created_at,type,code,qty,note,created_by_email,created_by_name,warehouse") // ✅
+      .select("id,created_at,type,code,qty,note,created_by,created_by_email,warehouse")
       .order("created_at", { ascending: false })
       .limit(200);
 
@@ -205,33 +246,39 @@ export default function MovimentiPage() {
       console.error("loadHistory error:", error);
       setHistory([]);
       setNameMap({});
+      setUserMap({});
       return;
     }
 
     const rows = (data ?? []) as DbMovement[];
     setHistory(rows);
 
+    // mappa descrizioni item
     const codes = Array.from(new Set(rows.map((r) => r.code).filter(Boolean)));
-    if (codes.length === 0) {
+    if (codes.length > 0) {
+      const { data: itemsData, error: e2 } = await supabase
+        .from("items")
+        .select("code,name")
+        .in("code", codes);
+
+      if (!e2) {
+        const map: Record<string, string> = {};
+        for (const it of itemsData ?? []) {
+          const c = (it as any).code as string;
+          const n = (it as any).name as string | null;
+          if (c) map[c] = n ?? "";
+        }
+        setNameMap(map);
+      } else {
+        console.error("items nameMap error:", e2);
+        setNameMap({});
+      }
+    } else {
       setNameMap({});
-      return;
     }
 
-    const { data: itemsData, error: e2 } = await supabase.from("items").select("code,name").in("code", codes);
-
-    if (e2) {
-      console.error("items nameMap error:", e2);
-      setNameMap({});
-      return;
-    }
-
-    const map: Record<string, string> = {};
-    for (const it of itemsData ?? []) {
-      const c = (it as any).code as string;
-      const n = (it as any).name as string | null;
-      if (c) map[c] = n ?? "";
-    }
-    setNameMap(map);
+    // mappa utenti (nome/badge)
+    await loadUsersForHistory(rows);
   }
 
   async function pickItem(it: DbItem) {
@@ -312,7 +359,8 @@ export default function MovimentiPage() {
         if (scanLockedRef.current) return;
 
         scanLockedRef.current = true;
-        const text = result.getText();
+
+        const text = String(result.getText?.() ?? "").trim();
 
         stopScan();
         await pickItemByCode(text);
@@ -367,27 +415,13 @@ export default function MovimentiPage() {
 
     if (type === "OUT") {
       const current = stock ?? 0;
-      if (current - n < 0) return setMsg(`Uscita non possibile: giacenza ${current} → diventerebbe ${current - n}.`);
+      if (current - n < 0) {
+        return setMsg(`Uscita non possibile: giacenza ${current} → diventerebbe ${current - n}.`);
+      }
     }
 
+    // Se in DB warehouse è NOT NULL, lo passiamo sempre
     const wh = picked.warehouse ?? "UNKNOWN";
-
-    // ✅ prende Nome Cognome dalla tabella profiles
-    let createdByName: string | null = null;
-    try {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("first_name,last_name")
-        .eq("id", userId)
-        .maybeSingle();
-
-      const first = profile?.first_name?.trim() ?? "";
-      const last = profile?.last_name?.trim() ?? "";
-      const full = `${first} ${last}`.trim();
-      if (full) createdByName = full;
-    } catch {}
-
-    if (!createdByName) createdByName = userEmail; // fallback
 
     const { error } = await supabase.from("movements").insert({
       type,
@@ -396,7 +430,6 @@ export default function MovimentiPage() {
       note: note.trim() || null,
       created_by: userId,
       created_by_email: userEmail,
-      created_by_name: createdByName, // ✅
       warehouse: wh,
     });
 
@@ -429,7 +462,7 @@ export default function MovimentiPage() {
     }
   }
 
-  // init
+  // INIT
   useEffect(() => {
     setReady(true);
     loadWarehouses();
@@ -455,7 +488,6 @@ export default function MovimentiPage() {
       }
       setIsAdmin(!!isAdm);
     });
-    
 
     function onDocMouseDown(e: MouseEvent) {
       if (!boxRef.current) return;
@@ -470,7 +502,38 @@ export default function MovimentiPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // debounce suggestions
+  // ✅ REALTIME LIVE (senza loop)
+  useEffect(() => {
+    let alive = true;
+    let timer: any = null;
+
+    const ch = supabase
+      .channel("movements-live")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "movements" },
+        () => {
+          if (!alive) return;
+          if (timer) clearTimeout(timer);
+
+          timer = setTimeout(async () => {
+            await loadHistory(picked?.code);
+            if (picked) await computeStockFor(picked.code);
+          }, 250);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+      supabase.removeChannel(ch);
+    };
+    // IMPORTANTE: niente dipendenze, altrimenti subscribe multiple
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // debounce suggerimenti
   useEffect(() => {
     setActiveIndex(0);
     const t = setTimeout(() => {
@@ -487,12 +550,8 @@ export default function MovimentiPage() {
       <div className="pageBar">
         <div className="pageBarTitle">Magazzino - Movimenti</div>
         <div className="pageBarActions">
-          <a className="btn" href="/giacenze">
-            Giacenze
-          </a>
-          <a className="btn" href="/import">
-            Import
-          </a>
+          <a className="btn" href="/giacenze">Giacenze</a>
+          <a className="btn" href="/import">Import</a>
         </div>
       </div>
 
@@ -561,11 +620,19 @@ export default function MovimentiPage() {
           {/* FORM MOVIMENTO */}
           <div className="card" style={{ padding: 12, marginTop: 12 }}>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-              <button className={`btn ${type === "IN" ? "btnPrimary" : ""}`} onClick={() => setType("IN")} type="button">
+              <button
+                className={`btn ${type === "IN" ? "btnPrimary" : ""}`}
+                onClick={() => setType("IN")}
+                type="button"
+              >
                 Entrata
               </button>
 
-              <button className={`btn ${type === "OUT" ? "btnPrimary" : ""}`} onClick={() => setType("OUT")} type="button">
+              <button
+                className={`btn ${type === "OUT" ? "btnPrimary" : ""}`}
+                onClick={() => setType("OUT")}
+                type="button"
+              >
                 Uscita
               </button>
 
@@ -657,20 +724,39 @@ export default function MovimentiPage() {
 
             {scanning && (
               <div style={{ marginTop: 12 }}>
-                <video ref={videoRef} style={{ width: "100%", borderRadius: 12, background: "black" }} muted playsInline />
-                <div style={{ fontSize: 12, opacity: 0.85, marginTop: 6 }}>Inquadra il codice a barre con la fotocamera.</div>
+                <video
+                  ref={videoRef}
+                  style={{ width: "100%", borderRadius: 12, background: "black" }}
+                  muted
+                  playsInline
+                />
+                <div style={{ fontSize: 12, opacity: 0.85, marginTop: 6 }}>
+                  Inquadra il codice a barre con la fotocamera.
+                </div>
               </div>
             )}
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10, marginTop: 12 }}>
               <div style={{ gridColumn: "span 8" }}>
                 <label className="label">Note (opz.)</label>
-                <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="DDT / commessa / cliente" />
+                <input
+                  className="input"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="DDT / commessa / cliente"
+                />
               </div>
 
               <div style={{ gridColumn: "span 3" }}>
                 <label className="label">Quantità</label>
-                <input ref={qtyRef} className="input" value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="es. 5" />
+                <input
+                  ref={qtyRef}
+                  className="input"
+                  value={qty}
+                  onChange={(e) => setQty(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="es. 5"
+                />
               </div>
 
               <div style={{ gridColumn: "span 1", display: "flex", alignItems: "end" }}>
@@ -686,8 +772,10 @@ export default function MovimentiPage() {
                   <b>{picked.code}</b> · {picked.name}
                 </div>
                 <div style={{ marginTop: 4 }}>
-                  Magazzino: <b>{[picked.warehouse, picked.warehouse_desc].filter(Boolean).join(" - ") || "-"}</b> · UM:{" "}
-                  <b>{picked.um ?? "-"}</b> · Iniziale: <b>{picked.initial_qty ?? 0}</b> · Giacenza: <b>{stock ?? 0}</b>
+                  Magazzino:{" "}
+                  <b>{[picked.warehouse, picked.warehouse_desc].filter(Boolean).join(" - ") || "-"}</b>{" "}
+                  · UM: <b>{picked.um ?? "-"}</b> · Iniziale: <b>{picked.initial_qty ?? 0}</b> · Giacenza:{" "}
+                  <b>{stock ?? 0}</b>
                 </div>
               </div>
             )}
@@ -698,10 +786,15 @@ export default function MovimentiPage() {
           {/* STORICO */}
           <div className="card" style={{ padding: 12, marginTop: 12 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-              <div style={{ fontWeight: 900 }}>Storico movimenti {picked ? `(solo ${picked.code})` : "(ultimi)"}</div>
-              <button className="btn" onClick={() => loadHistory(picked?.code)}>
-                Aggiorna
-              </button>
+              <div style={{ fontWeight: 900 }}>
+                Storico movimenti {picked ? `(solo ${picked.code})` : "(ultimi)"}
+              </div>
+
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button className="btn" onClick={() => loadHistory(picked?.code)}>
+                  Aggiorna
+                </button>
+              </div>
             </div>
 
             <div style={{ overflowX: "auto", marginTop: 10 }}>
@@ -721,35 +814,41 @@ export default function MovimentiPage() {
                 </thead>
 
                 <tbody>
-                  {history.map((m) => (
-                    <tr key={m.id}>
-                      <td>{fmtDate(m.created_at)}</td>
-                      <td>
-                        <span className={`badge ${m.type === "IN" ? "badgeIn" : "badgeOut"}`}>{m.type === "IN" ? "Entrata" : "Uscita"}</span>
-                      </td>
-                      <td>{m.code}</td>
-                      <td>{nameMap[m.code] ?? "-"}</td>
-                      <td>{m.warehouse ?? "-"}</td>
-                      <td>
-                        {m.type === "IN" ? "+" : "-"}
-                        {m.qty}
-                      </td>
-                      <td>{m.note ?? ""}</td>
+                  {history.map((m) => {
+                    const who =
+                      (m.created_by && userMap[m.created_by]) ||
+                      m.created_by_email ||
+                      "-";
 
-                      {/* ✅ QUI MOSTRA NOME */}
-                      <td>{m.created_by_name ?? m.created_by_email ?? "-"}</td>
-
-                      <td>
-                        {isAdmin ? (
-                          <button className="btn" onClick={() => deleteMovement(m.id)}>
-                            Elimina
-                          </button>
-                        ) : (
-                          <span style={{ opacity: 0.6 }}>—</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                    return (
+                      <tr key={m.id}>
+                        <td>{fmtDate(m.created_at)}</td>
+                        <td>
+                          <span className={`badge ${m.type === "IN" ? "badgeIn" : "badgeOut"}`}>
+                            {m.type === "IN" ? "Entrata" : "Uscita"}
+                          </span>
+                        </td>
+                        <td>{m.code}</td>
+                        <td>{nameMap[m.code] ?? "-"}</td>
+                        <td>{m.warehouse ?? "-"}</td>
+                        <td>
+                          {m.type === "IN" ? "+" : "-"}
+                          {m.qty}
+                        </td>
+                        <td>{m.note ?? ""}</td>
+                        <td>{who}</td>
+                        <td>
+                          {isAdmin ? (
+                            <button className="btn" onClick={() => deleteMovement(m.id)}>
+                              Elimina
+                            </button>
+                          ) : (
+                            <span style={{ opacity: 0.6 }}>—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
 
                   {history.length === 0 && (
                     <tr>

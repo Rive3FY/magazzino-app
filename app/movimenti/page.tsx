@@ -8,9 +8,6 @@ type DbItem = {
   code: string;
   name: string;
   um: string | null;
-  warehouse: string | null;
-  warehouse_desc: string | null;
-  initial_qty: number | null;
 };
 
 type DbMovement = {
@@ -21,11 +18,13 @@ type DbMovement = {
   qty: number;
   note: string | null;
   created_by: string | null;
+  created_by_name: string | null;
   created_by_email: string | null;
-  warehouse: string | null;
+  warehouse: "PRM" | "REALE" | null;
+  pending: boolean | null;
 };
 
-type WarehouseOpt = { key: string; label: string };
+type WarehouseKey = "PRM" | "REALE" | "ALL";
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
@@ -60,10 +59,12 @@ export default function MovimentiPage() {
   // user/admin
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
   // movimento form
   const [type, setType] = useState<"IN" | "OUT">("IN");
+  const [warehouse, setWarehouse] = useState<"PRM" | "REALE">("PRM");
   const [qty, setQty] = useState("");
   const [note, setNote] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
@@ -74,24 +75,19 @@ export default function MovimentiPage() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [suggestions, setSuggestions] = useState<DbItem[]>([]);
   const [picked, setPicked] = useState<DbItem | null>(null);
-
   const boxRef = useRef<HTMLDivElement | null>(null);
   const qtyRef = useRef<HTMLInputElement | null>(null);
 
-  // stock
-  const [stock, setStock] = useState<number | null>(null);
-
-  // storico
+  // storico + map code->name
   const [history, setHistory] = useState<DbMovement[]>([]);
-  const [nameMap, setNameMap] = useState<Record<string, string>>({}); // code -> item name
-  const [userMap, setUserMap] = useState<Record<string, string>>({}); // user_id -> "Nome Cognome · Badge X"
+  const [nameMap, setNameMap] = useState<Record<string, string>>({});
 
   // filtri storico
   const [fFrom, setFFrom] = useState(""); // yyyy-mm-dd
   const [fTo, setFTo] = useState("");
   const [fType, setFType] = useState<"ALL" | "IN" | "OUT">("ALL");
-  const [fWarehouse, setFWarehouse] = useState<string>("ALL");
-  const [warehouses, setWarehouses] = useState<WarehouseOpt[]>([]);
+  const [fWarehouse, setFWarehouse] = useState<WarehouseKey>("ALL");
+  const [fPending, setFPending] = useState<"ALL" | "PENDING" | "CLOSED">("ALL");
 
   // scanner
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -99,6 +95,37 @@ export default function MovimentiPage() {
   const [scanning, setScanning] = useState(false);
   const scanLockedRef = useRef(false);
   const lastScanRef = useRef<{ code: string; ts: number } | null>(null);
+
+  // MODAL chiusura
+  const [closeOpen, setCloseOpen] = useState(false);
+  const [closing, setClosing] = useState<DbMovement | null>(null);
+  const [returnQty, setReturnQty] = useState(""); // opzionale
+  const [closeNote, setCloseNote] = useState(""); // opzionale
+  const [busyClose, setBusyClose] = useState(false);
+
+  function openCloseModal(m: DbMovement) {
+    setClosing(m);
+    setReturnQty("");
+    setCloseNote("");
+    setCloseOpen(true);
+  }
+
+  function closeCloseModal() {
+    setCloseOpen(false);
+    setClosing(null);
+    setReturnQty("");
+    setCloseNote("");
+    setBusyClose(false);
+  }
+
+  // 🔒 può chiudere solo OUT + pending=true
+  function canCloseMovement(m: DbMovement) {
+    if (m.type !== "OUT") return false;
+    if (!m.pending) return false; // già chiuso
+    if (isAdmin) return true;
+    if (userId && m.created_by && userId === m.created_by) return true;
+    return false;
+  }
 
   async function loadSuggestions(text: string) {
     const s = text.trim();
@@ -109,128 +136,35 @@ export default function MovimentiPage() {
 
     const { data, error } = await supabase
       .from("items")
-      .select("code,name,um,warehouse,warehouse_desc,initial_qty")
+      .select("code,name,um")
       .or(`code.ilike.%${s}%,name.ilike.%${s}%`)
       .order("code", { ascending: true })
       .limit(12);
 
     if (error) {
-      console.error(error);
+      console.error("loadSuggestions error:", {
+        message: (error as any)?.message,
+        details: (error as any)?.details,
+        hint: (error as any)?.hint,
+        code: (error as any)?.code,
+        raw: error,
+      });
       setSuggestions([]);
+      setMsg("Errore ricerca: " + ((error as any)?.message ?? "sconosciuto"));
       return;
     }
 
     setSuggestions((data ?? []) as DbItem[]);
   }
 
-  async function computeStockFor(code: string) {
-    const { data: item, error: e1 } = await supabase
-      .from("items")
-      .select("initial_qty")
-      .eq("code", code)
-      .single();
-
-    if (e1) {
-      console.error(e1);
-      setStock(null);
-      return;
-    }
-
-    const initial = Number((item as any)?.initial_qty ?? 0);
-
-    const { data: movs, error: e2 } = await supabase
-      .from("movements")
-      .select("type,qty")
-      .eq("code", code);
-
-    if (e2) {
-      console.error(e2);
-      setStock(initial);
-      return;
-    }
-
-    let delta = 0;
-    for (const m of movs ?? []) {
-      const v = Number((m as any).qty ?? 0);
-      delta += (m as any).type === "IN" ? v : -v;
-    }
-
-    setStock(initial + delta);
-  }
-
-  async function loadWarehouses() {
-    const { data, error } = await supabase
-      .from("items")
-      .select("warehouse,warehouse_desc")
-      .limit(1000);
-
-    if (error) {
-      console.error("loadWarehouses:", error);
-      setWarehouses([]);
-      return;
-    }
-
-    const map = new Map<string, string>();
-    for (const r of data ?? []) {
-      const w = (r as any).warehouse as string | null;
-      const d = (r as any).warehouse_desc as string | null;
-      if (!w) continue;
-      const label = [w, d].filter(Boolean).join(" - ");
-      map.set(w, label || w);
-    }
-
-    const opts: WarehouseOpt[] = Array.from(map.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([key, label]) => ({ key, label }));
-
-    setWarehouses(opts);
-  }
-
-  async function loadUsersForHistory(rows: DbMovement[]) {
-    const ids = Array.from(
-      new Set(rows.map((r) => r.created_by).filter(Boolean) as string[])
-    );
-    if (ids.length === 0) {
-      setUserMap({});
-      return;
-    }
-
-    // profiles: id, first_name, last_name, badge_number
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id,first_name,last_name,badge_number")
-      .in("id", ids);
-
-    if (error) {
-      console.error("profiles load error:", error);
-      setUserMap({});
-      return;
-    }
-
-    const map: Record<string, string> = {};
-    for (const p of data ?? []) {
-      const id = (p as any).id as string;
-      const first = String((p as any).first_name ?? "").trim();
-      const last = String((p as any).last_name ?? "").trim();
-      const badge = String((p as any).badge_number ?? "").trim();
-
-      const full = [first, last].filter(Boolean).join(" ").trim();
-      const badgePart = badge ? ` · Badge ${badge}` : "";
-
-      map[id] = (full || "Operatore") + badgePart;
-    }
-
-    setUserMap(map);
-  }
-
-  async function loadHistory(code?: string) {
+  async function loadHistory() {
     let q = supabase
       .from("movements")
-      .select("id,created_at,type,code,qty,note,created_by,created_by_email,warehouse")
+      .select(
+        "id,created_at,type,code,qty,note,created_by,created_by_name,created_by_email,warehouse,pending"
+      )
       .order("created_at", { ascending: false })
       .limit(200);
-
-    if (code) q = q.eq("code", code);
 
     // filtri
     const isoFrom = toIsoStartOfDay(fFrom);
@@ -240,45 +174,53 @@ export default function MovimentiPage() {
     if (fType !== "ALL") q = q.eq("type", fType);
     if (fWarehouse !== "ALL") q = q.eq("warehouse", fWarehouse);
 
+    if (fPending === "PENDING") q = q.eq("pending", true);
+    if (fPending === "CLOSED") q = q.eq("pending", false);
+
     const { data, error } = await q;
 
     if (error) {
-      console.error("loadHistory error:", error);
+      console.error("loadHistory error:", {
+        message: (error as any)?.message,
+        details: (error as any)?.details,
+        hint: (error as any)?.hint,
+        code: (error as any)?.code,
+        raw: error,
+      });
       setHistory([]);
       setNameMap({});
-      setUserMap({});
+      setMsg("Errore storico: " + ((error as any)?.message ?? "sconosciuto"));
       return;
     }
 
     const rows = (data ?? []) as DbMovement[];
     setHistory(rows);
 
-    // mappa descrizioni item
+    // mappa code->name
     const codes = Array.from(new Set(rows.map((r) => r.code).filter(Boolean)));
-    if (codes.length > 0) {
-      const { data: itemsData, error: e2 } = await supabase
-        .from("items")
-        .select("code,name")
-        .in("code", codes);
-
-      if (!e2) {
-        const map: Record<string, string> = {};
-        for (const it of itemsData ?? []) {
-          const c = (it as any).code as string;
-          const n = (it as any).name as string | null;
-          if (c) map[c] = n ?? "";
-        }
-        setNameMap(map);
-      } else {
-        console.error("items nameMap error:", e2);
-        setNameMap({});
-      }
-    } else {
+    if (codes.length === 0) {
       setNameMap({});
+      return;
     }
 
-    // mappa utenti (nome/badge)
-    await loadUsersForHistory(rows);
+    const { data: itemsData, error: e2 } = await supabase
+      .from("items")
+      .select("code,name")
+      .in("code", codes);
+
+    if (e2) {
+      console.error("items nameMap error:", e2);
+      setNameMap({});
+      return;
+    }
+
+    const map: Record<string, string> = {};
+    for (const it of itemsData ?? []) {
+      const c = (it as any).code as string;
+      const n = (it as any).name as string | null;
+      if (c) map[c] = n ?? "";
+    }
+    setNameMap(map);
   }
 
   async function pickItem(it: DbItem) {
@@ -287,8 +229,8 @@ export default function MovimentiPage() {
     setOpen(false);
     setMsg(null);
 
-    await computeStockFor(it.code);
-    await loadHistory(it.code);
+    // ✅ storico SEMPRE globale (non filtrare per codice)
+    await loadHistory();
 
     setTimeout(() => qtyRef.current?.focus(), 50);
   }
@@ -297,30 +239,28 @@ export default function MovimentiPage() {
     const code = scannedCode.trim();
     if (!code) return;
 
+    // anti-duplicato
     const prev = lastScanRef.current;
     const now = Date.now();
     if (prev && prev.code === code && now - prev.ts < 1500) return;
     lastScanRef.current = { code, ts: now };
 
-    setType("OUT");
-    setQty("");
     setMsg(null);
 
     const { data: item, error } = await supabase
       .from("items")
-      .select("code,name,um,warehouse,warehouse_desc,initial_qty")
+      .select("code,name,um")
       .eq("code", code)
       .maybeSingle();
 
     if (error) {
       console.error("pickItemByCode error:", error);
-      setMsg("Errore ricerca articolo: " + error.message);
+      setMsg("Errore ricerca articolo: " + (error as any)?.message);
       return;
     }
 
     if (!item) {
       setPicked(null);
-      setStock(null);
       setMsg(`Codice "${code}" non trovato in anagrafica.`);
       setSearch(code);
       setOpen(true);
@@ -329,25 +269,19 @@ export default function MovimentiPage() {
     }
 
     await pickItem(item as DbItem);
-
-    setTimeout(() => {
-      const ae = document.activeElement as HTMLElement | null;
-      const typing = ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA");
-      if (!typing) qtyRef.current?.focus();
-    }, 120);
   }
 
   async function startScan() {
     setMsg(null);
     setOpen(false);
 
+    stopScan();
     scanLockedRef.current = false;
 
     setScanning(true);
-    await new Promise((r) => setTimeout(r, 120));
+    await new Promise((r) => setTimeout(r, 200));
 
     readerRef.current = new BrowserMultiFormatReader();
-    const ignoreUntil = Date.now() + 600;
 
     try {
       const videoEl = videoRef.current;
@@ -355,20 +289,19 @@ export default function MovimentiPage() {
 
       await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
         if (!result) return;
-        if (Date.now() < ignoreUntil) return;
         if (scanLockedRef.current) return;
 
-        scanLockedRef.current = true;
-
         const text = String(result.getText?.() ?? "").trim();
+        if (!text) return;
 
+        scanLockedRef.current = true;
         stopScan();
         await pickItemByCode(text);
       });
     } catch (e: any) {
       console.error(e);
       setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
-      setScanning(false);
+      stopScan();
     }
   }
 
@@ -397,7 +330,6 @@ export default function MovimentiPage() {
     setOpen(false);
     setSuggestions([]);
     setPicked(null);
-    setStock(null);
     setQty("");
     setNote("");
     setMsg(null);
@@ -410,62 +342,125 @@ export default function MovimentiPage() {
     if (!userId) return setMsg("Devi essere loggato per salvare movimenti.");
     if (!picked) return setMsg("Seleziona un materiale (scrivi per cercare o scansiona).");
 
-    const n = toNumber(qty);
-    if (!Number.isFinite(n) || n <= 0) return setMsg("Quantità non valida (deve essere > 0).");
+    const nQty = toNumber(qty);
+    if (!Number.isFinite(nQty) || nQty <= 0) return setMsg("Quantità non valida (deve essere > 0).");
 
-    if (type === "OUT") {
-      const current = stock ?? 0;
-      if (current - n < 0) {
-        return setMsg(`Uscita non possibile: giacenza ${current} → diventerebbe ${current - n}.`);
-      }
-    }
+    // ✅ OUT normale, ma lo salviamo "pending" finché non viene chiuso
+    const pending = type === "OUT";
 
-    // Se in DB warehouse è NOT NULL, lo passiamo sempre
-    const wh = picked.warehouse ?? "UNKNOWN";
-
-    const { error } = await supabase.from("movements").insert({
+    const payload = {
       type,
       code: picked.code,
-      qty: n,
+      qty: nQty,
       note: note.trim() || null,
       created_by: userId,
       created_by_email: userEmail,
-      warehouse: wh,
-    });
+      created_by_name: userName,
+      warehouse,
+      pending,
+    };
 
-    if (error) return setMsg("Errore salvataggio: " + error.message);
+    const { error } = await supabase.from("movements").insert(payload);
+
+    if (error) return setMsg("Errore salvataggio: " + (error as any)?.message);
 
     setQty("");
     setNote("");
     setMsg("Movimento salvato ✅");
 
-    await computeStockFor(picked.code);
-    await loadHistory(picked.code);
-
+    // ✅ storico globale
+    await loadHistory();
     setTimeout(() => qtyRef.current?.focus(), 100);
   }
 
   async function deleteMovement(id: string) {
-    if (!isAdmin) return alert("Solo l'admin può eliminare i movimenti.");
+    if (!isAdmin) {
+      alert("Solo l'admin può eliminare i movimenti.");
+      return;
+    }
 
     const ok = confirm("Eliminare questo movimento?");
     if (!ok) return;
 
     const { error } = await supabase.from("movements").delete().eq("id", id);
-    if (error) return alert("Non posso eliminare: " + error.message);
 
-    if (picked) {
-      await computeStockFor(picked.code);
-      await loadHistory(picked.code);
-    } else {
+    if (error) {
+      console.error("DELETE error:", error);
+      alert("Non posso eliminare: " + (error as any)?.message);
+      return;
+    }
+
+    await loadHistory();
+  }
+
+  async function confirmClose() {
+    if (!closing) return;
+
+    // blocco: chiusura solo se pending true
+    if (!closing.pending) {
+      setMsg("Questo movimento è già stato chiuso.");
+      closeCloseModal();
+      return;
+    }
+
+    if (!canCloseMovement(closing)) {
+      setMsg("Non hai i permessi per chiudere questo movimento.");
+      closeCloseModal();
+      return;
+    }
+
+    setBusyClose(true);
+    setMsg(null);
+
+    const ret = toNumber(returnQty || "0");
+    const extraNote = closeNote.trim();
+
+    try {
+      // 1) se rientra qualcosa, aggiungiamo una IN di rientro (stesso magazzino)
+      if (Number.isFinite(ret) && ret > 0) {
+        const { error: eIns } = await supabase.from("movements").insert({
+          type: "IN",
+          code: closing.code,
+          qty: ret,
+          warehouse: closing.warehouse,
+          pending: false,
+          note: extraNote ? `Rientro parziale: ${extraNote}` : "Rientro parziale",
+          created_by: userId,
+          created_by_email: userEmail,
+          created_by_name: userName,
+        });
+
+        if (eIns) throw eIns;
+      }
+
+      // 2) chiudiamo la OUT: pending=false + nota append (se vuoi)
+      // (non tocchiamo la nota originale se non vuoi “sporcarla”)
+      const { error: eUpd } = await supabase
+        .from("movements")
+        .update({
+          pending: false,
+          // opzionale: se vuoi salvare che è stata chiusa (senza mettere id in note)
+          note: closing.note, // lasciamo invariata
+        })
+        .eq("id", closing.id)
+        .eq("pending", true); // 🔒 evita richiudere 2 volte
+
+      if (eUpd) throw eUpd;
+
+      closeCloseModal();
+      setMsg("Movimento chiuso ✅");
       await loadHistory();
+    } catch (e: any) {
+      console.error("confirmClose error:", e);
+      setMsg("Errore chiusura: " + (e?.message ?? "sconosciuto"));
+    } finally {
+      setBusyClose(false);
     }
   }
 
-  // INIT
+  // init
   useEffect(() => {
     setReady(true);
-    loadWarehouses();
     loadHistory();
 
     supabase.auth.getUser().then(async ({ data }) => {
@@ -480,6 +475,22 @@ export default function MovimentiPage() {
         return;
       }
 
+      // prova a prendere nome/cognome dal profilo
+      try {
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("first_name,last_name")
+          .eq("id", uid)
+          .maybeSingle();
+
+        const fn = (prof as any)?.first_name?.trim?.() ?? "";
+        const ln = (prof as any)?.last_name?.trim?.() ?? "";
+        const full = [fn, ln].filter(Boolean).join(" ").trim();
+        setUserName(full || email);
+      } catch {
+        setUserName(email);
+      }
+
       const { data: isAdm, error } = await supabase.rpc("is_admin");
       if (error) {
         console.error("is_admin rpc error:", error);
@@ -489,47 +500,31 @@ export default function MovimentiPage() {
       setIsAdmin(!!isAdm);
     });
 
+    // click fuori -> chiude dropdown
     function onDocMouseDown(e: MouseEvent) {
       if (!boxRef.current) return;
       if (!boxRef.current.contains(e.target as Node)) setOpen(false);
     }
     document.addEventListener("mousedown", onDocMouseDown);
 
-    return () => {
-      document.removeEventListener("mousedown", onDocMouseDown);
-      stopScan();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ✅ REALTIME LIVE (senza loop)
-  useEffect(() => {
-    let alive = true;
-    let timer: any = null;
-
+    // realtime
     const ch = supabase
       .channel("movements-live")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "movements" },
         () => {
-          if (!alive) return;
-          if (timer) clearTimeout(timer);
-
-          timer = setTimeout(async () => {
-            await loadHistory(picked?.code);
-            if (picked) await computeStockFor(picked.code);
-          }, 250);
+          // ricarica lista mantenendo filtri
+          loadHistory();
         }
       )
       .subscribe();
 
     return () => {
-      alive = false;
-      if (timer) clearTimeout(timer);
+      document.removeEventListener("mousedown", onDocMouseDown);
+      stopScan();
       supabase.removeChannel(ch);
     };
-    // IMPORTANTE: niente dipendenze, altrimenti subscribe multiple
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -550,8 +545,12 @@ export default function MovimentiPage() {
       <div className="pageBar">
         <div className="pageBarTitle">Magazzino - Movimenti</div>
         <div className="pageBarActions">
-          <a className="btn" href="/giacenze">Giacenze</a>
-          <a className="btn" href="/import">Import</a>
+          <a className="btn" href="/giacenze">
+            Giacenze
+          </a>
+          <a className="btn" href="/import">
+            Import
+          </a>
         </div>
       </div>
 
@@ -581,21 +580,27 @@ export default function MovimentiPage() {
                 </select>
               </div>
 
-              <div style={{ gridColumn: "span 4" }}>
+              <div style={{ gridColumn: "span 2" }}>
                 <label className="label">Magazzino</label>
-                <select className="input" value={fWarehouse} onChange={(e) => setFWarehouse(e.target.value)}>
+                <select className="input" value={fWarehouse} onChange={(e) => setFWarehouse(e.target.value as any)}>
                   <option value="ALL">Tutti</option>
-                  {warehouses.map((w) => (
-                    <option key={w.key} value={w.key}>
-                      {w.label}
-                    </option>
-                  ))}
+                  <option value="PRM">PRM</option>
+                  <option value="REALE">REALE</option>
+                </select>
+              </div>
+
+              <div style={{ gridColumn: "span 2" }}>
+                <label className="label">Stato</label>
+                <select className="input" value={fPending} onChange={(e) => setFPending(e.target.value as any)}>
+                  <option value="ALL">Tutti</option>
+                  <option value="PENDING">Da chiudere</option>
+                  <option value="CLOSED">Confermati</option>
                 </select>
               </div>
             </div>
 
             <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
-              <button className="btn" onClick={() => loadHistory(picked?.code)}>
+              <button className="btn" onClick={() => loadHistory()}>
                 Applica filtri
               </button>
               <button
@@ -605,7 +610,8 @@ export default function MovimentiPage() {
                   setFTo("");
                   setFType("ALL");
                   setFWarehouse("ALL");
-                  setTimeout(() => loadHistory(picked?.code), 0);
+                  setFPending("ALL");
+                  setTimeout(() => loadHistory(), 0);
                 }}
               >
                 Reset filtri
@@ -620,21 +626,23 @@ export default function MovimentiPage() {
           {/* FORM MOVIMENTO */}
           <div className="card" style={{ padding: 12, marginTop: 12 }}>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-              <button
-                className={`btn ${type === "IN" ? "btnPrimary" : ""}`}
-                onClick={() => setType("IN")}
-                type="button"
-              >
+              <button className={`btn ${type === "IN" ? "btnPrimary" : ""}`} onClick={() => setType("IN")} type="button">
                 Entrata
               </button>
 
-              <button
-                className={`btn ${type === "OUT" ? "btnPrimary" : ""}`}
-                onClick={() => setType("OUT")}
-                type="button"
-              >
+              <button className={`btn ${type === "OUT" ? "btnPrimary" : ""}`} onClick={() => setType("OUT")} type="button">
                 Uscita
               </button>
+
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <label className="label" style={{ margin: 0 }}>
+                  Magazzino
+                </label>
+                <select className="input" value={warehouse} onChange={(e) => setWarehouse(e.target.value as any)} style={{ width: 160 }}>
+                  <option value="PRM">PRM</option>
+                  <option value="REALE">REALE</option>
+                </select>
+              </div>
 
               <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <button className="btn" type="button" onClick={() => (scanning ? stopScan() : startScan())}>
@@ -656,7 +664,6 @@ export default function MovimentiPage() {
                   setSearch(v);
                   setOpen(true);
                   setPicked(null);
-                  setStock(null);
                   setMsg(null);
                   if (!v.trim()) setSuggestions([]);
                 }}
@@ -724,27 +731,15 @@ export default function MovimentiPage() {
 
             {scanning && (
               <div style={{ marginTop: 12 }}>
-                <video
-                  ref={videoRef}
-                  style={{ width: "100%", borderRadius: 12, background: "black" }}
-                  muted
-                  playsInline
-                />
-                <div style={{ fontSize: 12, opacity: 0.85, marginTop: 6 }}>
-                  Inquadra il codice a barre con la fotocamera.
-                </div>
+                <video ref={videoRef} style={{ width: "100%", borderRadius: 12, background: "black" }} muted playsInline />
+                <div style={{ fontSize: 12, opacity: 0.85, marginTop: 6 }}>Inquadra il codice a barre con la fotocamera.</div>
               </div>
             )}
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10, marginTop: 12 }}>
               <div style={{ gridColumn: "span 8" }}>
                 <label className="label">Note (opz.)</label>
-                <input
-                  className="input"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="DDT / commessa / cliente"
-                />
+                <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="DDT / commessa / cliente" />
               </div>
 
               <div style={{ gridColumn: "span 3" }}>
@@ -771,11 +766,8 @@ export default function MovimentiPage() {
                 <div>
                   <b>{picked.code}</b> · {picked.name}
                 </div>
-                <div style={{ marginTop: 4 }}>
-                  Magazzino:{" "}
-                  <b>{[picked.warehouse, picked.warehouse_desc].filter(Boolean).join(" - ") || "-"}</b>{" "}
-                  · UM: <b>{picked.um ?? "-"}</b> · Iniziale: <b>{picked.initial_qty ?? 0}</b> · Giacenza:{" "}
-                  <b>{stock ?? 0}</b>
+                <div style={{ marginTop: 4, opacity: 0.9 }}>
+                  UM: <b>{picked.um ?? "-"}</b> · Magazzino selezionato: <b>{warehouse}</b>
                 </div>
               </div>
             )}
@@ -786,12 +778,10 @@ export default function MovimentiPage() {
           {/* STORICO */}
           <div className="card" style={{ padding: 12, marginTop: 12 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-              <div style={{ fontWeight: 900 }}>
-                Storico movimenti {picked ? `(solo ${picked.code})` : "(ultimi)"}
-              </div>
+              <div style={{ fontWeight: 900 }}>Storico movimenti (ultimi)</div>
 
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button className="btn" onClick={() => loadHistory(picked?.code)}>
+                <button className="btn" onClick={() => loadHistory()}>
                   Aggiorna
                 </button>
               </div>
@@ -809,19 +799,23 @@ export default function MovimentiPage() {
                     <th>Q.tà</th>
                     <th>Note</th>
                     <th>Inserito da</th>
+                    <th>Stato</th>
                     <th>Azioni</th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {history.map((m) => {
-                    const who =
-                      (m.created_by && userMap[m.created_by]) ||
-                      m.created_by_email ||
-                      "-";
+                    const isPending = m.type === "OUT" && !!m.pending;
 
                     return (
-                      <tr key={m.id}>
+                      <tr
+                        key={m.id}
+                        style={{
+                          background: isPending ? "#f1f5f9" : "transparent",
+                          borderLeft: isPending ? "4px solid #94a3b8" : "4px solid transparent",
+                        }}
+                      >
                         <td>{fmtDate(m.created_at)}</td>
                         <td>
                           <span className={`badge ${m.type === "IN" ? "badgeIn" : "badgeOut"}`}>
@@ -836,10 +830,79 @@ export default function MovimentiPage() {
                           {m.qty}
                         </td>
                         <td>{m.note ?? ""}</td>
-                        <td>{who}</td>
+                        <td>{m.created_by_name ?? m.created_by_email ?? "-"}</td>
+
+                        {/* STATO */}
                         <td>
-                          {isAdmin ? (
-                            <button className="btn" onClick={() => deleteMovement(m.id)}>
+                          {m.type === "OUT" ? (
+                            m.pending ? (
+                              <span
+                                style={{
+                                  fontSize: 12,
+                                  padding: "4px 10px",
+                                  borderRadius: 999,
+                                  background: "#e2e8f0",
+                                  color: "#334155",
+                                  fontWeight: 800,
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                Da chiudere
+                              </span>
+                            ) : (
+                              <span
+                                style={{
+                                  fontSize: 12,
+                                  padding: "4px 10px",
+                                  borderRadius: 999,
+                                  background: "#dcfce7",
+                                  color: "#166534",
+                                  fontWeight: 800,
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                Confermato
+                              </span>
+                            )
+                          ) : (
+                            <span style={{ opacity: 0.6 }}>—</span>
+                          )}
+                        </td>
+
+                        {/* AZIONI */}
+                        <td>
+                          {m.type === "OUT" && m.pending ? (
+                            canCloseMovement(m) ? (
+                              <button
+                                onClick={() => openCloseModal(m)}
+                                style={{
+                                  padding: "6px 10px",
+                                  borderRadius: 10,
+                                  border: "1px solid #2563eb",
+                                  background: "#dbeafe",
+                                  color: "#1e40af",
+                                  cursor: "pointer",
+                                  fontWeight: 800,
+                                }}
+                              >
+                                Chiudi
+                              </button>
+                            ) : (
+                              <span style={{ opacity: 0.6 }}>—</span>
+                            )
+                          ) : isAdmin ? (
+                            <button
+                              onClick={() => deleteMovement(m.id)}
+                              style={{
+                                padding: "6px 10px",
+                                borderRadius: 10,
+                                border: "1px solid #dc2626",
+                                background: "#fee2e2",
+                                color: "#991b1b",
+                                cursor: "pointer",
+                                fontWeight: 700,
+                              }}
+                            >
                               Elimina
                             </button>
                           ) : (
@@ -852,7 +915,7 @@ export default function MovimentiPage() {
 
                   {history.length === 0 && (
                     <tr>
-                      <td colSpan={9} style={{ padding: 12, color: "#0f172a" }}>
+                      <td colSpan={10} style={{ padding: 12, color: "#0f172a" }}>
                         Nessun movimento.
                       </td>
                     </tr>
@@ -861,6 +924,111 @@ export default function MovimentiPage() {
               </table>
             </div>
           </div>
+
+          {/* MODAL CHIUSURA */}
+          {closeOpen && closing && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.55)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 200,
+                padding: 16,
+              }}
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget) closeCloseModal();
+              }}
+            >
+              <div
+                style={{
+                  width: "min(560px, 100%)",
+                  background: "white",
+                  borderRadius: 16,
+                  boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
+                  overflow: "hidden",
+                }}
+              >
+                <div style={{ padding: 14, borderBottom: "1px solid #e2e8f0" }}>
+                  <div style={{ fontWeight: 900, color: "#0f172a" }}>Chiudi uscita</div>
+                  <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>
+                    {closing.code} · {nameMap[closing.code] ?? ""} · {closing.warehouse ?? "-"}
+                  </div>
+                </div>
+
+                <div style={{ padding: 14, display: "grid", gap: 10 }}>
+                  <div style={{ fontSize: 13, color: "#0f172a", fontWeight: 800 }}>
+                    Vuoi registrare un rientro (opzionale)?
+                  </div>
+
+                  <label style={{ fontSize: 12, color: "#334155", fontWeight: 700 }}>
+                    Quantità rientrata (opzionale)
+                    <input
+                      className="input"
+                      value={returnQty}
+                      onChange={(e) => setReturnQty(e.target.value)}
+                      inputMode="decimal"
+                      placeholder="es. 2"
+                      style={{ marginTop: 6 }}
+                    />
+                  </label>
+
+                  <label style={{ fontSize: 12, color: "#334155", fontWeight: 700 }}>
+                    Nota chiusura (opzionale)
+                    <input
+                      className="input"
+                      value={closeNote}
+                      onChange={(e) => setCloseNote(e.target.value)}
+                      placeholder="es. rientro parziale / note"
+                      style={{ marginTop: 6 }}
+                    />
+                  </label>
+
+                  <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 6 }}>
+                    <button
+                      onClick={closeCloseModal}
+                      className="btn"
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 10,
+                        border: "1px solid #cbd5e1",
+                        background: "#f8fafc",
+                        color: "#0f172a",
+                        fontWeight: 800,
+                        cursor: "pointer",
+                      }}
+                      disabled={busyClose}
+                    >
+                      Annulla
+                    </button>
+
+                    <button
+                      onClick={confirmClose}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 10,
+                        border: "1px solid #2563eb",
+                        background: "#dbeafe",
+                        color: "#1e40af",
+                        fontWeight: 900,
+                        cursor: "pointer",
+                        opacity: busyClose ? 0.7 : 1,
+                      }}
+                      disabled={busyClose}
+                    >
+                      {busyClose ? "Salvo..." : "Conferma chiusura"}
+                    </button>
+                  </div>
+
+                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                    Dopo la chiusura lo stato diventa <b>Confermato</b> e non sarà più richiudibile.
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </main>

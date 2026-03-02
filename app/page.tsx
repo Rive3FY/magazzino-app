@@ -11,22 +11,28 @@ type Movement = {
   code: string;
   qty: number;
   note: string | null;
-  created_by: string | null;
-  created_by_email: string | null;
-  warehouse: string | null;
+  created_by_name: string | null;
+  warehouse: "PRM" | "REALE" | null;
 };
 
 type DbItem = {
   code: string;
   name: string;
   um: string | null;
-  warehouse: string | null;
-  warehouse_desc: string | null;
+};
+
+type DbStock = {
+  code: string;
+  warehouse: "PRM" | "REALE";
   initial_qty: number | null;
 };
 
 function isSameDay(d: Date, ref: Date) {
-  return d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth() && d.getDate() === ref.getDate();
+  return (
+    d.getFullYear() === ref.getFullYear() &&
+    d.getMonth() === ref.getMonth() &&
+    d.getDate() === ref.getDate()
+  );
 }
 
 function fmtDate(iso: string) {
@@ -39,6 +45,22 @@ function fmtDate(iso: string) {
   return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
 }
 
+function n(v: any) {
+  const x = Number(v ?? 0);
+  return Number.isFinite(x) ? x : 0;
+}
+
+type StockBoth = { PRM: number; REALE: number };
+
+function whereLabel(st: StockBoth) {
+  const a = st.PRM > 0;
+  const b = st.REALE > 0;
+  if (a && b) return "Entrambi";
+  if (a) return "PRM";
+  if (b) return "REALE";
+  return "Nessuno";
+}
+
 export default function Home() {
   const supabase = createClient();
 
@@ -47,17 +69,15 @@ export default function Home() {
   const [itemsCount, setItemsCount] = useState<number>(0);
   const [movements, setMovements] = useState<Movement[]>([]);
 
-  // user map (id -> "Nome Cognome · Badge X")
-  const [userMap, setUserMap] = useState<Record<string, string>>({});
-
   // search
+  const [warehouseFilter, setWarehouseFilter] = useState<"ALL" | "PRM" | "REALE">("ALL");
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<DbItem[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
 
   const [picked, setPicked] = useState<DbItem | null>(null);
-  const [stock, setStock] = useState<number | null>(null);
+  const [stock, setStock] = useState<StockBoth | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -67,7 +87,6 @@ export default function Home() {
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const [scanning, setScanning] = useState(false);
   const scanLockedRef = useRef(false);
-  const lastScanRef = useRef<{ code: string; ts: number } | null>(null);
 
   async function loadSuggestions(text: string) {
     const s = text.trim();
@@ -78,7 +97,7 @@ export default function Home() {
 
     const { data, error } = await supabase
       .from("items")
-      .select("code,name,um,warehouse,warehouse_desc,initial_qty")
+      .select("code,name,um")
       .or(`code.ilike.%${s}%,name.ilike.%${s}%`)
       .order("code", { ascending: true })
       .limit(12);
@@ -92,28 +111,52 @@ export default function Home() {
     setSuggestions((data ?? []) as DbItem[]);
   }
 
-  async function computeStockFor(code: string) {
-    const { data: item, error: e1 } = await supabase.from("items").select("initial_qty").eq("code", code).single();
-    if (e1) {
-      console.error(e1);
+  async function computeStockBoth(code: string) {
+    // base stock (item_stocks)
+    const { data: base, error: eBase } = await supabase
+      .from("item_stocks")
+      .select("code,warehouse,initial_qty")
+      .eq("code", code);
+
+    if (eBase) {
+      console.error("item_stocks error:", eBase);
       setStock(null);
       return;
     }
-    const initial = Number((item as any)?.initial_qty ?? 0);
 
-    const { data: movs, error: e2 } = await supabase.from("movements").select("type,qty").eq("code", code);
-    if (e2) {
-      console.error(e2);
-      setStock(initial);
+    let basePRM = 0;
+    let baseREALE = 0;
+    for (const r of (base ?? []) as DbStock[]) {
+      if (r.warehouse === "PRM") basePRM = n(r.initial_qty);
+      if (r.warehouse === "REALE") baseREALE = n(r.initial_qty);
+    }
+
+    // delta movements
+    const { data: movs, error: eMovs } = await supabase
+      .from("movements")
+      .select("warehouse,type,qty")
+      .eq("code", code);
+
+    if (eMovs) {
+      console.error("movements stock error:", eMovs);
+      setStock({ PRM: basePRM, REALE: baseREALE });
       return;
     }
 
-    let delta = 0;
+    let dPRM = 0;
+    let dREALE = 0;
+
     for (const m of movs ?? []) {
-      const v = Number((m as any).qty ?? 0);
-      delta += (m as any).type === "IN" ? v : -v;
+      const wh = (m as any).warehouse as "PRM" | "REALE" | null;
+      const t = (m as any).type as "IN" | "OUT";
+      const q = n((m as any).qty);
+      const signed = t === "IN" ? q : -q;
+
+      if (wh === "PRM") dPRM += signed;
+      if (wh === "REALE") dREALE += signed;
     }
-    setStock(initial + delta);
+
+    setStock({ PRM: basePRM + dPRM, REALE: baseREALE + dREALE });
   }
 
   async function pickItem(it: DbItem) {
@@ -121,21 +164,16 @@ export default function Home() {
     setSearch(`${it.code} — ${it.name}`);
     setOpen(false);
     setMsg(null);
-    await computeStockFor(it.code);
+    await computeStockBoth(it.code);
   }
 
   async function pickItemByCode(codeRaw: string) {
     const code = codeRaw.trim();
     if (!code) return;
 
-    const prev = lastScanRef.current;
-    const now = Date.now();
-    if (prev && prev.code === code && now - prev.ts < 1500) return;
-    lastScanRef.current = { code, ts: now };
-
     const { data: item, error } = await supabase
       .from("items")
-      .select("code,name,um,warehouse,warehouse_desc,initial_qty")
+      .select("code,name,um")
       .eq("code", code)
       .maybeSingle();
 
@@ -184,7 +222,6 @@ export default function Home() {
 
     stopScan();
     scanLockedRef.current = false;
-    lastScanRef.current = null;
 
     setScanning(true);
     await new Promise((r) => setTimeout(r, 200));
@@ -194,11 +231,9 @@ export default function Home() {
       if (!videoEl) throw new Error("Video non disponibile");
 
       readerRef.current = new BrowserMultiFormatReader();
-      const ignoreUntil = Date.now() + 600;
 
       await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
         if (!result) return;
-        if (Date.now() < ignoreUntil) return;
         if (scanLockedRef.current) return;
 
         const text = String(result.getText?.() ?? "").trim();
@@ -211,111 +246,52 @@ export default function Home() {
       });
     } catch (e: any) {
       console.error(e);
-      setMsg("Errore camera: " + (e?.message ?? "sconosciuto"));
+      setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
       stopScan();
     }
   }
 
   function resetSearch() {
     stopScan();
-    scanLockedRef.current = false;
-    lastScanRef.current = null;
-
     setSearch("");
     setSuggestions([]);
     setPicked(null);
     setStock(null);
     setOpen(false);
     setMsg(null);
+    setActiveIndex(0);
   }
 
-  async function refreshDashboard() {
-    setLoading(true);
-
-    const { count: cItems, error: eItems } = await supabase.from("items").select("code", { count: "exact", head: true });
-
-    const { data: movs, error: eMovs } = await supabase
-      .from("movements")
-      .select("id,created_at,type,code,qty,note,created_by,created_by_email,warehouse")
-      .order("created_at", { ascending: false })
-      .limit(100);
-
-    if (eItems) console.error(eItems);
-    if (eMovs) console.error(eMovs);
-
-    const rows = (movs ?? []) as Movement[];
-    setItemsCount(cItems ?? 0);
-    setMovements(rows);
-    setLoading(false);
-
-    // carica nomi/badge per "Inserito da"
-    const ids = Array.from(new Set(rows.map((r) => r.created_by).filter(Boolean) as string[]));
-    if (ids.length === 0) {
-      setUserMap({});
-      return;
-    }
-
-    const { data: prof, error: eP } = await supabase
-      .from("profiles")
-      .select("id,first_name,last_name,badge_number")
-      .in("id", ids);
-
-    if (eP) {
-      console.error("profiles load error:", eP);
-      setUserMap({});
-      return;
-    }
-
-    const map: Record<string, string> = {};
-    for (const p of prof ?? []) {
-      const id = (p as any).id as string;
-      const first = String((p as any).first_name ?? "").trim();
-      const last = String((p as any).last_name ?? "").trim();
-      const badge = String((p as any).badge_number ?? "").trim();
-      const full = [first, last].filter(Boolean).join(" ").trim();
-      const badgePart = badge ? ` · Badge ${badge}` : "";
-      map[id] = (full || "Operatore") + badgePart;
-    }
-    setUserMap(map);
-  }
-
-  // initial load
+  // dashboard load
   useEffect(() => {
     let alive = true;
 
     (async () => {
-      await refreshDashboard();
+      setLoading(true);
+
+      const { count: cItems, error: eItems } = await supabase
+        .from("items")
+        .select("code", { count: "exact", head: true });
+
+      const { data: movs, error: eMovs } = await supabase
+        .from("movements")
+        .select("id,created_at,type,code,qty,note,created_by_name,warehouse")
+        .order("created_at", { ascending: false })
+        .limit(100);
+
       if (!alive) return;
+
+      if (eItems) console.error(eItems);
+      if (eMovs) console.error(eMovs);
+
+      setItemsCount(cItems ?? 0);
+      setMovements((movs ?? []) as Movement[]);
+      setLoading(false);
     })();
 
     return () => {
       alive = false;
       stopScan();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ✅ realtime dashboard (movements live)
-  useEffect(() => {
-    let alive = true;
-    let timer: any = null;
-
-    const ch = supabase
-      .channel("dashboard-movements-live")
-      .on("postgres_changes", { event: "*", schema: "public", table: "movements" }, async () => {
-        if (!alive) return;
-        if (timer) clearTimeout(timer);
-
-        timer = setTimeout(async () => {
-          await refreshDashboard();
-        }, 250);
-      })
-      .subscribe();
-
-    return () => {
-      alive = false;
-      if (timer) clearTimeout(timer);
-      supabase.removeChannel(ch);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -343,6 +319,18 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, open]);
 
+  // Applica filtro magazzino ai suggerimenti (in memoria, non cambia query DB)
+  const filteredSuggestions = useMemo(() => {
+    if (warehouseFilter === "ALL") return suggestions;
+
+    // se l’utente filtra PRM/REALE, facciamo un filtro "soft":
+    // mostriamo comunque i suggerimenti, ma quando seleziona calcoliamo e poi gli diciamo “nessuna giacenza” se è vuoto.
+    // (Evitiamo 12 query extra per ogni battuta di tastiera.)
+    return suggestions;
+  }, [suggestions, warehouseFilter]);
+
+  const active = useMemo(() => filteredSuggestions[activeIndex], [filteredSuggestions, activeIndex]);
+
   const today = new Date();
   const movementsToday = useMemo(
     () => movements.filter((m) => isSameDay(new Date(m.created_at), today)).length,
@@ -351,7 +339,18 @@ export default function Home() {
 
   const lastMovement = movements[0] ?? null;
   const last10 = movements.slice(0, 10);
-  const active = useMemo(() => suggestions[activeIndex], [suggestions, activeIndex]);
+
+  // label “dove” solo se ho già stock
+  const where = stock ? whereLabel(stock) : "";
+
+  // quando ho stock e filtro magazzino, mostro un messaggio “coerente”
+  const filterHint = useMemo(() => {
+    if (!picked || !stock) return null;
+
+    if (warehouseFilter === "PRM" && stock.PRM <= 0) return "⚠️ In PRM non c’è giacenza.";
+    if (warehouseFilter === "REALE" && stock.REALE <= 0) return "⚠️ In REALE non c’è giacenza.";
+    return null;
+  }, [picked, stock, warehouseFilter]);
 
   return (
     <div>
@@ -371,16 +370,29 @@ export default function Home() {
       <div className="glass" style={{ marginTop: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div>
-            <div style={{ fontWeight: 900, fontSize: 16 }}> Cerca materiale</div>
+            <div style={{ fontWeight: 900, fontSize: 16 }}> Controllo veloce materiale</div>
             <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
-              Cerca per codice/descrizione oppure scansiona il barcode.
+              Cerca per codice/descrizione o scansiona. Vedi subito PRM / REALE e dove si trova.
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <select
+              className="input"
+              value={warehouseFilter}
+              onChange={(e) => setWarehouseFilter(e.target.value as any)}
+              style={{ width: 170 }}
+              aria-label="Filtro magazzino"
+            >
+              <option value="ALL">Tutti i magazzini</option>
+              <option value="PRM">Solo PRM</option>
+              <option value="REALE">Solo REALE</option>
+            </select>
+
             <button className="btn" onClick={() => (scanning ? stopScan() : startScan())}>
               {scanning ? "⏹ Ferma scansione" : " Scansiona barcode"}
             </button>
+
             <button className="btn" onClick={resetSearch}>Pulisci</button>
           </div>
         </div>
@@ -404,7 +416,7 @@ export default function Home() {
 
               if (e.key === "ArrowDown") {
                 e.preventDefault();
-                setActiveIndex((i) => Math.min(i + 1, suggestions.length - 1));
+                setActiveIndex((i) => Math.min(i + 1, filteredSuggestions.length - 1));
               } else if (e.key === "ArrowUp") {
                 e.preventDefault();
                 setActiveIndex((i) => Math.max(i - 1, 0));
@@ -435,10 +447,10 @@ export default function Home() {
                 zIndex: 50,
               }}
             >
-              {suggestions.length === 0 ? (
+              {filteredSuggestions.length === 0 ? (
                 <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
               ) : (
-                suggestions.map((it, idx) => (
+                filteredSuggestions.map((it, idx) => (
                   <div
                     key={it.code}
                     onMouseEnter={() => setActiveIndex(idx)}
@@ -451,10 +463,19 @@ export default function Home() {
                       cursor: "pointer",
                       background: idx === activeIndex ? "#eef2ff" : "white",
                       borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 10,
                     }}
                   >
-                    <div style={{ fontWeight: 900, color: "#0f172a" }}>{it.code}</div>
-                    <div style={{ fontSize: 12, color: "#334155" }}>{it.name}</div>
+                    <div>
+                      <div style={{ fontWeight: 900, color: "#0f172a" }}>{it.code}</div>
+                      <div style={{ fontSize: 12, color: "#334155" }}>{it.name}</div>
+                    </div>
+                    <div style={{ fontSize: 12, opacity: 0.8, color: "#0f172a" }}>
+                      ↵ seleziona
+                    </div>
                   </div>
                 ))
               )}
@@ -464,7 +485,12 @@ export default function Home() {
 
         {scanning && (
           <div style={{ marginTop: 12 }}>
-            <video ref={videoRef} style={{ width: "100%", borderRadius: 12, background: "black" }} muted playsInline />
+            <video
+              ref={videoRef}
+              style={{ width: "100%", borderRadius: 12, background: "black" }}
+              muted
+              playsInline
+            />
             <div style={{ fontSize: 12, marginTop: 6, opacity: 0.9 }}>
               Inquadra il codice a barre con la fotocamera.
             </div>
@@ -473,33 +499,32 @@ export default function Home() {
 
         {msg && <div style={{ marginTop: 10, fontWeight: 800 }}>{msg}</div>}
 
-        {picked && (
-          <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 12 }}>
-            <div style={{ gridColumn: "span 6" }} className="glass">
-              <div style={{ opacity: 0.85, fontSize: 12 }}>Materiale</div>
-              <div style={{ fontSize: 18, fontWeight: 900, marginTop: 6 }}>{picked.code}</div>
-              <div style={{ opacity: 0.9, marginTop: 6 }}>{picked.name}</div>
+        {picked && stock && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 12 }}>
+              <div style={{ gridColumn: "span 6" }} className="glass">
+                <div style={{ opacity: 0.85, fontSize: 12 }}>Materiale</div>
+                <div style={{ fontSize: 18, fontWeight: 900, marginTop: 6 }}>{picked.code}</div>
+                <div style={{ opacity: 0.9, marginTop: 6 }}>{picked.name}</div>
+                <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>
+                  UM: <b>{picked.um ?? "-"}</b> · Dove: <b>{where}</b>
+                </div>
+              </div>
+
+              <div style={{ gridColumn: "span 3" }} className="glass">
+                <div style={{ opacity: 0.85, fontSize: 12 }}>PRM</div>
+                <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>{stock.PRM}</div>
+              </div>
+
+              <div style={{ gridColumn: "span 3" }} className="glass">
+                <div style={{ opacity: 0.85, fontSize: 12 }}>REALE</div>
+                <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>{stock.REALE}</div>
+              </div>
             </div>
 
-            <div style={{ gridColumn: "span 3" }} className="glass">
-              <div style={{ opacity: 0.85, fontSize: 12 }}>Magazzino</div>
-              <div style={{ fontSize: 14, fontWeight: 900, marginTop: 8 }}>
-                {[picked.warehouse, picked.warehouse_desc].filter(Boolean).join(" - ") || "-"}
-              </div>
-              <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>
-                UM: <b>{picked.um ?? "-"}</b>
-              </div>
-            </div>
-
-            <div style={{ gridColumn: "span 3" }} className="glass">
-              <div style={{ opacity: 0.85, fontSize: 12 }}>Giacenza attuale</div>
-              <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6 }}>
-                {stock === null ? "…" : stock}
-              </div>
-              <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>
-                (iniziale {picked.initial_qty ?? 0} + movimenti)
-              </div>
-            </div>
+            {filterHint && (
+              <div style={{ marginTop: 10, fontWeight: 800 }}>{filterHint}</div>
+            )}
           </div>
         )}
       </div>
@@ -530,7 +555,7 @@ export default function Home() {
             {loading
               ? "…"
               : lastMovement
-              ? `${lastMovement.code} · ${lastMovement.type === "IN" ? "Entrata" : "Uscita"}`
+              ? `${lastMovement.code} · ${lastMovement.type === "IN" ? "Entrata" : "Uscita"} · ${lastMovement.warehouse ?? "-"}`
               : "—"}
           </div>
           <div style={{ opacity: 0.85, fontSize: 12, marginTop: 6 }}>
@@ -553,6 +578,7 @@ export default function Home() {
                 <th>Data</th>
                 <th>Tipo</th>
                 <th>Codice</th>
+                <th>Magazzino</th>
                 <th>Q.tà</th>
                 <th>Note</th>
                 <th>Inserito da</th>
@@ -561,37 +587,35 @@ export default function Home() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: 12, color: "#0f172a" }}>
+                  <td colSpan={7} style={{ padding: 12, color: "#0f172a" }}>
                     Caricamento…
                   </td>
                 </tr>
               ) : last10.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: 12, color: "#0f172a" }}>
+                  <td colSpan={7} style={{ padding: 12, color: "#0f172a" }}>
                     Nessun movimento.
                   </td>
                 </tr>
               ) : (
-                last10.map((m) => {
-                  const who = (m.created_by && userMap[m.created_by]) || m.created_by_email || "-";
-                  return (
-                    <tr key={m.id}>
-                      <td>{fmtDate(m.created_at)}</td>
-                      <td>
-                        <span className={`badge ${m.type === "IN" ? "badgeIn" : "badgeOut"}`}>
-                          {m.type === "IN" ? "Entrata" : "Uscita"}
-                        </span>
-                      </td>
-                      <td>{m.code}</td>
-                      <td>
-                        {m.type === "IN" ? "+" : "-"}
-                        {m.qty}
-                      </td>
-                      <td>{m.note ?? ""}</td>
-                      <td>{who}</td>
-                    </tr>
-                  );
-                })
+                last10.map((m) => (
+                  <tr key={m.id}>
+                    <td>{fmtDate(m.created_at)}</td>
+                    <td>
+                      <span className={`badge ${m.type === "IN" ? "badgeIn" : "badgeOut"}`}>
+                        {m.type === "IN" ? "Entrata" : "Uscita"}
+                      </span>
+                    </td>
+                    <td>{m.code}</td>
+                    <td>{m.warehouse ?? "-"}</td>
+                    <td>
+                      {m.type === "IN" ? "+" : "-"}
+                      {m.qty}
+                    </td>
+                    <td>{m.note ?? ""}</td>
+                    <td>{m.created_by_name ?? "-"}</td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>

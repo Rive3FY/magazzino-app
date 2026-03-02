@@ -455,6 +455,34 @@ export default function MovimentiPage() {
       }
       setIsAdmin(!!isAdm);
     });
+    // 🔹 REALTIME MOVEMENTS (NUOVO BLOCCO)
+useEffect(() => {
+  const channel = supabase
+    .channel("movements-live")
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "movements" },
+      async () => {
+        await loadHistory(picked?.code);
+      }
+    )
+    .on(
+      "postgres_changes",
+      { event: "DELETE", schema: "public", table: "movements" },
+      async () => {
+        await loadHistory(picked?.code);
+      }
+    )
+    .subscribe((status) => {
+      console.log("Realtime status:", status);
+    });
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [picked?.code, fFrom, fTo, fType, fWarehouse]);
 
     function onDocMouseDown(e: MouseEvent) {
       if (!boxRef.current) return;

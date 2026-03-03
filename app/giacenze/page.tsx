@@ -2,41 +2,79 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "../_lib/supabase/client";
 
 const PAGE_SIZE = 25;
 
 type WarehouseView = "REALE" | "PRM" | "TUTTI";
+type SortDir = "none" | "asc" | "desc";
 
-type DbItem = {
-  code: string;
-  name: string;
-  um: string | null;
-};
+const EXCEL_COLS = [
+  "Def. Progetto",
+  "Materiale",
+  "Descrizione Materiale",
+  "Divisione",
+  "Descrizione Divisione",
+  "Magazzino",
+  "Descrizione Magazzino",
+  "Qnt. a Mag. bloccato",
+  "Controllo Qualità Progetto",
+  "Valore per Stock",
+  "Controllo Qualità Magazzino",
+  "Valore a Magazzino",
+  "Bloccato Progetto",
+  "Scarico Tot",
+  "Qnt. stock prog",
+  "Finalità di Utilizzo",
+  "Gruppo Merci",
+  "Descrizione Gruppo Merci",
+  "Profit Center",
+  "Descrizione Profit Center",
+  "Unità di Misura",
+  "Qnt. a Mag. libero",
+  "Tipo Valore",
+  "Centro Resp.",
+  "Descrizione Centro Resp.",
+  "Descrizione Contab.",
+  "Data Primo utilizzo previsto",
+  "Data Ultimo utilizzo previsto",
+  "Data Prima EM",
+  "Data Ultima EM",
+  "Materiale Pianif.",
+] as const;
 
-type StockRow = DbItem & {
-  stockPRM: number;
-  stockREALE: number;
-};
-
-type DbStock = {
+type DbRow = {
   code: string;
   warehouse: "PRM" | "REALE";
-  initial_qty: number | null;
-};
+  qty_free: number;
+  qty_blocked: number;
+  qty_quality: number;
+  initial_qty: number;
+  excel: Record<string, any> | null;
 
-type DbMov = {
-  code: string;
-  warehouse: "PRM" | "REALE" | null;
-  type: "IN" | "OUT";
-  qty: number;
+  // se la rpc li ritorna (consigliato)
+  name?: string | null;
+  um?: string | null;
+
+  // conteggio totale (ritornato dalla rpc)
+  total_count?: number | null;
 };
 
 function n(v: any) {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
+}
+
+function toNumberLoose(v: any) {
+  const s = String(v ?? "").trim().replace(",", ".");
+  const x = Number(s);
+  return Number.isFinite(x) ? x : 0;
+}
+
+function sanitizeId(s: string) {
+  return "f_" + s.replace(/\W+/g, "_").toLowerCase();
 }
 
 export default function GiacenzePage() {
@@ -46,138 +84,180 @@ export default function GiacenzePage() {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
 
-  const [items, setItems] = useState<DbItem[]>([]);
+  const [sortKey, setSortKey] = useState<string>("Materiale");
+  const [sortDir, setSortDir] = useState<SortDir>("none");
+
   const [count, setCount] = useState(0);
-  const [rows, setRows] = useState<StockRow[]>([]);
+  const [rows, setRows] = useState<DbRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState<string | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE));
 
+  // Popup
+  const [editing, setEditing] = useState<DbRow | null>(null);
+  const [editExcel, setEditExcel] = useState<Record<string, any>>({});
+  const [saving, setSaving] = useState(false);
+
+  // quali campi sono sbloccati (uno per volta / a piacere)
+  const [unlocked, setUnlocked] = useState<Record<string, boolean>>({});
+
+  function cycleSort(clickedKey: string) {
+    setPage(1);
+
+    if (sortKey !== clickedKey) {
+      setSortKey(clickedKey);
+      setSortDir("asc");
+      return;
+    }
+
+    setSortDir((prev) => {
+      if (prev === "none") return "asc";
+      if (prev === "asc") return "desc";
+      return "none";
+    });
+  }
+
+  function sortIcon(col: string) {
+    if (sortKey !== col || sortDir === "none") return "↕";
+    return sortDir === "asc" ? "↑" : "↓";
+  }
+
   async function load() {
     setLoading(true);
+    setMsg(null);
 
-    const search = q.trim();
-    let query = supabase.from("items").select("code,name,um", { count: "exact" });
+    const search = q.trim() || null;
+    const offset = (page - 1) * PAGE_SIZE;
 
-    if (search) query = query.or(`code.ilike.%${search}%,name.ilike.%${search}%`);
-
-    const from = (page - 1) * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
-
-    const { data, error, count: c } = await query.order("code", { ascending: true }).range(from, to);
+    // ✅ Ordinamento globale via RPC
+    const { data, error } = await supabase.rpc("giacenze_list", {
+      p_view: view,
+      p_search: search,
+      p_sort_key: sortKey,
+      p_sort_dir: sortDir, // "none" | "asc" | "desc"
+      p_limit: PAGE_SIZE,
+      p_offset: offset,
+    });
 
     if (error) {
-      console.error("items load error:", error);
-      setItems([]);
+      // console spesso mostra "{}" con turbopack: stampo il raw
+      // @ts-ignore
+      console.error("giacenze_list error raw:", error);
       setRows([]);
       setCount(0);
       setLoading(false);
+      setMsg("Errore caricamento giacenze (RPC). Controlla che la funzione giacenze_list esista e sia pubblicata.");
       return;
     }
 
-    const list = (data ?? []) as DbItem[];
-    setItems(list);
-    setCount(c ?? 0);
+    const list = (data ?? []) as DbRow[];
+    setRows(list);
 
-    const codes = list.map((i) => i.code).filter(Boolean);
-    if (codes.length === 0) {
-      setRows([]);
-      setLoading(false);
-      return;
-    }
+    // total_count: o è in ogni riga, o mettiamo fallback = lunghezza
+    const tc = Number(list?.[0]?.total_count ?? 0);
+    setCount(Number.isFinite(tc) && tc > 0 ? tc : list.length);
 
-    // 1) base stock da item_stocks (PRM / REALE)
-    const { data: baseStocks, error: eS } = await supabase
-      .from("item_stocks")
-      .select("code,warehouse,initial_qty")
-      .in("code", codes);
-
-    if (eS) console.error("item_stocks load error:", eS);
-
-    const baseMap = new Map<string, { PRM: number; REALE: number }>();
-    for (const c of codes) baseMap.set(c, { PRM: 0, REALE: 0 });
-
-    for (const r of (baseStocks ?? []) as DbStock[]) {
-      const m = baseMap.get(r.code) ?? { PRM: 0, REALE: 0 };
-      if (r.warehouse === "PRM") m.PRM = n(r.initial_qty);
-      if (r.warehouse === "REALE") m.REALE = n(r.initial_qty);
-      baseMap.set(r.code, m);
-    }
-
-    // 2) delta stock da movements
-    let movQuery = supabase.from("movements").select("code,warehouse,type,qty").in("code", codes);
-
-    // se non stai vedendo "TUTTI" filtriamo lato DB (più veloce)
-    if (view === "PRM") movQuery = movQuery.eq("warehouse", "PRM");
-    if (view === "REALE") movQuery = movQuery.eq("warehouse", "REALE");
-
-    const { data: movs, error: eM } = await movQuery;
-    if (eM) console.error("movements load error:", eM);
-
-    const deltaMap = new Map<string, { PRM: number; REALE: number }>();
-    for (const c of codes) deltaMap.set(c, { PRM: 0, REALE: 0 });
-
-    for (const m of (movs ?? []) as DbMov[]) {
-      const wh = (m.warehouse ?? "") as any;
-      if (wh !== "PRM" && wh !== "REALE") continue;
-
-      const d = deltaMap.get(m.code) ?? { PRM: 0, REALE: 0 };
-      const signed = (m.type === "IN" ? 1 : -1) * n(m.qty);
-
-      if (wh === "PRM") d.PRM += signed;
-      if (wh === "REALE") d.REALE += signed;
-
-      deltaMap.set(m.code, d);
-    }
-
-    const computed: StockRow[] = list.map((it) => {
-      const b = baseMap.get(it.code) ?? { PRM: 0, REALE: 0 };
-      const d = deltaMap.get(it.code) ?? { PRM: 0, REALE: 0 };
-
-      return {
-        ...it,
-        stockPRM: b.PRM + d.PRM,
-        stockREALE: b.REALE + d.REALE,
-      };
-    });
-
-    setRows(computed);
     setLoading(false);
   }
 
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, view]);
+  }, [page, view, sortKey, sortDir]);
 
   useEffect(() => {
     setPage(1);
-  }, [q, view]);
+  }, [q, view, sortKey, sortDir]);
 
   useEffect(() => {
-    load();
+    // ricerca live (senza tasto)
+    const t = setTimeout(() => {
+      load();
+    }, 250);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
   const viewRows = useMemo(() => rows, [rows]);
 
+  function openEdit(r: DbRow) {
+    setEditing(r);
+
+    const base = { ...(r.excel ?? {}) };
+
+    // forzo questi coerenti
+    base["Materiale"] = r.code;
+    if (r.name != null) base["Descrizione Materiale"] = r.name ?? "";
+    if (r.um != null) base["Unità di Misura"] = r.um ?? "";
+
+    // riallineo quantità nel json (se mancanti)
+    if (base["Qnt. a Mag. libero"] == null) base["Qnt. a Mag. libero"] = r.qty_free ?? 0;
+    if (base["Qnt. a Mag. bloccato"] == null) base["Qnt. a Mag. bloccato"] = r.qty_blocked ?? 0;
+    if (base["Controllo Qualità Magazzino"] == null) base["Controllo Qualità Magazzino"] = r.qty_quality ?? 0;
+
+    setEditExcel(base);
+    setUnlocked({}); // tutto bloccato all'apertura
+    setMsg(null);
+  }
+
+  async function saveEdit() {
+    if (!editing) return;
+
+    setSaving(true);
+    setMsg(null);
+
+    try {
+      // riallineo i numeri “interni”
+      const qtyFree = toNumberLoose(editExcel["Qnt. a Mag. libero"]);
+      const qtyBlocked = toNumberLoose(editExcel["Qnt. a Mag. bloccato"]);
+      const qtyQuality = toNumberLoose(editExcel["Controllo Qualità Magazzino"]);
+      const initial = qtyFree + qtyBlocked + qtyQuality;
+
+      const payload = {
+        excel: editExcel,
+        qty_free: qtyFree,
+        qty_blocked: qtyBlocked,
+        qty_quality: qtyQuality,
+        initial_qty: initial,
+      };
+
+      const { error } = await supabase
+        .from("item_stocks")
+        .update(payload as any)
+        .eq("code", editing.code)
+        .eq("warehouse", editing.warehouse);
+
+      if (error) {
+        // @ts-ignore
+        console.error("saveEdit error raw:", error);
+        setMsg("Errore salvataggio: " + ((error as any)?.message ?? "sconosciuto"));
+        setSaving(false);
+        return;
+      }
+
+      setMsg("Salvato ✅");
+      setEditing(null);
+      setEditExcel({});
+      setUnlocked({});
+      await load();
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function exportXlsx() {
-    const data =
-      view === "TUTTI"
-        ? viewRows.map((r) => ({
-            Materiale: r.code,
-            Descrizione: r.name,
-            UM: r.um ?? "",
-            PRM: r.stockPRM ?? 0,
-            REALE: r.stockREALE ?? 0,
-          }))
-        : viewRows.map((r) => ({
-            Materiale: r.code,
-            Descrizione: r.name,
-            UM: r.um ?? "",
-            Magazzino: view,
-            Giacenza: view === "PRM" ? r.stockPRM ?? 0 : r.stockREALE ?? 0,
-          }));
+    const data = viewRows.map((r) => {
+      const obj: Record<string, any> = {};
+      for (const c of EXCEL_COLS) {
+        if (c === "Materiale") obj[c] = r.code;
+        else if (c === "Descrizione Materiale") obj[c] = (r.name ?? r.excel?.[c] ?? "");
+        else if (c === "Unità di Misura") obj[c] = (r.um ?? r.excel?.[c] ?? "");
+        else obj[c] = r.excel?.[c] ?? "";
+      }
+      obj["_warehouse"] = r.warehouse;
+      return obj;
+    });
 
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -188,30 +268,21 @@ export default function GiacenzePage() {
   return (
     <main className="panel">
       <div className="pageBar">
-        <div className="pageBarTitle">Magazzino - Giacenze</div>
+        <div className="pageBarTitle">Magazzino - Giacenze (Excel completo)</div>
         <div className="pageBarActions">
-          <a className="btn" href="/movimenti">
-            Movimenti
-          </a>
-          <a className="btn" href="/import">
-            Import
-          </a>
+          <a className="btn" href="/movimenti">Movimenti</a>
+          <a className="btn" href="/import">Import</a>
         </div>
       </div>
 
-      {/* Barra filtri orizzontale */}
+      {/* Filtri */}
       <div className="card" style={{ padding: 12 }}>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "180px 1fr auto auto",
-            gap: 10,
-            alignItems: "end",
-          }}
-        >
+        <div style={{ display: "grid", gridTemplateColumns: "180px 1fr auto auto", gap: 10, alignItems: "end" }}>
           <div>
-            <label className="label">Magazzino</label>
+            <label className="label" htmlFor="viewSel">Magazzino</label>
             <select
+              id="viewSel"
+              name="viewSel"
               className="input"
               value={view}
               onChange={(e) => setView(e.target.value as WarehouseView)}
@@ -223,49 +294,69 @@ export default function GiacenzePage() {
           </div>
 
           <div>
-            <label className="label">Cerca</label>
+            <label className="label" htmlFor="qSearch">Cerca</label>
             <input
+              id="qSearch"
+              name="qSearch"
               className="input"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Codice o descrizione…"
+              placeholder="Codice, descrizione, qualunque colonna excel…"
               style={{ width: "100%" }}
             />
           </div>
 
-          <button className="btn" onClick={load}>
-            Aggiorna
-          </button>
+          <button className="btn" onClick={load}>Aggiorna</button>
+          <button className="btn" onClick={exportXlsx}>Export pagina</button>
+        </div>
 
-          <button className="btn" onClick={exportXlsx}>
-            Export pagina
-          </button>
+        <div style={{ marginTop: 10, fontSize: 12, opacity: 0.8 }}>
+          Ordinamento: clicca su una colonna → <b>↑</b> (ASC) → <b>↓</b> (DESC) → <b>↕</b> (default).
         </div>
       </div>
+
+      {msg && <div style={{ padding: 12, fontWeight: 800 }}>{msg}</div>}
 
       {loading ? (
         <div style={{ padding: 12 }}>Caricamento…</div>
       ) : (
         <>
-          <div style={{ overflowX: "auto", marginTop: 12 }}>
-            <table className="table">
+          {/* ✅ Scroll orizzontale garantito */}
+          <div
+            style={{
+              overflowX: "auto",
+              overflowY: "hidden",
+              width: "100%",
+              marginTop: 12,
+              WebkitOverflowScrolling: "touch",
+            }}
+          >
+            <table
+              className="table"
+              style={{
+                minWidth: 2600, // abbastanza per 31 colonne + warehouse
+              }}
+            >
               <thead>
                 <tr>
-                  <th>Materiale</th>
-                  <th>Descrizione</th>
-                  <th>UM</th>
+                  <th
+                    onClick={() => cycleSort("_warehouse")}
+                    style={{ cursor: "pointer", userSelect: "none" }}
+                    title="Ordina"
+                  >
+                    Warehouse <span style={{ opacity: 0.7 }}>{sortIcon("_warehouse")}</span>
+                  </th>
 
-                  {view === "TUTTI" ? (
-                    <>
-                      <th>PRM</th>
-                      <th>REALE</th>
-                    </>
-                  ) : (
-                    <>
-                      <th>Magazzino</th>
-                      <th>Giacenza</th>
-                    </>
-                  )}
+                  {EXCEL_COLS.map((c) => (
+                    <th
+                      key={c}
+                      onClick={() => cycleSort(c)}
+                      style={{ cursor: "pointer", userSelect: "none" }}
+                      title="Ordina"
+                    >
+                      {c} <span style={{ opacity: 0.7 }}>{sortIcon(c)}</span>
+                    </th>
+                  ))}
                 </tr>
               </thead>
 
@@ -273,35 +364,30 @@ export default function GiacenzePage() {
                 {viewRows.map((r, idx) => {
                   const zebraBg = idx % 2 === 0 ? "rgba(15,23,42,0.03)" : "rgba(15,23,42,0.08)";
                   return (
-                    <tr key={r.code} style={{ background: zebraBg }}>
-                      <td style={{ fontWeight: 900 }}>{r.code}</td>
-                      <td>{r.name}</td>
-                      <td>{r.um ?? ""}</td>
+                    <tr
+                      key={`${r.code}__${r.warehouse}`}
+                      style={{ background: zebraBg, cursor: "pointer" }}
+                      title="Clicca per aprire e modificare (con matita)"
+                      onClick={() => openEdit(r)}
+                    >
+                      <td style={{ fontWeight: 900 }}>{r.warehouse}</td>
 
-                      {view === "TUTTI" ? (
-                        <>
-                          <td>
-                            <b>{r.stockPRM ?? 0}</b>
-                          </td>
-                          <td>
-                            <b>{r.stockREALE ?? 0}</b>
-                          </td>
-                        </>
-                      ) : (
-                        <>
-                          <td>{view}</td>
-                          <td>
-                            <b>{view === "PRM" ? r.stockPRM ?? 0 : r.stockREALE ?? 0}</b>
-                          </td>
-                        </>
-                      )}
+                      {EXCEL_COLS.map((c) => {
+                        let v: any = r.excel?.[c] ?? "";
+
+                        if (c === "Materiale") v = r.code;
+                        if (c === "Descrizione Materiale") v = (r.name ?? v);
+                        if (c === "Unità di Misura") v = (r.um ?? v);
+
+                        return <td key={c}>{String(v ?? "")}</td>;
+                      })}
                     </tr>
                   );
                 })}
 
                 {viewRows.length === 0 && (
                   <tr>
-                    <td colSpan={view === "TUTTI" ? 5 : 5} style={{ padding: 12, color: "#0f172a" }}>
+                    <td colSpan={1 + EXCEL_COLS.length} style={{ padding: 12, color: "#0f172a" }}>
                       Nessun risultato.
                     </td>
                   </tr>
@@ -310,6 +396,7 @@ export default function GiacenzePage() {
             </table>
           </div>
 
+          {/* paginazione */}
           <div style={{ marginTop: 14, display: "flex", gap: 10, alignItems: "center" }}>
             <button
               className="btn"
@@ -334,6 +421,156 @@ export default function GiacenzePage() {
             </button>
           </div>
         </>
+      )}
+
+      {/* POPUP EDIT */}
+      {editing && (
+        <div
+          onMouseDown={() => {
+            if (saving) return;
+            setEditing(null);
+            setEditExcel({});
+            setUnlocked({});
+            setMsg(null);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 14,
+            zIndex: 999,
+          }}
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              width: "min(1100px, 100%)",
+              maxHeight: "85vh",
+              overflow: "auto",
+              background: "white",
+              borderRadius: 14,
+              border: "1px solid rgba(15,23,42,0.16)",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
+              padding: 12,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ fontWeight: 900 }}>
+                Modifica riga · <span style={{ opacity: 0.75 }}>{editing.code}</span> ·{" "}
+                <span style={{ opacity: 0.75 }}>{editing.warehouse}</span>
+              </div>
+
+              <div style={{ display: "flex", gap: 10 }}>
+                <button
+                  className="btn"
+                  disabled={saving}
+                  onClick={() => {
+                    setEditing(null);
+                    setEditExcel({});
+                    setUnlocked({});
+                    setMsg(null);
+                  }}
+                >
+                  Chiudi
+                </button>
+
+                <button className="btn btnPrimary" disabled={saving} onClick={saveEdit}>
+                  {saving ? "Salvataggio…" : "Salva"}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
+              Tutto è bloccato. Premi la <b>matita</b> a destra del campo per sbloccare solo quel campo.
+            </div>
+
+            <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
+              {EXCEL_COLS.map((c) => {
+                const id = sanitizeId(c);
+                const isMaterial = c === "Materiale";
+                const computedValue =
+                  c === "Materiale"
+                    ? editing.code
+                    : c === "Descrizione Materiale"
+                    ? (editing.name ?? editExcel[c] ?? "")
+                    : c === "Unità di Misura"
+                    ? (editing.um ?? editExcel[c] ?? "")
+                    : (editExcel[c] ?? "");
+
+                const canUnlock = !isMaterial && c !== "Descrizione Materiale" && c !== "Unità di Misura";
+                const isUnlocked = !!unlocked[c];
+                const disabled = saving || !canUnlock || !isUnlocked;
+
+                const inputStyle: React.CSSProperties = disabled
+                  ? { background: "#f1f5f9", color: "#64748b" }
+                  : { background: "white", color: "#0f172a" };
+
+                return (
+                  <div key={c} style={{ gridColumn: "span 6" }}>
+                    <label className="label" htmlFor={id}>{c}</label>
+
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <input
+                        id={id}
+                        name={id}
+                        className="input"
+                        disabled={disabled}
+                        value={String(computedValue ?? "")}
+                        style={{ ...inputStyle, flex: 1 }}
+                        onChange={(e) => {
+                          if (disabled) return;
+                          const v = e.target.value;
+                          setEditExcel((prev) => ({ ...prev, [c]: v }));
+                        }}
+                      />
+
+                      {/* Matita a fine riga */}
+                      <button
+  type="button"
+  className="btn"
+  disabled={!canUnlock || saving}
+  onClick={() => {
+    if (!canUnlock || saving) return;
+    setUnlocked((prev) => ({ ...prev, [c]: !prev[c] }));
+  }}
+  title={canUnlock ? (isUnlocked ? "Blocca campo" : "Modifica campo") : "Campo non modificabile"}
+  style={{
+    width: 44,
+    justifyContent: "center",
+    opacity: canUnlock ? 1 : 0.5,
+  }}
+>
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M12 20h9"/>
+    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
+  </svg>
+</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {msg && <div style={{ marginTop: 10, fontWeight: 800 }}>{msg}</div>}
+
+            <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
+              Nota: se modifichi <b>Qnt. a Mag. libero / bloccato / Controllo Qualità Magazzino</b>, al salvataggio vengono riallineati anche i campi numerici interni.
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );

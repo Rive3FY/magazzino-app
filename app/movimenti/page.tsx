@@ -365,40 +365,49 @@ export default function MovimentiPage() {
   }
 
   async function saveMovement() {
-    setMsg(null);
-    if (!userId) return setMsg("Devi essere loggato per salvare movimenti.");
-    if (!picked) return setMsg("Seleziona un materiale (scrivi per cercare o scansiona).");
+  setMsg(null);
+  if (!userId) return setMsg("Devi essere loggato per salvare movimenti.");
+  if (!picked) return setMsg("Seleziona un materiale (scrivi per cercare o scansiona).");
 
-    const qn = toNumber(qty);
-    if (!Number.isFinite(qn) || qn <= 0) return setMsg("Quantità non valida (deve essere > 0).");
+  const qn = toNumber(qty);
+  if (!Number.isFinite(qn) || qn <= 0) return setMsg("Quantità non valida (deve essere > 0).");
 
-    const payload: Partial<MovementRow> = {
-      type,
-      code: picked.code,
-      qty: qn,
-      note: note.trim() || null,
-      created_by: userId,
-      created_by_name: null,
-      warehouse,
-      status: type === "OUT" ? "OPEN" : "CLOSED",
-      // OUT: parte da 0, IN: non interessa ma mettiamo 0 per NOT NULL
-      returned_qty: 0,
-      return_note: null,
-      closed_at: type === "OUT" ? null : new Date().toISOString(),
-      closed_by: type === "OUT" ? null : userId,
-      referent_id: null,
-      referee_email: null,
-    };
+  // 🔹 recupera nome e cognome dal profilo
+  const { data: prof } = await supabase
+    .from("profiles")
+    .select("first_name,last_name")
+    .eq("id", userId)
+    .maybeSingle();
 
-    const { error } = await supabase.from("movements").insert(payload as any);
-    if (error) return setMsg("Errore salvataggio: " + (error as any)?.message);
+  const fullName =
+    `${String((prof as any)?.first_name ?? "").trim()} ${String((prof as any)?.last_name ?? "").trim()}`.trim() || null;
 
-    setQty("");
-    setNote("");
-    setMsg("Movimento salvato ✅");
-    await loadHistory();
-    setTimeout(() => qtyRef.current?.focus(), 80);
-  }
+  const payload: Partial<MovementRow> = {
+    type,
+    code: picked.code,
+    qty: qn,
+    note: note.trim() || null,
+    created_by: userId,
+    created_by_name: fullName, // ✅ ora salva nome e cognome
+    warehouse,
+    status: type === "OUT" ? "OPEN" : "CLOSED",
+    returned_qty: 0,
+    return_note: null,
+    closed_at: type === "OUT" ? null : new Date().toISOString(),
+    closed_by: type === "OUT" ? null : userId,
+    referent_id: null,
+    referee_email: null,
+  };
+
+  const { error } = await supabase.from("movements").insert(payload as any);
+  if (error) return setMsg("Errore salvataggio: " + (error as any)?.message);
+
+  setQty("");
+  setNote("");
+  setMsg("Movimento salvato ✅");
+  await loadHistory();
+  setTimeout(() => qtyRef.current?.focus(), 80);
+}
 
   async function deleteMovement(id: string) {
     if (!isAdmin) return alert("Solo l'admin può eliminare i movimenti.");

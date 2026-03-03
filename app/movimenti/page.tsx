@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 
-type Warehouse = "PRM" | "REALE";
+const PAGE_LIMIT = 300;
 
 type DbItem = {
   code: string;
@@ -12,41 +12,37 @@ type DbItem = {
   um: string | null;
 };
 
-type DbStockRow = {
-  code: string;
-  warehouse: Warehouse;
-  initial_qty: number | null;
-};
-
-type DbMovement = {
+type MovementRow = {
   id: string;
   created_at: string;
   type: "IN" | "OUT";
   code: string;
   qty: number;
   note: string | null;
-  warehouse: Warehouse | null;
-  pending: boolean;
+
+  warehouse: "PRM" | "REALE" | null;
+
   created_by: string | null;
-  created_by_email: string | null;
   created_by_name: string | null;
+
+  // chiusura/rettifica
+  status: "OPEN" | "CLOSED" | null;
+  returned_qty: number | null;
+  return_note: string | null;
+  closed_at: string | null;
+  closed_by: string | null;
 };
 
-type StockBoth = { PRM: number; REALE: number };
+type WarehouseOpt = { key: "PRM" | "REALE"; label: string };
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
   const hh = String(d.getHours()).padStart(2, "0");
   const mi = String(d.getMinutes()).padStart(2, "0");
   return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
-}
-
-function toNumber(v: string) {
-  const n = Number(v.trim().replace(",", "."));
-  return Number.isFinite(n) ? n : NaN;
 }
 
 function n(v: any) {
@@ -54,29 +50,62 @@ function n(v: any) {
   return Number.isFinite(x) ? x : 0;
 }
 
-function whereLabel(st: StockBoth) {
-  const a = st.PRM > 0;
-  const b = st.REALE > 0;
-  if (a && b) return "Entrambi";
-  if (a) return "PRM";
-  if (b) return "REALE";
-  return "Nessuno";
+function toNumber(v: string) {
+  const x = Number(String(v ?? "").trim().replace(",", "."));
+  return Number.isFinite(x) ? x : NaN;
+}
+
+function toIsoStartOfDay(d: string) {
+  if (!d) return null;
+  return new Date(`${d}T00:00:00.000`).toISOString();
+}
+function toIsoEndOfDay(d: string) {
+  if (!d) return null;
+  return new Date(`${d}T23:59:59.999`).toISOString();
+}
+
+function sameUser(a: string | null | undefined, b: string | null | undefined) {
+  return !!a && !!b && a === b;
+}
+
+/** Pill “aziendali” uguali, cambiano solo colore */
+function pillStyle(kind: "IN" | "OUT" | "OPEN" | "CLOSED" | "PRM" | "REALE") {
+  const base: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "6px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(15,23,42,0.12)",
+    fontSize: 12,
+    fontWeight: 900,
+    letterSpacing: 0.2,
+    background: "rgba(255,255,255,0.85)",
+    color: "#0f172a",
+    whiteSpace: "nowrap",
+  };
+
+  if (kind === "IN") return { ...base, borderColor: "rgba(16,185,129,0.35)", background: "rgba(16,185,129,0.10)" };
+  if (kind === "OUT") return { ...base, borderColor: "rgba(239,68,68,0.35)", background: "rgba(239,68,68,0.10)" };
+
+  if (kind === "OPEN") return { ...base, borderColor: "rgba(148,163,184,0.55)", background: "rgba(148,163,184,0.18)" };
+  if (kind === "CLOSED") return { ...base, borderColor: "rgba(59,130,246,0.45)", background: "rgba(59,130,246,0.10)" };
+
+  // PRM/REALE: colori “neutri” per non confondere con IN/OUT
+  if (kind === "PRM") return { ...base, borderColor: "rgba(2,132,199,0.45)", background: "rgba(2,132,199,0.10)" };
+  return { ...base, borderColor: "rgba(99,102,241,0.45)", background: "rgba(99,102,241,0.10)" };
 }
 
 export default function MovimentiPage() {
   const supabase = createClient();
 
-  const [ready, setReady] = useState(false);
-
-  // user/admin
-  const [userEmail, setUserEmail] = useState<string | null>(null);
+  // auth
   const [userId, setUserId] = useState<string | null>(null);
-  const [userName, setUserName] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // movimento form
+  // form movimento
   const [type, setType] = useState<"IN" | "OUT">("IN");
-  const [warehouse, setWarehouse] = useState<Warehouse>("PRM");
+  const [warehouse, setWarehouse] = useState<"PRM" | "REALE">("PRM");
   const [qty, setQty] = useState("");
   const [note, setNote] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
@@ -91,29 +120,23 @@ export default function MovimentiPage() {
   const boxRef = useRef<HTMLDivElement | null>(null);
   const qtyRef = useRef<HTMLInputElement | null>(null);
 
-  // stock
-  const [stock, setStock] = useState<StockBoth | null>(null);
-
-  // storico
-  const [history, setHistory] = useState<DbMovement[]>([]);
+  // storico + filtri
+  const [history, setHistory] = useState<MovementRow[]>([]);
   const [nameMap, setNameMap] = useState<Record<string, string>>({});
+  const [onlyPicked, setOnlyPicked] = useState(false);
 
-  // filtri storico
   const [fFrom, setFFrom] = useState(""); // yyyy-mm-dd
   const [fTo, setFTo] = useState("");
   const [fType, setFType] = useState<"ALL" | "IN" | "OUT">("ALL");
-  const [fWarehouse, setFWarehouse] = useState<"ALL" | Warehouse>("ALL");
-  const [onlyPicked, setOnlyPicked] = useState(false);
+  const [fWarehouse, setFWarehouse] = useState<"ALL" | "PRM" | "REALE">("ALL");
 
-  // date helper
-  function toIsoStartOfDay(d: string) {
-    if (!d) return null;
-    return new Date(`${d}T00:00:00.000`).toISOString();
-  }
-  function toIsoEndOfDay(d: string) {
-    if (!d) return null;
-    return new Date(`${d}T23:59:59.999`).toISOString();
-  }
+  const warehouses: WarehouseOpt[] = useMemo(
+    () => [
+      { key: "PRM", label: "PRM" },
+      { key: "REALE", label: "REALE" },
+    ],
+    []
+  );
 
   // scanner
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -121,32 +144,17 @@ export default function MovimentiPage() {
   const [scanning, setScanning] = useState(false);
   const scanLockedRef = useRef(false);
 
-  // modal chiusura
-  const [closing, setClosing] = useState<DbMovement | null>(null);
+  // dettaglio “chiusura”
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [returnQty, setReturnQty] = useState("");
-  const [closeNote, setCloseNote] = useState("");
-  const [busyClose, setBusyClose] = useState(false);
+  const [returnNote, setReturnNote] = useState("");
+  const [closingBusy, setClosingBusy] = useState(false);
 
-  function openCloseModal(m: DbMovement) {
-    setClosing(m);
-    setReturnQty("");
-    setCloseNote("");
-    setMsg(null);
-  }
-
-  function closeCloseModal() {
-    setClosing(null);
-    setReturnQty("");
-    setCloseNote("");
-    setBusyClose(false);
-  }
-
-  function canCloseMovement(m: DbMovement) {
-    // admin sempre, altrimenti solo chi ha creato la riga (se created_by c’è)
-    if (isAdmin) return true;
-    if (!userId) return false;
-    if (!m.created_by) return false;
-    return m.created_by === userId;
+  function canEditRow(m: MovementRow) {
+    const st = (m.status ?? (m.type === "OUT" ? "OPEN" : "CLOSED")) as "OPEN" | "CLOSED";
+    if (m.type !== "OUT") return false;
+    if (st === "CLOSED") return false;
+    return isAdmin || sameUser(m.created_by, userId);
   }
 
   async function loadSuggestions(text: string) {
@@ -164,14 +172,7 @@ export default function MovimentiPage() {
       .limit(12);
 
     if (error) {
-      console.error("loadSuggestions error:", {
-        message: (error as any)?.message,
-        details: (error as any)?.details,
-        hint: (error as any)?.hint,
-        code: (error as any)?.code,
-        raw: error,
-      });
-      setMsg("Errore ricerca: " + ((error as any)?.message ?? "sconosciuto"));
+      console.error("loadSuggestions error:", error);
       setSuggestions([]);
       return;
     }
@@ -179,50 +180,56 @@ export default function MovimentiPage() {
     setSuggestions((data ?? []) as DbItem[]);
   }
 
-  async function computeStockBoth(code: string) {
-    // base (item_stocks)
-    const { data: base, error: eBase } = await supabase
-      .from("item_stocks")
-      .select("code,warehouse,initial_qty")
-      .eq("code", code);
-
-    if (eBase) {
-      console.error("item_stocks error:", eBase);
-      setStock(null);
-      return;
-    }
-
-    let basePRM = 0;
-    let baseREALE = 0;
-    for (const r of (base ?? []) as DbStockRow[]) {
-      if (r.warehouse === "PRM") basePRM = n(r.initial_qty);
-      if (r.warehouse === "REALE") baseREALE = n(r.initial_qty);
-    }
-
-    // delta movements
-    const { data: movs, error: eMovs } = await supabase
+  async function loadHistory() {
+    let q = supabase
       .from("movements")
-      .select("warehouse,type,qty")
-      .eq("code", code);
+      .select(
+        "id,created_at,type,code,qty,note,warehouse,created_by,created_by_name,status,returned_qty,return_note,closed_at,closed_by"
+      )
+      .order("created_at", { ascending: false })
+      .limit(PAGE_LIMIT);
 
-    if (eMovs) {
-      console.error("movements stock error:", eMovs);
-      setStock({ PRM: basePRM, REALE: baseREALE });
+    const isoFrom = toIsoStartOfDay(fFrom);
+    const isoTo = toIsoEndOfDay(fTo);
+    if (isoFrom) q = q.gte("created_at", isoFrom);
+    if (isoTo) q = q.lte("created_at", isoTo);
+    if (fType !== "ALL") q = q.eq("type", fType);
+    if (fWarehouse !== "ALL") q = q.eq("warehouse", fWarehouse);
+    if (onlyPicked && picked?.code) q = q.eq("code", picked.code);
+
+    const { data, error } = await q;
+
+    if (error) {
+      console.error("loadHistory error:", error);
+      setMsg("Errore caricamento storico (loadHistory).");
+      setHistory([]);
+      setNameMap({});
       return;
     }
 
-    let dPRM = 0;
-    let dREALE = 0;
-    for (const m of movs ?? []) {
-      const wh = (m as any).warehouse as Warehouse | null;
-      const t = (m as any).type as "IN" | "OUT";
-      const q = n((m as any).qty);
-      const signed = t === "IN" ? q : -q;
-      if (wh === "PRM") dPRM += signed;
-      if (wh === "REALE") dREALE += signed;
+    const rows = (data ?? []) as MovementRow[];
+    setHistory(rows);
+
+    const codes = Array.from(new Set(rows.map((r) => r.code).filter(Boolean)));
+    if (codes.length === 0) {
+      setNameMap({});
+      return;
     }
 
-    setStock({ PRM: basePRM + dPRM, REALE: baseREALE + dREALE });
+    const { data: itemsData, error: e2 } = await supabase.from("items").select("code,name").in("code", codes);
+    if (e2) {
+      console.error("items nameMap error:", e2);
+      setNameMap({});
+      return;
+    }
+
+    const map: Record<string, string> = {};
+    for (const it of itemsData ?? []) {
+      const c = (it as any).code as string;
+      const nm = (it as any).name as string | null;
+      if (c) map[c] = nm ?? "";
+    }
+    setNameMap(map);
   }
 
   async function pickItem(it: DbItem) {
@@ -230,24 +237,17 @@ export default function MovimentiPage() {
     setSearch(`${it.code} — ${it.name}`);
     setOpen(false);
     setMsg(null);
-    await computeStockBoth(it.code);
-    setTimeout(() => qtyRef.current?.focus(), 80);
+
+    setTimeout(() => qtyRef.current?.focus(), 50);
+
+    if (onlyPicked) await loadHistory();
   }
 
   async function pickItemByCode(codeRaw: string) {
     const code = codeRaw.trim();
     if (!code) return;
 
-    // quando scansiono: di default prelievo (OUT) veloce
-    setType("OUT");
-    setQty("");
-    setMsg(null);
-
-    const { data: item, error } = await supabase
-      .from("items")
-      .select("code,name,um")
-      .eq("code", code)
-      .maybeSingle();
+    const { data: item, error } = await supabase.from("items").select("code,name,um").eq("code", code).maybeSingle();
 
     if (error) {
       console.error("pickItemByCode error:", error);
@@ -257,7 +257,6 @@ export default function MovimentiPage() {
 
     if (!item) {
       setPicked(null);
-      setStock(null);
       setMsg(`Codice "${code}" non trovato in anagrafica.`);
       setSearch(code);
       setOpen(true);
@@ -291,7 +290,6 @@ export default function MovimentiPage() {
     setMsg(null);
     setOpen(false);
 
-    // reset “duro” prima di ripartire (iOS friendly)
     stopScan();
     scanLockedRef.current = false;
 
@@ -312,7 +310,6 @@ export default function MovimentiPage() {
         if (!text) return;
 
         scanLockedRef.current = true;
-
         stopScan();
         await pickItemByCode(text);
       });
@@ -323,80 +320,14 @@ export default function MovimentiPage() {
     }
   }
 
-  function clearAll() {
+  function resetSearch() {
     stopScan();
     setSearch("");
-    setOpen(false);
     setSuggestions([]);
     setPicked(null);
-    setStock(null);
-    setQty("");
-    setNote("");
+    setOpen(false);
     setMsg(null);
-    // NON cambiamo filtri storico
-    loadHistory();
-  }
-
-  async function loadHistory() {
-    let q = supabase
-      .from("movements")
-      .select("id,created_at,type,code,qty,note,warehouse,pending,created_by,created_by_email,created_by_name")
-      .order("created_at", { ascending: false })
-      .limit(250);
-
-    // filtri
-    const isoFrom = toIsoStartOfDay(fFrom);
-    const isoTo = toIsoEndOfDay(fTo);
-    if (isoFrom) q = q.gte("created_at", isoFrom);
-    if (isoTo) q = q.lte("created_at", isoTo);
-    if (fType !== "ALL") q = q.eq("type", fType);
-    if (fWarehouse !== "ALL") q = q.eq("warehouse", fWarehouse);
-
-    // SOLO se l’utente lo decide esplicitamente
-    if (onlyPicked && picked?.code) q = q.eq("code", picked.code);
-
-    const { data, error } = await q;
-
-    if (error) {
-      console.error("loadHistory error:", {
-        message: (error as any)?.message,
-        details: (error as any)?.details,
-        hint: (error as any)?.hint,
-        code: (error as any)?.code,
-        raw: error,
-      });
-      setHistory([]);
-      setNameMap({});
-      return;
-    }
-
-    const rows = (data ?? []) as DbMovement[];
-    setHistory(rows);
-
-    const codes = Array.from(new Set(rows.map((r) => r.code).filter(Boolean)));
-    if (codes.length === 0) {
-      setNameMap({});
-      return;
-    }
-
-    const { data: itemsData, error: e2 } = await supabase
-      .from("items")
-      .select("code,name")
-      .in("code", codes);
-
-    if (e2) {
-      console.error("items nameMap error:", e2);
-      setNameMap({});
-      return;
-    }
-
-    const map: Record<string, string> = {};
-    for (const it of itemsData ?? []) {
-      const c = (it as any).code as string;
-      const nme = (it as any).name as string | null;
-      if (c) map[c] = nme ?? "";
-    }
-    setNameMap(map);
+    setActiveIndex(0);
   }
 
   async function save() {
@@ -408,26 +339,20 @@ export default function MovimentiPage() {
     const q = toNumber(qty);
     if (!Number.isFinite(q) || q <= 0) return setMsg("Quantità non valida (deve essere > 0).");
 
-    // blocco uscita sotto zero (per magazzino selezionato)
-    if (type === "OUT") {
-      const s = stock ?? { PRM: 0, REALE: 0 };
-      const current = warehouse === "PRM" ? s.PRM : s.REALE;
-      if (current - q < 0) {
-        return setMsg(`Uscita non possibile: giacenza ${current} → diventerebbe ${current - q}.`);
-      }
-    }
-
-    const payload = {
+    const payload: Partial<MovementRow> = {
       type,
       code: picked.code,
       qty: q,
       note: note.trim() || null,
-      warehouse,
-      // se hai trigger DB che imposta pending per OUT, va bene lo stesso; qui lo mettiamo esplicito:
-      pending: type === "OUT",
       created_by: userId,
-      created_by_email: userEmail,
-      created_by_name: userName,
+      warehouse,
+
+      // stato: entrate chiuse, uscite aperte
+      status: type === "OUT" ? "OPEN" : "CLOSED",
+      returned_qty: type === "OUT" ? 0 : null,
+      return_note: null,
+      closed_at: type === "OUT" ? null : new Date().toISOString(),
+      closed_by: type === "OUT" ? null : userId,
     };
 
     const { error } = await supabase.from("movements").insert(payload as any);
@@ -437,136 +362,91 @@ export default function MovimentiPage() {
     setNote("");
     setMsg("Movimento salvato ✅");
 
-    await computeStockBoth(picked.code);
     await loadHistory();
-
     setTimeout(() => qtyRef.current?.focus(), 80);
   }
 
   async function deleteMovement(id: string) {
-    if (!isAdmin) {
-      alert("Solo l'admin può eliminare i movimenti.");
-      return;
-    }
+    if (!isAdmin) return alert("Solo l'admin può eliminare i movimenti.");
 
     const ok = confirm("Eliminare questo movimento?");
     if (!ok) return;
 
     const { error } = await supabase.from("movements").delete().eq("id", id);
-    if (error) {
-      alert("Non posso eliminare: " + (error as any)?.message);
-      return;
-    }
+    if (error) return alert("Non posso eliminare: " + (error as any)?.message);
 
-    // aggiorno stock se serve
-    if (picked?.code) await computeStockBoth(picked.code);
+    if (expandedId === id) setExpandedId(null);
+
     await loadHistory();
   }
 
-  async function confirmClose() {
-    if (!closing) return;
+  function openDetail(m: MovementRow) {
+    // toggle
+    setExpandedId((prev) => (prev === m.id ? null : m.id));
 
-    const movement = closing;
+    // prepara input
+    setReturnQty(String(n(m.returned_qty)));
+    setReturnNote(m.return_note ?? "");
+  }
 
-    // già chiuso → stop
-    if (movement.pending !== true) {
-      setMsg("Movimento già chiuso.");
-      closeCloseModal();
+  async function confirmClose(m: MovementRow) {
+    if (closingBusy) return;
+
+    const st = (m.status ?? (m.type === "OUT" ? "OPEN" : "CLOSED")) as "OPEN" | "CLOSED";
+    if (m.type !== "OUT") return;
+    if (st === "CLOSED") return; // anti richiusura
+
+    const outQty = n(m.qty);
+    const r = toNumber(returnQty);
+
+    if (!Number.isFinite(r) || r < 0) {
+      setMsg("Quantità rientro non valida (>= 0).");
+      return;
+    }
+    if (r > outQty) {
+      setMsg(`Il rientro non può superare l’uscita (${outQty}).`);
       return;
     }
 
-    // permessi
-    if (!canCloseMovement(movement)) {
-      setMsg("Non hai i permessi per chiudere questo movimento.");
-      closeCloseModal();
-      return;
-    }
-
-    setBusyClose(true);
+    setClosingBusy(true);
     setMsg(null);
 
-    try {
-      const retQty = toNumber(returnQty || "0");
-      const extraNote = closeNote.trim();
+    const updatePayload = {
+      returned_qty: r,
+      return_note: (returnNote ?? "").trim() || null,
+      status: "CLOSED",
+      closed_at: new Date().toISOString(),
+      closed_by: userId ?? null,
+    };
 
-      // 1) eventuale rientro (IN)
-      if (Number.isFinite(retQty) && retQty > 0) {
-        const { error: insertError } = await supabase.from("movements").insert({
-          type: "IN",
-          code: movement.code,
-          qty: retQty,
-          warehouse: movement.warehouse,
-          pending: false,
-          note: extraNote ? `Rientro: ${extraNote}` : "Rientro",
-          created_by: userId,
-          created_by_email: userEmail,
-          created_by_name: userName,
-        } as any);
+    const { error } = await supabase.from("movements").update(updatePayload as any).eq("id", m.id);
 
-        if (insertError) throw insertError;
-      }
-
-      // 2) chiudo OUT (solo se pending=true)
-      const { data, error: updateError } = await supabase
-        .from("movements")
-        .update({ pending: false })
-        .eq("id", movement.id)
-        .eq("pending", true)
-        .select();
-
-      if (updateError) throw updateError;
-
-      if (!data || data.length === 0) {
-        setMsg("Movimento già chiuso da un altro utente.");
-        closeCloseModal();
-        setBusyClose(false);
-        return;
-      }
-
-      closeCloseModal();
-      setMsg("Movimento chiuso correttamente ✅");
-
-      // refresh
-      if (picked?.code) await computeStockBoth(picked.code);
-      await loadHistory();
-    } catch (err: any) {
-      console.error("confirmClose error:", err);
-      setMsg("Errore chiusura: " + (err?.message ?? "sconosciuto"));
-    } finally {
-      setBusyClose(false);
+    if (error) {
+      setClosingBusy(false);
+      setMsg("Errore chiusura: " + (error as any)?.message);
+      return;
     }
+
+    // ✅ aggiorna immediato la UI (sparisce “APERTO” e sparisce il dettaglio)
+    setHistory((prev) =>
+      prev.map((row) => (row.id === m.id ? ({ ...row, ...updatePayload } as MovementRow) : row))
+    );
+
+    setMsg("Movimento chiuso ✅");
+    setExpandedId(null);
+    setClosingBusy(false);
+
+    // 🔁 allinea al server (per sicurezza)
+    await loadHistory();
   }
 
   // init
   useEffect(() => {
-    setReady(true);
     loadHistory();
 
-    (async () => {
-      const { data } = await supabase.auth.getUser();
-      const u = data.user;
-
-      const email = u?.email ?? null;
-      const uid = u?.id ?? null;
-
-      setUserEmail(email);
+    supabase.auth.getUser().then(async ({ data }) => {
+      const uid = data.user?.id ?? null;
       setUserId(uid);
-
-      // nome
-      if (uid) {
-        const { data: prof } = await supabase
-          .from("profiles")
-          .select("first_name,last_name")
-          .eq("id", uid)
-          .maybeSingle();
-
-        const first = (prof as any)?.first_name?.trim?.() ?? "";
-        const last = (prof as any)?.last_name?.trim?.() ?? "";
-        const full = [first, last].filter(Boolean).join(" ").trim();
-        setUserName(full || email);
-      } else {
-        setUserName(email);
-      }
 
       if (!uid) {
         setIsAdmin(false);
@@ -580,7 +460,7 @@ export default function MovimentiPage() {
         return;
       }
       setIsAdmin(!!isAdm);
-    })();
+    });
 
     function onDocMouseDown(e: MouseEvent) {
       if (!boxRef.current) return;
@@ -598,540 +478,439 @@ export default function MovimentiPage() {
   // debounce suggestions
   useEffect(() => {
     setActiveIndex(0);
-    if (!open) return;
-
     const t = setTimeout(() => {
-      loadSuggestions(search);
+      if (open) loadSuggestions(search);
     }, 220);
-
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, open]);
 
+  // se cambi toggle onlyPicked ricarico
+  useEffect(() => {
+    loadHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onlyPicked]);
+
   const active = useMemo(() => suggestions[activeIndex], [suggestions, activeIndex]);
-
-  const where = stock ? whereLabel(stock) : "";
-
-  // UI helpers
-  function rowStyle(m: DbMovement): React.CSSProperties {
-    if (m.type === "OUT" && m.pending === true) {
-      return {
-        background: "#f1f5f9",
-        opacity: 0.95,
-      };
-    }
-    return {};
-  }
 
   return (
     <main className="panel">
       <div className="pageBar">
-        <div className="pageBarTitle">Magazzino · Movimenti</div>
+        <div className="pageBarTitle">Magazzino - Movimenti</div>
         <div className="pageBarActions">
           <a className="btn" href="/giacenze">Giacenze</a>
-          <a className="btn" href="/import">Import</a>
+          <a className="btn" href="/">Dashboard</a>
         </div>
       </div>
 
-      {!ready ? (
-        <div style={{ padding: 12 }}>Caricamento…</div>
-      ) : (
-        <>
-          {/* FILTRI STORICO */}
-          <div className="card" style={{ padding: 12, marginTop: 12 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
-              <div style={{ gridColumn: "span 3" }}>
-                <label className="label">Data da</label>
-                <input className="input" type="date" value={fFrom} onChange={(e) => setFFrom(e.target.value)} />
-              </div>
-
-              <div style={{ gridColumn: "span 3" }}>
-                <label className="label">Data a</label>
-                <input className="input" type="date" value={fTo} onChange={(e) => setFTo(e.target.value)} />
-              </div>
-
-              <div style={{ gridColumn: "span 2" }}>
-                <label className="label">Tipo</label>
-                <select className="input" value={fType} onChange={(e) => setFType(e.target.value as any)}>
-                  <option value="ALL">Tutti</option>
-                  <option value="IN">Entrata</option>
-                  <option value="OUT">Uscita</option>
-                </select>
-              </div>
-
-              <div style={{ gridColumn: "span 2" }}>
-                <label className="label">Magazzino</label>
-                <select className="input" value={fWarehouse} onChange={(e) => setFWarehouse(e.target.value as any)}>
-                  <option value="ALL">Tutti</option>
-                  <option value="PRM">PRM</option>
-                  <option value="REALE">REALE</option>
-                </select>
-              </div>
-
-              <div style={{ gridColumn: "span 2" }}>
-                <label className="label">Solo selezionato</label>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => setOnlyPicked((v) => !v)}
-                  style={{
-                    width: "100%",
-                    border: onlyPicked ? "1px solid #2563eb" : undefined,
-                    background: onlyPicked ? "rgba(37, 99, 235, 0.12)" : undefined,
-                    fontWeight: 800,
-                  }}
-                  title="Mostra solo i movimenti del materiale selezionato (non automatico)"
-                >
-                  {onlyPicked ? "Attivo" : "Disattivo"}
-                </button>
-              </div>
-            </div>
-
-            <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
-              <button className="btn" onClick={() => loadHistory()}>
-                Applica filtri
-              </button>
-
-              <button
-                className="btn"
-                onClick={() => {
-                  setFFrom("");
-                  setFTo("");
-                  setFType("ALL");
-                  setFWarehouse("ALL");
-                  setOnlyPicked(false);
-                  setTimeout(() => loadHistory(), 0);
-                }}
-              >
-                Reset filtri
-              </button>
-
-              <div style={{ marginLeft: "auto", opacity: 0.75, fontSize: 12, alignSelf: "center" }}>
-                Permessi: {isAdmin ? "Admin" : "Operatore"}
-              </div>
-            </div>
+      {/* FILTRI STORICO */}
+      <div className="filtersRow" style={{ padding: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
+          <div style={{ gridColumn: "span 3" }}>
+            <label className="label">Data da</label>
+            <input className="input" type="date" value={fFrom} onChange={(e) => setFFrom(e.target.value)} />
           </div>
 
-          {/* FORM MOVIMENTO */}
-          <div className="card" style={{ padding: 12, marginTop: 12 }}>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-              <button
-                className={`btn ${type === "IN" ? "btnPrimary" : ""}`}
-                onClick={() => setType("IN")}
-                type="button"
-              >
-                Entrata
-              </button>
-
-              <button
-                className={`btn ${type === "OUT" ? "btnPrimary" : ""}`}
-                onClick={() => setType("OUT")}
-                type="button"
-              >
-                Uscita
-              </button>
-
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                <label className="label" style={{ margin: 0 }}>Magazzino</label>
-                <select
-                  className="input"
-                  value={warehouse}
-                  onChange={(e) => setWarehouse(e.target.value as Warehouse)}
-                  style={{ width: 160 }}
-                >
-                  <option value="PRM">PRM</option>
-                  <option value="REALE">REALE</option>
-                </select>
-              </div>
-
-              <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button className="btn" type="button" onClick={() => (scanning ? stopScan() : startScan())}>
-                  {scanning ? "Chiudi camera" : "Scanner"}
-                </button>
-                <button className="btn" type="button" onClick={clearAll}>
-                  Pulisci
-                </button>
-              </div>
-            </div>
-
-            <div ref={boxRef} style={{ position: "relative", marginTop: 12 }}>
-              <label className="label">Materiale (codice o descrizione)</label>
-              <input
-                className="input"
-                value={search}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setSearch(v);
-                  setOpen(true);
-                  setPicked(null);
-                  setStock(null);
-                  setMsg(null);
-                  if (!v.trim()) setSuggestions([]);
-                }}
-                onFocus={() => setOpen(true)}
-                onKeyDown={(e) => {
-                  if (!open) return;
-                  if (e.key === "ArrowDown") {
-                    e.preventDefault();
-                    setActiveIndex((i) => Math.min(i + 1, suggestions.length - 1));
-                  } else if (e.key === "ArrowUp") {
-                    e.preventDefault();
-                    setActiveIndex((i) => Math.max(i - 1, 0));
-                  } else if (e.key === "Enter") {
-                    e.preventDefault();
-                    if (active) pickItem(active);
-                  } else if (e.key === "Escape") {
-                    setOpen(false);
-                  }
-                }}
-                placeholder="Filtra per codice, descrizione..."
-              />
-
-              {open && search.trim() && (
-                <div
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    right: 0,
-                    top: "100%",
-                    marginTop: 6,
-                    background: "#fff",
-                    border: "1px solid rgba(15,23,42,0.12)",
-                    borderRadius: 12,
-                    boxShadow: "0 16px 40px rgba(0,0,0,0.12)",
-                    overflow: "hidden",
-                    zIndex: 50,
-                  }}
-                >
-                  {suggestions.length === 0 ? (
-                    <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
-                  ) : (
-                    suggestions.map((it, idx) => (
-                      <div
-                        key={it.code}
-                        onMouseEnter={() => setActiveIndex(idx)}
-                        onMouseDown={(ev) => {
-                          ev.preventDefault();
-                          pickItem(it);
-                        }}
-                        style={{
-                          padding: "10px 12px",
-                          cursor: "pointer",
-                          background: idx === activeIndex ? "#eef2ff" : "white",
-                          borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
-                        }}
-                      >
-                        <div style={{ fontWeight: 900, color: "#0f172a" }}>{it.code}</div>
-                        <div style={{ fontSize: 12, color: "#334155" }}>{it.name}</div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
-
-            {scanning && (
-              <div style={{ marginTop: 12 }}>
-                <video
-                  ref={videoRef}
-                  style={{ width: "100%", borderRadius: 12, background: "black" }}
-                  muted
-                  playsInline
-                />
-                <div style={{ fontSize: 12, opacity: 0.85, marginTop: 6 }}>
-                  Inquadra il codice a barre con la fotocamera.
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10, marginTop: 12 }}>
-              <div style={{ gridColumn: "span 8" }}>
-                <label className="label">Note (opz.)</label>
-                <input
-                  className="input"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="DDT / commessa / cliente"
-                />
-              </div>
-
-              <div style={{ gridColumn: "span 3" }}>
-                <label className="label">Quantità</label>
-                <input
-                  ref={qtyRef}
-                  className="input"
-                  value={qty}
-                  onChange={(e) => setQty(e.target.value)}
-                  inputMode="decimal"
-                  placeholder="es. 5"
-                />
-              </div>
-
-              <div style={{ gridColumn: "span 1", display: "flex", alignItems: "end" }}>
-                <button className="btn btnPrimary" onClick={save} style={{ width: "100%" }}>
-                  Salva
-                </button>
-              </div>
-            </div>
-
-            {picked && stock && (
-              <div style={{ marginTop: 12, fontSize: 13, opacity: 0.95 }}>
-                <div>
-                  <b>{picked.code}</b> · {picked.name} · UM <b>{picked.um ?? "-"}</b> · Dove: <b>{where}</b>
-                </div>
-                <div style={{ marginTop: 6, display: "flex", gap: 12, flexWrap: "wrap" }}>
-                  <span className="badge badgeIn">PRM: {stock.PRM}</span>
-                  <span className="badge badgeOut">REALE: {stock.REALE}</span>
-                </div>
-              </div>
-            )}
-
-            {msg && <div style={{ marginTop: 10, fontWeight: 800 }}>{msg}</div>}
+          <div style={{ gridColumn: "span 3" }}>
+            <label className="label">Data a</label>
+            <input className="input" type="date" value={fTo} onChange={(e) => setFTo(e.target.value)} />
           </div>
 
-          {/* STORICO */}
-          <div className="card" style={{ padding: 12, marginTop: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-              <div style={{ fontWeight: 900 }}>Storico movimenti</div>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button className="btn" onClick={() => loadHistory()}>
-                  Aggiorna
-                </button>
-              </div>
-            </div>
-
-            <div style={{ overflowX: "auto", marginTop: 10 }}>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Data</th>
-                    <th>Tipo</th>
-                    <th>Codice</th>
-                    <th>Descrizione</th>
-                    <th>Magazzino</th>
-                    <th>Q.tà</th>
-                    <th>Note</th>
-                    <th>Inserito da</th>
-                    <th>Stato</th>
-                    <th>Azioni</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {history.map((m) => (
-                    <tr key={m.id} style={rowStyle(m)}>
-                      <td>{fmtDate(m.created_at)}</td>
-                      <td>
-                        <span className={`badge ${m.type === "IN" ? "badgeIn" : "badgeOut"}`}>
-                          {m.type === "IN" ? "Entrata" : "Uscita"}
-                        </span>
-                      </td>
-                      <td>{m.code}</td>
-                      <td>{nameMap[m.code] ?? "-"}</td>
-                      <td>{m.warehouse ?? "-"}</td>
-                      <td>
-                        {m.type === "IN" ? "+" : "-"}
-                        {m.qty}
-                      </td>
-                      <td>{m.note ?? ""}</td>
-                      <td>{m.created_by_name ?? m.created_by_email ?? "-"}</td>
-
-                      {/* STATO */}
-                      <td>
-                        {m.type === "OUT" ? (
-                          m.pending === true ? (
-                            <span
-                              style={{
-                                fontSize: 12,
-                                padding: "4px 10px",
-                                borderRadius: 999,
-                                background: "#e2e8f0",
-                                color: "#334155",
-                                fontWeight: 900,
-                              }}
-                            >
-                              Da chiudere
-                            </span>
-                          ) : (
-                            <span
-                              style={{
-                                fontSize: 12,
-                                padding: "4px 10px",
-                                borderRadius: 999,
-                                background: "#dcfce7",
-                                color: "#166534",
-                                fontWeight: 900,
-                              }}
-                            >
-                              Confermato
-                            </span>
-                          )
-                        ) : (
-                          <span style={{ opacity: 0.6 }}>—</span>
-                        )}
-                      </td>
-
-                      {/* AZIONI */}
-                      <td style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        {m.type === "OUT" && m.pending === true && canCloseMovement(m) && (
-                          <button
-                            onClick={() => openCloseModal(m)}
-                            style={{
-                              padding: "6px 10px",
-                              borderRadius: 10,
-                              border: "1px solid #2563eb",
-                              background: "#dbeafe",
-                              color: "#1e40af",
-                              cursor: "pointer",
-                              fontWeight: 800,
-                            }}
-                          >
-                            Chiudi
-                          </button>
-                        )}
-
-                        {isAdmin ? (
-                          <button
-                            onClick={() => deleteMovement(m.id)}
-                            style={{
-                              padding: "6px 10px",
-                              borderRadius: 10,
-                              border: "1px solid #dc2626",
-                              background: "#fee2e2",
-                              color: "#991b1b",
-                              cursor: "pointer",
-                              fontWeight: 700,
-                            }}
-                          >
-                            Elimina
-                          </button>
-                        ) : (
-                          <span style={{ opacity: 0.6 }}>—</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-
-                  {history.length === 0 && (
-                    <tr>
-                      <td colSpan={10} style={{ padding: 12, color: "#0f172a" }}>
-                        Nessun movimento.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+          <div style={{ gridColumn: "span 2" }}>
+            <label className="label">Tipo</label>
+            <select className="input" value={fType} onChange={(e) => setFType(e.target.value as any)}>
+              <option value="ALL">Tutti</option>
+              <option value="IN">Entrata</option>
+              <option value="OUT">Uscita</option>
+            </select>
           </div>
 
-          {/* MODAL CHIUSURA */}
-          {closing && (
+          <div style={{ gridColumn: "span 2" }}>
+            <label className="label">Magazzino</label>
+            <select className="input" value={fWarehouse} onChange={(e) => setFWarehouse(e.target.value as any)}>
+              <option value="ALL">Tutti</option>
+              {warehouses.map((w) => (
+                <option key={w.key} value={w.key}>{w.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ gridColumn: "span 2" }}>
+            <label className="label">Vista</label>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setOnlyPicked((v) => !v)}
+              style={{ width: "100%", justifyContent: "center" }}
+              title="Mostra solo i movimenti del materiale selezionato (se presente)"
+            >
+              {onlyPicked ? "Solo selezionato: ON" : "Solo selezionato: OFF"}
+            </button>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
+          <button className="btn" onClick={() => loadHistory()}>Applica filtri</button>
+          <button
+            className="btn"
+            onClick={() => {
+              setFFrom("");
+              setFTo("");
+              setFType("ALL");
+              setFWarehouse("ALL");
+              setTimeout(() => loadHistory(), 0);
+            }}
+          >
+            Reset filtri
+          </button>
+
+          <div style={{ marginLeft: "auto", opacity: 0.75, fontSize: 12, alignSelf: "center" }}>
+            Permessi: {isAdmin ? "Admin" : "Operatore"}
+          </div>
+        </div>
+      </div>
+
+      {/* FORM MOVIMENTO */}
+      <div className="card" style={{ padding: 12, marginTop: 12 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <button className={`btn ${type === "IN" ? "btnPrimary" : ""}`} onClick={() => setType("IN")} type="button">
+            Entrata
+          </button>
+
+          <button className={`btn ${type === "OUT" ? "btnPrimary" : ""}`} onClick={() => setType("OUT")} type="button">
+            Uscita
+          </button>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <select
+              className="input"
+              value={warehouse}
+              onChange={(e) => setWarehouse(e.target.value as any)}
+              style={{ width: 140 }}
+              aria-label="Magazzino movimento"
+            >
+              <option value="PRM">PRM</option>
+              <option value="REALE">REALE</option>
+            </select>
+
+            <span style={{ opacity: 0.8, fontSize: 12 }}>Magazzino movimento</span>
+          </div>
+
+          <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button className="btn" type="button" onClick={() => (scanning ? stopScan() : startScan())}>
+              {scanning ? "Chiudi camera" : "Scanner"}
+            </button>
+            <button className="btn" type="button" onClick={resetSearch}>
+              Pulisci
+            </button>
+          </div>
+        </div>
+
+        <div ref={boxRef} style={{ position: "relative", marginTop: 12 }}>
+          <label className="label">Materiale (codice o descrizione)</label>
+          <input
+            className="input"
+            value={search}
+            onChange={(e) => {
+              const v = e.target.value;
+              setSearch(v);
+              setOpen(true);
+              setPicked(null);
+              setMsg(null);
+              if (!v.trim()) setSuggestions([]);
+            }}
+            onFocus={() => setOpen(true)}
+            onKeyDown={(e) => {
+              if (!open) return;
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setActiveIndex((i) => Math.min(i + 1, suggestions.length - 1));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setActiveIndex((i) => Math.max(i - 1, 0));
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                if (active) pickItem(active);
+              } else if (e.key === "Escape") {
+                setOpen(false);
+              }
+            }}
+            placeholder="Filtra per codice, descrizione..."
+          />
+
+          {open && search.trim() && (
             <div
               style={{
-                position: "fixed",
-                inset: 0,
-                background: "rgba(0,0,0,0.55)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: 16,
-                zIndex: 999,
-              }}
-              onMouseDown={(e) => {
-                // chiudi cliccando fuori
-                if (e.target === e.currentTarget) closeCloseModal();
+                position: "absolute",
+                left: 0,
+                right: 0,
+                top: "100%",
+                marginTop: 6,
+                background: "#fff",
+                border: "1px solid rgba(15,23,42,0.12)",
+                borderRadius: 12,
+                boxShadow: "0 16px 40px rgba(0,0,0,0.12)",
+                overflow: "hidden",
+                zIndex: 50,
               }}
             >
-              <div
-                style={{
-                  width: "min(680px, 100%)",
-                  background: "white",
-                  borderRadius: 16,
-                  border: "1px solid rgba(15,23,42,0.12)",
-                  boxShadow: "0 30px 90px rgba(0,0,0,0.35)",
-                  overflow: "hidden",
-                }}
-              >
-                <div style={{ padding: 14, borderBottom: "1px solid #e5e7eb" }}>
-                  <div style={{ fontWeight: 950, color: "#0f172a" }}>Chiudi uscita</div>
-                  <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>
-                    Codice <b>{closing.code}</b> · Magazzino <b>{closing.warehouse ?? "-"}</b> · Q.tà uscita <b>{closing.qty}</b>
-                  </div>
-                </div>
-
-                <div style={{ padding: 14, display: "grid", gap: 10 }}>
-                  <div>
-                    <label style={{ fontSize: 12, fontWeight: 800, color: "#0f172a" }}>
-                      Quantità rientrata (opzionale)
-                    </label>
-                    <input
-                      className="input"
-                      value={returnQty}
-                      onChange={(e) => setReturnQty(e.target.value)}
-                      inputMode="decimal"
-                      placeholder="Es. 2"
-                      style={{ marginTop: 6 }}
-                    />
-                    <div style={{ fontSize: 12, color: "#64748b", marginTop: 6 }}>
-                      Se lasci vuoto/0 → chiusura senza rientro.
-                    </div>
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: 12, fontWeight: 800, color: "#0f172a" }}>
-                      Nota chiusura (opzionale)
-                    </label>
-                    <input
-                      className="input"
-                      value={closeNote}
-                      onChange={(e) => setCloseNote(e.target.value)}
-                      placeholder="Es. rientrati 2 pezzi"
-                      style={{ marginTop: 6 }}
-                    />
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    padding: 14,
-                    borderTop: "1px solid #e5e7eb",
-                    display: "flex",
-                    gap: 10,
-                    justifyContent: "flex-end",
-                    background: "#f8fafc",
-                  }}
-                >
-                  <button
-                    className="btn"
-                    onClick={closeCloseModal}
-                    disabled={busyClose}
-                    style={{ cursor: busyClose ? "not-allowed" : "pointer" }}
-                  >
-                    Annulla
-                  </button>
-
-                  <button
-                    onClick={confirmClose}
-                    disabled={busyClose}
+              {suggestions.length === 0 ? (
+                <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
+              ) : (
+                suggestions.map((it, idx) => (
+                  <div
+                    key={it.code}
+                    onMouseEnter={() => setActiveIndex(idx)}
+                    onMouseDown={(ev) => {
+                      ev.preventDefault();
+                      pickItem(it);
+                    }}
                     style={{
-                      padding: "10px 14px",
-                      borderRadius: 12,
-                      border: "1px solid #2563eb",
-                      background: "#2563eb",
-                      color: "white",
-                      cursor: busyClose ? "not-allowed" : "pointer",
-                      fontWeight: 900,
-                      opacity: busyClose ? 0.7 : 1,
+                      padding: "10px 12px",
+                      cursor: "pointer",
+                      background: idx === activeIndex ? "#eef2ff" : "white",
+                      borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
                     }}
                   >
-                    {busyClose ? "Chiusura..." : "Conferma chiusura"}
-                  </button>
-                </div>
-              </div>
+                    <div style={{ fontWeight: 900, color: "#0f172a" }}>{it.code}</div>
+                    <div style={{ fontSize: 12, color: "#334155" }}>{it.name}</div>
+                  </div>
+                ))
+              )}
             </div>
           )}
-        </>
-      )}
+        </div>
+
+        {scanning && (
+          <div style={{ marginTop: 12 }}>
+            <video ref={videoRef} style={{ width: "100%", borderRadius: 12, background: "black" }} muted playsInline />
+            <div style={{ fontSize: 12, opacity: 0.85, marginTop: 6 }}>Inquadra il codice a barre con la fotocamera.</div>
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10, marginTop: 12 }}>
+          <div style={{ gridColumn: "span 8" }}>
+            <label className="label">Note (opz.)</label>
+            <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="DDT / commessa / cliente" />
+          </div>
+
+          <div style={{ gridColumn: "span 3" }}>
+            <label className="label">Quantità</label>
+            <input ref={qtyRef} className="input" value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="es. 5" />
+          </div>
+
+          <div style={{ gridColumn: "span 1", display: "flex", alignItems: "end" }}>
+            <button className="btn btnPrimary" onClick={save} style={{ width: "100%" }}>
+              Salva
+            </button>
+          </div>
+        </div>
+
+        {picked && (
+          <div style={{ marginTop: 12, fontSize: 13, opacity: 0.95 }}>
+            <div>
+              <b>{picked.code}</b> · {picked.name}
+            </div>
+            <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
+              UM: <b>{picked.um ?? "-"}</b>
+            </div>
+          </div>
+        )}
+
+        {msg && <div style={{ marginTop: 10, fontWeight: 800 }}>{msg}</div>}
+      </div>
+
+      {/* STORICO */}
+      <div className="card" style={{ padding: 12, marginTop: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ fontWeight: 900 }}>
+            Storico movimenti {onlyPicked && picked ? `(solo ${picked.code})` : "(ultimi)"}
+          </div>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button className="btn" onClick={() => loadHistory()}>
+              Aggiorna
+            </button>
+          </div>
+        </div>
+
+        <div style={{ overflowX: "auto", marginTop: 10 }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Stato</th>
+                <th>Tipo</th>
+                <th>Codice</th>
+                <th>Descrizione</th>
+                <th>Mag.</th>
+                <th>Q.tà</th>
+                <th>Rientro</th>
+                <th>Netta</th>
+                <th>Note</th>
+                <th>Inserito da</th>
+                <th>Azioni</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {history.length === 0 ? (
+                <tr>
+                  <td colSpan={12} style={{ padding: 12, color: "#0f172a" }}>
+                    Nessun movimento.
+                  </td>
+                </tr>
+              ) : (
+                history.map((m) => {
+                  const st = (m.status ?? (m.type === "OUT" ? "OPEN" : "CLOSED")) as "OPEN" | "CLOSED";
+                  const isOpenOut = m.type === "OUT" && st === "OPEN";
+                  const net = m.type === "OUT" ? Math.max(0, n(m.qty) - n(m.returned_qty)) : null;
+
+                  return (
+                    <React.Fragment key={m.id}>
+                      <tr
+                        onClick={() => {
+                          if (!canEditRow(m)) return;
+                          openDetail(m);
+                        }}
+                        style={{
+                          cursor: canEditRow(m) ? "pointer" : "default",
+                          background: isOpenOut ? "rgba(148,163,184,0.18)" : "transparent",
+                        }}
+                        title={canEditRow(m) ? "Clicca per dettaglio / chiusura" : ""}
+                      >
+                        <td>{fmtDate(m.created_at)}</td>
+
+                        <td>
+                          <span style={pillStyle(st)}>{st === "OPEN" ? "APERTO" : "CHIUSO"}</span>
+                        </td>
+
+                        <td>
+                          <span style={pillStyle(m.type)}>{m.type === "IN" ? "ENTRATA" : "USCITA"}</span>
+                        </td>
+
+                        <td style={{ fontWeight: 900 }}>{m.code}</td>
+                        <td>{nameMap[m.code] ?? "-"}</td>
+
+                        <td>{m.warehouse ? <span style={pillStyle(m.warehouse)}>{m.warehouse}</span> : "-"}</td>
+
+                        <td style={{ fontWeight: 900 }}>
+                          {m.type === "IN" ? "+" : "-"}
+                          {n(m.qty)}
+                        </td>
+
+                        <td>{m.type === "OUT" ? n(m.returned_qty) : "-"}</td>
+                        <td style={{ fontWeight: 900 }}>{m.type === "OUT" ? net : "-"}</td>
+
+                        <td>{m.note ?? ""}</td>
+                        <td>{m.created_by_name ?? "-"}</td>
+
+                        <td>
+                          {isAdmin ? (
+                            <button
+                              className="btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteMovement(m.id);
+                              }}
+                            >
+                              Elimina
+                            </button>
+                          ) : (
+                            <span style={{ opacity: 0.6 }}>—</span>
+                          )}
+                        </td>
+                      </tr>
+
+                      {/* DETTAGLIO */}
+                      {expandedId === m.id && canEditRow(m) && (
+                        <tr>
+                          <td colSpan={12} style={{ padding: 12, background: "rgba(255,255,255,0.70)" }}>
+                            <div
+                              style={{
+                                border: "1px solid rgba(15,23,42,0.14)",
+                                borderRadius: 14,
+                                padding: 12,
+                                background: "rgba(255,255,255,0.85)",
+                              }}
+                            >
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                                <div style={{ fontWeight: 900, color: "#0f172a" }}>
+                                  Chiusura uscita · <span style={{ opacity: 0.8 }}>{m.code}</span>
+                                </div>
+
+                                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                                  <button
+                                    className="btn"
+                                    onClick={() => {
+                                      setExpandedId(null);
+                                    }}
+                                    type="button"
+                                    disabled={closingBusy}
+                                  >
+                                    Annulla
+                                  </button>
+
+                                  <button
+                                    className="btn btnPrimary"
+                                    onClick={() => confirmClose(m)}
+                                    type="button"
+                                    disabled={closingBusy}
+                                  >
+                                    {closingBusy ? "Chiusura..." : "Chiudi"}
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10, marginTop: 10 }}>
+                                <div style={{ gridColumn: "span 3" }}>
+                                  <label className="label" style={{ color: "#0f172a" }}>
+                                    Quantità uscita
+                                  </label>
+                                  <input className="input" value={String(n(m.qty))} disabled />
+                                </div>
+
+                                <div style={{ gridColumn: "span 3" }}>
+                                  <label className="label" style={{ color: "#0f172a" }}>
+                                    Quantità rientro
+                                  </label>
+                                  <input
+                                    className="input"
+                                    value={returnQty}
+                                    onChange={(e) => setReturnQty(e.target.value)}
+                                    inputMode="decimal"
+                                    placeholder="0"
+                                  />
+                                </div>
+
+                                <div style={{ gridColumn: "span 6" }}>
+                                  <label className="label" style={{ color: "#0f172a" }}>
+                                    Nota rientro (opz.)
+                                  </label>
+                                  <input
+                                    className="input"
+                                    value={returnNote}
+                                    onChange={(e) => setReturnNote(e.target.value)}
+                                    placeholder="Esempio: rientrati 2 pezzi"
+                                  />
+                                </div>
+                              </div>
+
+                              <div style={{ marginTop: 10, fontSize: 12, color: "#0f172a", opacity: 0.8 }}>
+                                Dopo la chiusura lo stato passa a <b>CHIUSO</b> e non sarà più modificabile.
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </main>
   );
 }

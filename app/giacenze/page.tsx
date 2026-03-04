@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "../_lib/supabase/client";
 
@@ -94,13 +94,36 @@ export default function GiacenzePage() {
 
   const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE));
 
+  // Admin
+  const [isAdmin, setIsAdmin] = useState(false);
+
   // Popup
   const [editing, setEditing] = useState<DbRow | null>(null);
   const [editExcel, setEditExcel] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
 
-  // quali campi sono sbloccati (uno per volta / a piacere)
+  // modalità creazione nuovo materiale
+  const [creating, setCreating] = useState(false);
+
+  // quali campi sono sbloccati (uno per volta)
   const [unlocked, setUnlocked] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data, error } = await supabase.rpc("is_admin");
+        if (error) {
+          console.error("is_admin rpc error:", error);
+          setIsAdmin(false);
+          return;
+        }
+        setIsAdmin(!!data);
+      } catch {
+        setIsAdmin(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function cycleSort(clickedKey: string) {
     setPage(1);
@@ -141,20 +164,17 @@ export default function GiacenzePage() {
     });
 
     if (error) {
-      // console spesso mostra "{}" con turbopack: stampo il raw
-      // @ts-ignore
-      console.error("giacenze_list error raw:", error);
+      console.error("giacenze_list error:", error);
       setRows([]);
       setCount(0);
       setLoading(false);
-      setMsg("Errore caricamento giacenze (RPC). Controlla che la funzione giacenze_list esista e sia pubblicata.");
+      setMsg("Errore caricamento giacenze. (RPC giacenze_list)");
       return;
     }
 
     const list = (data ?? []) as DbRow[];
     setRows(list);
 
-    // total_count: o è in ogni riga, o mettiamo fallback = lunghezza
     const tc = Number(list?.[0]?.total_count ?? 0);
     setCount(Number.isFinite(tc) && tc > 0 ? tc : list.length);
 
@@ -171,7 +191,6 @@ export default function GiacenzePage() {
   }, [q, view, sortKey, sortDir]);
 
   useEffect(() => {
-    // ricerca live (senza tasto)
     const t = setTimeout(() => {
       load();
     }, 250);
@@ -182,22 +201,45 @@ export default function GiacenzePage() {
   const viewRows = useMemo(() => rows, [rows]);
 
   function openEdit(r: DbRow) {
+    setCreating(false);
     setEditing(r);
 
     const base = { ...(r.excel ?? {}) };
 
-    // forzo questi coerenti
     base["Materiale"] = r.code;
     if (r.name != null) base["Descrizione Materiale"] = r.name ?? "";
     if (r.um != null) base["Unità di Misura"] = r.um ?? "";
 
-    // riallineo quantità nel json (se mancanti)
     if (base["Qnt. a Mag. libero"] == null) base["Qnt. a Mag. libero"] = r.qty_free ?? 0;
     if (base["Qnt. a Mag. bloccato"] == null) base["Qnt. a Mag. bloccato"] = r.qty_blocked ?? 0;
     if (base["Controllo Qualità Magazzino"] == null) base["Controllo Qualità Magazzino"] = r.qty_quality ?? 0;
 
     setEditExcel(base);
-    setUnlocked({}); // tutto bloccato all'apertura
+    setUnlocked({});
+    setMsg(null);
+  }
+
+  function openCreate() {
+    if (!isAdmin) return;
+
+    const base: Record<string, any> = {};
+    for (const c of EXCEL_COLS) base[c] = "";
+
+    const wh: "PRM" | "REALE" = view === "PRM" ? "PRM" : "REALE";
+
+    setEditing({
+      code: "",
+      warehouse: wh,
+      qty_free: 0,
+      qty_blocked: 0,
+      qty_quality: 0,
+      initial_qty: 0,
+      excel: base,
+    });
+
+    setEditExcel(base);
+    setUnlocked({});
+    setCreating(true);
     setMsg(null);
   }
 
@@ -208,11 +250,17 @@ export default function GiacenzePage() {
     setMsg(null);
 
     try {
-      // riallineo i numeri “interni”
       const qtyFree = toNumberLoose(editExcel["Qnt. a Mag. libero"]);
       const qtyBlocked = toNumberLoose(editExcel["Qnt. a Mag. bloccato"]);
       const qtyQuality = toNumberLoose(editExcel["Controllo Qualità Magazzino"]);
       const initial = qtyFree + qtyBlocked + qtyQuality;
+
+      const code = String(editExcel["Materiale"] ?? editing.code ?? "").trim();
+      if (!code) {
+        setMsg("Inserisci il codice materiale (Materiale).");
+        setSaving(false);
+        return;
+      }
 
       const payload = {
         excel: editExcel,
@@ -222,28 +270,97 @@ export default function GiacenzePage() {
         initial_qty: initial,
       };
 
-      const { error } = await supabase
-        .from("item_stocks")
-        .update(payload as any)
-        .eq("code", editing.code)
-        .eq("warehouse", editing.warehouse);
+      if (creating) {
+        if (!isAdmin) {
+          setMsg("Solo admin può creare nuovi materiali.");
+          setSaving(false);
+          return;
+        }
 
-      if (error) {
-        // @ts-ignore
-        console.error("saveEdit error raw:", error);
-        setMsg("Errore salvataggio: " + ((error as any)?.message ?? "sconosciuto"));
-        setSaving(false);
-        return;
+        // items: crea/aggiorna anagrafica minima
+        const name = String(editExcel["Descrizione Materiale"] ?? "").trim() || code;
+        const um = String(editExcel["Unità di Misura"] ?? "").trim() || null;
+
+        const { error: eItems } = await supabase
+          .from("items")
+          .upsert({ code, name, um } as any, { onConflict: "code" });
+
+        if (eItems) {
+          setMsg("Errore creazione (items): " + eItems.message);
+          setSaving(false);
+          return;
+        }
+
+        const { error: eStock } = await supabase
+          .from("item_stocks")
+          .upsert(
+            {
+              code,
+              warehouse: editing.warehouse,
+              excel: editExcel,
+              qty_free: qtyFree,
+              qty_blocked: qtyBlocked,
+              qty_quality: qtyQuality,
+              initial_qty: initial,
+            } as any,
+            { onConflict: "code,warehouse" }
+          );
+
+        if (eStock) {
+          setMsg("Errore creazione (item_stocks): " + eStock.message);
+          setSaving(false);
+          return;
+        }
+      } else {
+        const { error } = await supabase
+          .from("item_stocks")
+          .update(payload as any)
+          .eq("code", editing.code)
+          .eq("warehouse", editing.warehouse);
+
+        if (error) {
+          console.error("saveEdit error:", error);
+          setMsg("Errore salvataggio: " + ((error as any)?.message ?? "sconosciuto"));
+          setSaving(false);
+          return;
+        }
       }
 
       setMsg("Salvato ✅");
       setEditing(null);
       setEditExcel({});
       setUnlocked({});
+      setCreating(false);
       await load();
     } finally {
       setSaving(false);
     }
+  }
+
+  async function deleteRow() {
+    if (!isAdmin) return;
+    if (!editing) return;
+    if (creating) return;
+
+    const ok = confirm(`Eliminare questo materiale?\n\nCodice: ${editing.code}\nMagazzino: ${editing.warehouse}`);
+    if (!ok) return;
+
+    const { error } = await supabase
+      .from("item_stocks")
+      .delete()
+      .eq("code", editing.code)
+      .eq("warehouse", editing.warehouse);
+
+    if (error) {
+      setMsg("Errore eliminazione: " + error.message);
+      return;
+    }
+
+    setMsg("Eliminato ✅");
+    setEditing(null);
+    setEditExcel({});
+    setUnlocked({});
+    await load();
   }
 
   function exportXlsx() {
@@ -251,8 +368,8 @@ export default function GiacenzePage() {
       const obj: Record<string, any> = {};
       for (const c of EXCEL_COLS) {
         if (c === "Materiale") obj[c] = r.code;
-        else if (c === "Descrizione Materiale") obj[c] = (r.name ?? r.excel?.[c] ?? "");
-        else if (c === "Unità di Misura") obj[c] = (r.um ?? r.excel?.[c] ?? "");
+        else if (c === "Descrizione Materiale") obj[c] = r.name ?? r.excel?.[c] ?? "";
+        else if (c === "Unità di Misura") obj[c] = r.um ?? r.excel?.[c] ?? "";
         else obj[c] = r.excel?.[c] ?? "";
       }
       obj["_warehouse"] = r.warehouse;
@@ -267,11 +384,30 @@ export default function GiacenzePage() {
 
   return (
     <main className="panel">
-      <div className="pageBar">
+
+      <div
+  className="pageBar"
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 10,
+  }}
+>
         <div className="pageBarTitle">Magazzino - Giacenze (Excel completo)</div>
         <div className="pageBarActions">
-          <a className="btn" href="/movimenti">Movimenti</a>
-          <a className="btn" href="/import">Import</a>
+          {isAdmin && (
+            <button className="btn" onClick={openCreate}>
+              Nuovo materiale
+            </button>
+          )}
+          <a className="btn" href="/movimenti">
+            Movimenti
+          </a>
+          <a className="btn" href="/import">
+            Import
+          </a>
         </div>
       </div>
 
@@ -279,14 +415,10 @@ export default function GiacenzePage() {
       <div className="card" style={{ padding: 12 }}>
         <div style={{ display: "grid", gridTemplateColumns: "180px 1fr auto auto", gap: 10, alignItems: "end" }}>
           <div>
-            <label className="label" htmlFor="viewSel">Magazzino</label>
-            <select
-              id="viewSel"
-              name="viewSel"
-              className="input"
-              value={view}
-              onChange={(e) => setView(e.target.value as WarehouseView)}
-            >
+            <label className="label" htmlFor="viewSel">
+              Magazzino
+            </label>
+            <select id="viewSel" name="viewSel" className="input" value={view} onChange={(e) => setView(e.target.value as WarehouseView)}>
               <option value="REALE">REALE</option>
               <option value="PRM">PRM</option>
               <option value="TUTTI">TUTTI</option>
@@ -294,7 +426,9 @@ export default function GiacenzePage() {
           </div>
 
           <div>
-            <label className="label" htmlFor="qSearch">Cerca</label>
+            <label className="label" htmlFor="qSearch">
+              Cerca
+            </label>
             <input
               id="qSearch"
               name="qSearch"
@@ -306,8 +440,12 @@ export default function GiacenzePage() {
             />
           </div>
 
-          <button className="btn" onClick={load}>Aggiorna</button>
-          <button className="btn" onClick={exportXlsx}>Export pagina</button>
+          <button className="btn" onClick={load}>
+            Aggiorna
+          </button>
+          <button className="btn" onClick={exportXlsx}>
+            Export pagina
+          </button>
         </div>
 
         <div style={{ marginTop: 10, fontSize: 12, opacity: 0.8 }}>
@@ -321,7 +459,7 @@ export default function GiacenzePage() {
         <div style={{ padding: 12 }}>Caricamento…</div>
       ) : (
         <>
-          {/* ✅ Scroll orizzontale garantito */}
+          {/* Scroll orizzontale */}
           <div
             style={{
               overflowX: "auto",
@@ -331,29 +469,15 @@ export default function GiacenzePage() {
               WebkitOverflowScrolling: "touch",
             }}
           >
-            <table
-              className="table"
-              style={{
-                minWidth: 2600, // abbastanza per 31 colonne + warehouse
-              }}
-            >
+            <table className="table" style={{ minWidth: 2600 }}>
               <thead>
                 <tr>
-                  <th
-                    onClick={() => cycleSort("_warehouse")}
-                    style={{ cursor: "pointer", userSelect: "none" }}
-                    title="Ordina"
-                  >
+                  <th onClick={() => cycleSort("_warehouse")} style={{ cursor: "pointer", userSelect: "none" }} title="Ordina">
                     Warehouse <span style={{ opacity: 0.7 }}>{sortIcon("_warehouse")}</span>
                   </th>
 
                   {EXCEL_COLS.map((c) => (
-                    <th
-                      key={c}
-                      onClick={() => cycleSort(c)}
-                      style={{ cursor: "pointer", userSelect: "none" }}
-                      title="Ordina"
-                    >
+                    <th key={c} onClick={() => cycleSort(c)} style={{ cursor: "pointer", userSelect: "none" }} title="Ordina">
                       {c} <span style={{ opacity: 0.7 }}>{sortIcon(c)}</span>
                     </th>
                   ))}
@@ -376,8 +500,8 @@ export default function GiacenzePage() {
                         let v: any = r.excel?.[c] ?? "";
 
                         if (c === "Materiale") v = r.code;
-                        if (c === "Descrizione Materiale") v = (r.name ?? v);
-                        if (c === "Unità di Misura") v = (r.um ?? v);
+                        if (c === "Descrizione Materiale") v = r.name ?? v;
+                        if (c === "Unità di Misura") v = r.um ?? v;
 
                         return <td key={c}>{String(v ?? "")}</td>;
                       })}
@@ -398,12 +522,7 @@ export default function GiacenzePage() {
 
           {/* paginazione */}
           <div style={{ marginTop: 14, display: "flex", gap: 10, alignItems: "center" }}>
-            <button
-              className="btn"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              style={{ opacity: page <= 1 ? 0.6 : 1 }}
-            >
+            <button className="btn" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} style={{ opacity: page <= 1 ? 0.6 : 1 }}>
               ← Precedente
             </button>
 
@@ -431,6 +550,7 @@ export default function GiacenzePage() {
             setEditing(null);
             setEditExcel({});
             setUnlocked({});
+            setCreating(false);
             setMsg(null);
           }}
           style={{
@@ -459,11 +579,34 @@ export default function GiacenzePage() {
           >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
               <div style={{ fontWeight: 900 }}>
-                Modifica riga · <span style={{ opacity: 0.75 }}>{editing.code}</span> ·{" "}
+                {creating ? "Nuovo materiale" : "Modifica riga"} ·{" "}
+                <span style={{ opacity: 0.75 }}>{creating ? "(nuovo)" : editing.code}</span> ·{" "}
                 <span style={{ opacity: 0.75 }}>{editing.warehouse}</span>
               </div>
 
               <div style={{ display: "flex", gap: 10 }}>
+                {isAdmin && !creating && (
+                  <button
+                    className="btn"
+                    style={{
+                      borderColor: "rgba(239,68,68,0.5)",
+                      background: "rgba(239,68,68,0.1)",
+                      color: "#991b1b",
+                    }}
+                    disabled={saving}
+                    onClick={deleteRow}
+                    title="Elimina riga"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6l-1 14H6L5 6" />
+                      <path d="M10 11v6" />
+                      <path d="M14 11v6" />
+                      <path d="M9 6V4h6v2" />
+                    </svg>
+                  </button>
+                )}
+
                 <button
                   className="btn"
                   disabled={saving}
@@ -471,6 +614,7 @@ export default function GiacenzePage() {
                     setEditing(null);
                     setEditExcel({});
                     setUnlocked({});
+                    setCreating(false);
                     setMsg(null);
                   }}
                 >
@@ -490,19 +634,34 @@ export default function GiacenzePage() {
             <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
               {EXCEL_COLS.map((c) => {
                 const id = sanitizeId(c);
-                const isMaterial = c === "Materiale";
+
+                // Materiale è editabile SOLO in creazione
+                const isMaterialReadOnly = c === "Materiale" && !creating;
+
+                // descrizione/um: li gestisci già tu, qui li lasciamo bloccati
+                const isAlwaysLocked = c === "Descrizione Materiale" || c === "Unità di Misura";
+
                 const computedValue =
                   c === "Materiale"
-                    ? editing.code
-                    : c === "Descrizione Materiale"
-                    ? (editing.name ?? editExcel[c] ?? "")
-                    : c === "Unità di Misura"
-                    ? (editing.um ?? editExcel[c] ?? "")
+                    ? (creating ? (editExcel[c] ?? "") : editing.code)
+                    : isAlwaysLocked
+                    ? (editExcel[c] ?? "")
                     : (editExcel[c] ?? "");
 
-                const canUnlock = !isMaterial && c !== "Descrizione Materiale" && c !== "Unità di Misura";
-                const isUnlocked = !!unlocked[c];
-                const disabled = saving || !canUnlock || !isUnlocked;
+                // ✅ se sei admin, NON bloccare mai "Descrizione Materiale" e "Unità di Misura"
+const adminCanEditCoreFields =
+  isAdmin && (c === "Descrizione Materiale" || c === "Unità di Misura");
+
+// regola base (quella che avevi)
+const canUnlockBase = !isMaterialReadOnly && !isAlwaysLocked;
+
+// ✅ admin sblocca anche quei 2 campi
+const canUnlock = adminCanEditCoreFields ? true : canUnlockBase;
+
+const isUnlocked = !!unlocked[c];
+
+// se vuoi che resti sempre “con matita”, lascia così:
+const disabled = saving || !canUnlock || !isUnlocked;
 
                 const inputStyle: React.CSSProperties = disabled
                   ? { background: "#f1f5f9", color: "#64748b" }
@@ -510,7 +669,9 @@ export default function GiacenzePage() {
 
                 return (
                   <div key={c} style={{ gridColumn: "span 6" }}>
-                    <label className="label" htmlFor={id}>{c}</label>
+                    <label className="label" htmlFor={id}>
+                      {c}
+                    </label>
 
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                       <input
@@ -527,37 +688,26 @@ export default function GiacenzePage() {
                         }}
                       />
 
-                      {/* Matita a fine riga */}
                       <button
-  type="button"
-  className="btn"
-  disabled={!canUnlock || saving}
-  onClick={() => {
-    if (!canUnlock || saving) return;
-    setUnlocked((prev) => ({ ...prev, [c]: !prev[c] }));
-  }}
-  title={canUnlock ? (isUnlocked ? "Blocca campo" : "Modifica campo") : "Campo non modificabile"}
-  style={{
-    width: 44,
-    justifyContent: "center",
-    opacity: canUnlock ? 1 : 0.5,
-  }}
->
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width="16"
-    height="16"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M12 20h9"/>
-    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
-  </svg>
-</button>
+                        type="button"
+                        className="btn"
+                        disabled={!canUnlock || saving}
+                        onClick={() => {
+                          if (!canUnlock || saving) return;
+                          setUnlocked((prev) => ({ ...prev, [c]: !prev[c] }));
+                        }}
+                        title={canUnlock ? (isUnlocked ? "Blocca campo" : "Modifica campo") : "Campo non modificabile"}
+                        style={{
+                          width: 44,
+                          justifyContent: "center",
+                          opacity: canUnlock ? 1 : 0.5,
+                        }}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 20h9" />
+                          <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                        </svg>
+                      </button>
                     </div>
                   </div>
                 );

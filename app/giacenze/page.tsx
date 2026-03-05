@@ -2,9 +2,11 @@
 
 export const dynamic = "force-dynamic";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "../_lib/supabase/client";
+
+const supabase = createClient();
 
 const PAGE_SIZE = 25;
 
@@ -52,13 +54,11 @@ type DbRow = {
   qty_blocked: number;
   qty_quality: number;
   initial_qty: number;
-  excel: Record<string, any> | null;
+  row_json: Record<string, any> | null;
 
-  // se la rpc li ritorna (consigliato)
   name?: string | null;
   um?: string | null;
 
-  // conteggio totale (ritornato dalla rpc)
   total_count?: number | null;
 };
 
@@ -78,7 +78,26 @@ function sanitizeId(s: string) {
 }
 
 export default function GiacenzePage() {
-  const supabase = createClient();
+  // ✅ auth/approved check
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      const user = data.user;
+
+      if (!user) {
+        window.location.href = "/login";
+        return;
+      }
+
+      const { data: p } = await supabase.from("profiles").select("approved").eq("id", user.id).maybeSingle();
+
+      if (!(p as any)?.approved) {
+        await supabase.auth.signOut();
+        window.location.href = "/pending";
+        return;
+      }
+    })();
+  }, []);
 
   const [view, setView] = useState<WarehouseView>("REALE");
   const [q, setQ] = useState("");
@@ -108,6 +127,11 @@ export default function GiacenzePage() {
   // quali campi sono sbloccati (uno per volta)
   const [unlocked, setUnlocked] = useState<Record<string, boolean>>({});
 
+  // ✅ Scrollbar orizzontale “gemella” (in alto) + tabella
+  const tableXRef = useRef<HTMLDivElement | null>(null);
+  const topXRef = useRef<HTMLDivElement | null>(null);
+
+  // Admin check
   useEffect(() => {
     (async () => {
       try {
@@ -122,8 +146,44 @@ export default function GiacenzePage() {
         setIsAdmin(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ✅ sync scroll top <-> table
+  useEffect(() => {
+    const tableEl = tableXRef.current;
+    const topEl = topXRef.current;
+
+    if (!tableEl || !topEl) return;
+
+    let lock = false;
+
+    const syncFromTop = () => {
+      if (lock) return;
+      lock = true;
+      tableEl.scrollLeft = topEl.scrollLeft;
+      lock = false;
+    };
+
+    const syncFromTable = () => {
+      if (lock) return;
+      lock = true;
+      topEl.scrollLeft = tableEl.scrollLeft;
+      lock = false;
+    };
+
+    const spacer = topEl.firstElementChild as HTMLDivElement | null;
+    if (spacer) spacer.style.width = `${tableEl.scrollWidth}px`;
+
+    topEl.addEventListener("scroll", syncFromTop, { passive: true });
+    tableEl.addEventListener("scroll", syncFromTable, { passive: true });
+
+    topEl.scrollLeft = tableEl.scrollLeft;
+
+    return () => {
+      topEl.removeEventListener("scroll", syncFromTop);
+      tableEl.removeEventListener("scroll", syncFromTable);
+    };
+  }, [loading, rows.length, view, sortKey, sortDir, page]);
 
   function cycleSort(clickedKey: string) {
     setPage(1);
@@ -153,12 +213,11 @@ export default function GiacenzePage() {
     const search = q.trim() || null;
     const offset = (page - 1) * PAGE_SIZE;
 
-    // ✅ Ordinamento globale via RPC
     const { data, error } = await supabase.rpc("giacenze_list", {
       p_view: view,
       p_search: search,
       p_sort_key: sortKey,
-      p_sort_dir: sortDir, // "none" | "asc" | "desc"
+      p_sort_dir: sortDir,
       p_limit: PAGE_SIZE,
       p_offset: offset,
     });
@@ -204,7 +263,7 @@ export default function GiacenzePage() {
     setCreating(false);
     setEditing(r);
 
-    const base = { ...(r.excel ?? {}) };
+    const base = { ...(r.row_json ?? {}) };
 
     base["Materiale"] = r.code;
     if (r.name != null) base["Descrizione Materiale"] = r.name ?? "";
@@ -227,6 +286,11 @@ export default function GiacenzePage() {
 
     const wh: "PRM" | "REALE" = view === "PRM" ? "PRM" : "REALE";
 
+    base["Magazzino"] = wh;
+    base["Qnt. a Mag. libero"] = 0;
+    base["Qnt. a Mag. bloccato"] = 0;
+    base["Controllo Qualità Magazzino"] = 0;
+
     setEditing({
       code: "",
       warehouse: wh,
@@ -234,7 +298,7 @@ export default function GiacenzePage() {
       qty_blocked: 0,
       qty_quality: 0,
       initial_qty: 0,
-      excel: base,
+      row_json: base,
     });
 
     setEditExcel(base);
@@ -262,8 +326,16 @@ export default function GiacenzePage() {
         return;
       }
 
+      // Manteniamo coerenti anche i 3 campi nel JSON
+      const nextJson = { ...editExcel };
+      nextJson["Materiale"] = code;
+      nextJson["Magazzino"] = editing.warehouse;
+      nextJson["Qnt. a Mag. libero"] = qtyFree;
+      nextJson["Qnt. a Mag. bloccato"] = qtyBlocked;
+      nextJson["Controllo Qualità Magazzino"] = qtyQuality;
+
       const payload = {
-        excel: editExcel,
+        row_json: nextJson,
         qty_free: qtyFree,
         qty_blocked: qtyBlocked,
         qty_quality: qtyQuality,
@@ -278,42 +350,55 @@ export default function GiacenzePage() {
         }
 
         // items: crea/aggiorna anagrafica minima
-        const name = String(editExcel["Descrizione Materiale"] ?? "").trim() || code;
-        const um = String(editExcel["Unità di Misura"] ?? "").trim() || null;
+        const name = String(nextJson["Descrizione Materiale"] ?? "").trim() || code;
+        const um = String(nextJson["Unità di Misura"] ?? "").trim() || null;
 
-        const { error: eItems } = await supabase
-          .from("items")
-          .upsert({ code, name, um } as any, { onConflict: "code" });
-
+        const { error: eItems } = await supabase.from("items").upsert({ code, name, um } as any, { onConflict: "code" });
         if (eItems) {
           setMsg("Errore creazione (items): " + eItems.message);
           setSaving(false);
           return;
         }
 
-        const { error: eStock } = await supabase
-          .from("item_stocks")
+        // excel_original (immutabile)
+        const { error: eOrig } = await supabase
+          .from("excel_original")
           .upsert(
             {
               code,
               warehouse: editing.warehouse,
-              excel: editExcel,
-              qty_free: qtyFree,
-              qty_blocked: qtyBlocked,
-              qty_quality: qtyQuality,
-              initial_qty: initial,
+              ...payload,
             } as any,
             { onConflict: "code,warehouse" }
           );
 
-        if (eStock) {
-          setMsg("Errore creazione (item_stocks): " + eStock.message);
+        if (eOrig) {
+          setMsg("Errore creazione (excel_original): " + eOrig.message);
+          setSaving(false);
+          return;
+        }
+
+        // excel_live (lavorabile)
+        const { error: eLive } = await supabase
+          .from("excel_live")
+          .upsert(
+            {
+              code,
+              warehouse: editing.warehouse,
+              ...payload,
+            } as any,
+            { onConflict: "code,warehouse" }
+          );
+
+        if (eLive) {
+          setMsg("Errore creazione (excel_live): " + eLive.message);
           setSaving(false);
           return;
         }
       } else {
+        // update SOLO live
         const { error } = await supabase
-          .from("item_stocks")
+          .from("excel_live")
           .update(payload as any)
           .eq("code", editing.code)
           .eq("warehouse", editing.warehouse);
@@ -323,6 +408,24 @@ export default function GiacenzePage() {
           setMsg("Errore salvataggio: " + ((error as any)?.message ?? "sconosciuto"));
           setSaving(false);
           return;
+        }
+
+        // opzionale: se admin cambia descrizione/UM nel popup, aggiorno anche items
+        if (isAdmin) {
+          const name = String(nextJson["Descrizione Materiale"] ?? "").trim();
+          const um = String(nextJson["Unità di Misura"] ?? "").trim();
+          if (name || um) {
+            await supabase
+              .from("items")
+              .upsert(
+                {
+                  code: editing.code,
+                  name: name || editing.name || editing.code,
+                  um: um || editing.um || null,
+                } as any,
+                { onConflict: "code" }
+              );
+          }
         }
       }
 
@@ -345,11 +448,8 @@ export default function GiacenzePage() {
     const ok = confirm(`Eliminare questo materiale?\n\nCodice: ${editing.code}\nMagazzino: ${editing.warehouse}`);
     if (!ok) return;
 
-    const { error } = await supabase
-      .from("item_stocks")
-      .delete()
-      .eq("code", editing.code)
-      .eq("warehouse", editing.warehouse);
+    // Eliminazione lato live (original resta come storico import)
+    const { error } = await supabase.from("excel_live").delete().eq("code", editing.code).eq("warehouse", editing.warehouse);
 
     if (error) {
       setMsg("Errore eliminazione: " + error.message);
@@ -368,9 +468,10 @@ export default function GiacenzePage() {
       const obj: Record<string, any> = {};
       for (const c of EXCEL_COLS) {
         if (c === "Materiale") obj[c] = r.code;
-        else if (c === "Descrizione Materiale") obj[c] = r.name ?? r.excel?.[c] ?? "";
-        else if (c === "Unità di Misura") obj[c] = r.um ?? r.excel?.[c] ?? "";
-        else obj[c] = r.excel?.[c] ?? "";
+        else if (c === "Descrizione Materiale") obj[c] = r.name ?? r.row_json?.[c] ?? "";
+        else if (c === "Unità di Misura") obj[c] = r.um ?? r.row_json?.[c] ?? "";
+        else if (c === "Qnt. a Mag. libero") obj[c] = Number.isFinite(Number(r.qty_free)) ? r.qty_free : r.row_json?.[c] ?? "";
+        else obj[c] = r.row_json?.[c] ?? "";
       }
       obj["_warehouse"] = r.warehouse;
       return obj;
@@ -382,39 +483,28 @@ export default function GiacenzePage() {
     XLSX.writeFile(wb, `giacenze_${view.toLowerCase()}_pagina_${page}.xlsx`);
   }
 
-  return (
-    <main className="panel">
+  function downloadExcelLive() {
+    window.location.href = "/api/excel-live/download";
+  }
 
-      <div
-  className="pageBar"
-  style={{
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: 10,
-  }}
->
-        <div className="pageBarTitle">Magazzino - Giacenze (Excel completo)</div>
-        <div className="pageBarActions">
-          {isAdmin && (
-            <button className="btn" onClick={openCreate}>
-              Nuovo materiale
-            </button>
-          )}
-          <a className="btn" href="/movimenti">
-            Movimenti
-          </a>
-          <a className="btn" href="/import">
-            Import
-          </a>
-        </div>
+  return (
+    <main className="panel" style={{ overflowX: "hidden" }}>
+      {/* HEADER */}
+      <div className="pageBar">
+        <div className="pageBarTitle">Magazzino - Giacenze</div>
       </div>
 
-      {/* Filtri */}
+      {/* FILTRI */}
       <div className="card" style={{ padding: 12 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "180px 1fr auto auto", gap: 10, alignItems: "end" }}>
-          <div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "180px minmax(240px,1fr) auto auto auto auto",
+            gap: 10,
+            alignItems: "end",
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
             <label className="label" htmlFor="viewSel">
               Magazzino
             </label>
@@ -425,7 +515,7 @@ export default function GiacenzePage() {
             </select>
           </div>
 
-          <div>
+          <div style={{ minWidth: 0 }}>
             <label className="label" htmlFor="qSearch">
               Cerca
             </label>
@@ -436,15 +526,26 @@ export default function GiacenzePage() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Codice, descrizione, qualunque colonna excel…"
-              style={{ width: "100%" }}
+              style={{ width: "100%", maxWidth: 520 }}
             />
           </div>
+
+          {isAdmin && (
+            <button className="btn btnPrimary" onClick={openCreate}>
+              Nuovo materiale
+            </button>
+          )}
 
           <button className="btn" onClick={load}>
             Aggiorna
           </button>
+
           <button className="btn" onClick={exportXlsx}>
             Export pagina
+          </button>
+
+          <button className="btn" onClick={downloadExcelLive} title="Scarica il file Excel LIVE (tutte le righe)">
+            Download Excel LIVE
           </button>
         </div>
 
@@ -459,13 +560,34 @@ export default function GiacenzePage() {
         <div style={{ padding: 12 }}>Caricamento…</div>
       ) : (
         <>
-          {/* Scroll orizzontale */}
+          {/* ✅ SCROLLBAR ORIZZONTALE SEMPRE DISPONIBILE */}
           <div
+            ref={topXRef}
+            style={{
+              position: "sticky",
+              top: 10,
+              zIndex: 30,
+              height: 16,
+              overflowX: "auto",
+              overflowY: "hidden",
+              background: "rgba(255,255,255,0.92)",
+              backdropFilter: "blur(10px)",
+              border: "1px solid rgba(15,23,42,0.10)",
+              borderRadius: 10,
+              marginTop: 12,
+            }}
+          >
+            <div style={{ width: 2600, height: 1 }} />
+          </div>
+
+          {/* ✅ TABELLA */}
+          <div
+            ref={tableXRef}
             style={{
               overflowX: "auto",
               overflowY: "hidden",
               width: "100%",
-              marginTop: 12,
+              marginTop: 10,
               WebkitOverflowScrolling: "touch",
             }}
           >
@@ -497,11 +619,16 @@ export default function GiacenzePage() {
                       <td style={{ fontWeight: 900 }}>{r.warehouse}</td>
 
                       {EXCEL_COLS.map((c) => {
-                        let v: any = r.excel?.[c] ?? "";
+                        let v: any = r.row_json?.[c] ?? "";
 
                         if (c === "Materiale") v = r.code;
                         if (c === "Descrizione Materiale") v = r.name ?? v;
                         if (c === "Unità di Misura") v = r.um ?? v;
+
+                        // ✅ quantità reale: preferisci qty_free (sempre allineato ai movimenti)
+                        if (c === "Qnt. a Mag. libero") {
+                          v = Number.isFinite(Number(r.qty_free)) ? Number(r.qty_free) : Number(r.row_json?.["Qnt. a Mag. libero"] ?? 0);
+                        }
 
                         return <td key={c}>{String(v ?? "")}</td>;
                       })}
@@ -520,8 +647,8 @@ export default function GiacenzePage() {
             </table>
           </div>
 
-          {/* paginazione */}
-          <div style={{ marginTop: 14, display: "flex", gap: 10, alignItems: "center" }}>
+          {/* PAGINAZIONE */}
+          <div style={{ marginTop: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <button className="btn" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} style={{ opacity: page <= 1 ? 0.6 : 1 }}>
               ← Precedente
             </button>
@@ -530,19 +657,14 @@ export default function GiacenzePage() {
               Pagina <b>{page}</b> di <b>{totalPages}</b> · Totale righe: <b>{count}</b>
             </span>
 
-            <button
-              className="btn"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              style={{ opacity: page >= totalPages ? 0.6 : 1 }}
-            >
+            <button className="btn" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} style={{ opacity: page >= totalPages ? 0.6 : 1 }}>
               Successiva →
             </button>
           </div>
         </>
       )}
 
-      {/* POPUP EDIT */}
+      {/* POPUP EDIT / CREATE */}
       {editing && (
         <div
           onMouseDown={() => {
@@ -579,8 +701,7 @@ export default function GiacenzePage() {
           >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
               <div style={{ fontWeight: 900 }}>
-                {creating ? "Nuovo materiale" : "Modifica riga"} ·{" "}
-                <span style={{ opacity: 0.75 }}>{creating ? "(nuovo)" : editing.code}</span> ·{" "}
+                {creating ? "Nuovo materiale" : "Modifica riga"} · <span style={{ opacity: 0.75 }}>{creating ? "(nuovo)" : editing.code}</span> ·{" "}
                 <span style={{ opacity: 0.75 }}>{editing.warehouse}</span>
               </div>
 
@@ -635,37 +756,25 @@ export default function GiacenzePage() {
               {EXCEL_COLS.map((c) => {
                 const id = sanitizeId(c);
 
-                // Materiale è editabile SOLO in creazione
+                // Materiale editabile SOLO in creazione
                 const isMaterialReadOnly = c === "Materiale" && !creating;
 
-                // descrizione/um: li gestisci già tu, qui li lasciamo bloccati
-                const isAlwaysLocked = c === "Descrizione Materiale" || c === "Unità di Misura";
+                // regola "sempre bloccati" (ma admin può sbloccarli)
+                const isCoreField = c === "Descrizione Materiale" || c === "Unità di Misura";
+                const isAlwaysLocked = isCoreField && !isAdmin;
 
                 const computedValue =
                   c === "Materiale"
-                    ? (creating ? (editExcel[c] ?? "") : editing.code)
-                    : isAlwaysLocked
-                    ? (editExcel[c] ?? "")
-                    : (editExcel[c] ?? "");
+                    ? creating
+                      ? editExcel[c] ?? ""
+                      : editing.code
+                    : editExcel[c] ?? "";
 
-                // ✅ se sei admin, NON bloccare mai "Descrizione Materiale" e "Unità di Misura"
-const adminCanEditCoreFields =
-  isAdmin && (c === "Descrizione Materiale" || c === "Unità di Misura");
+                const canUnlock = !isMaterialReadOnly && !isAlwaysLocked;
+                const isUnlocked = !!unlocked[c];
+                const disabled = saving || !canUnlock || !isUnlocked;
 
-// regola base (quella che avevi)
-const canUnlockBase = !isMaterialReadOnly && !isAlwaysLocked;
-
-// ✅ admin sblocca anche quei 2 campi
-const canUnlock = adminCanEditCoreFields ? true : canUnlockBase;
-
-const isUnlocked = !!unlocked[c];
-
-// se vuoi che resti sempre “con matita”, lascia così:
-const disabled = saving || !canUnlock || !isUnlocked;
-
-                const inputStyle: React.CSSProperties = disabled
-                  ? { background: "#f1f5f9", color: "#64748b" }
-                  : { background: "white", color: "#0f172a" };
+                const inputStyle: React.CSSProperties = disabled ? { background: "#f1f5f9", color: "#64748b" } : { background: "white", color: "#0f172a" };
 
                 return (
                   <div key={c} style={{ gridColumn: "span 6" }}>
@@ -674,20 +783,40 @@ const disabled = saving || !canUnlock || !isUnlocked;
                     </label>
 
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <input
-                        id={id}
-                        name={id}
-                        className="input"
-                        disabled={disabled}
-                        value={String(computedValue ?? "")}
-                        style={{ ...inputStyle, flex: 1 }}
-                        onChange={(e) => {
-                          if (disabled) return;
-                          const v = e.target.value;
-                          setEditExcel((prev) => ({ ...prev, [c]: v }));
-                        }}
-                      />
+                      {c === "Magazzino" && creating ? (
+                        <select
+                          id={id}
+                          name={id}
+                          className="input"
+                          disabled={disabled}
+                          value={String(editExcel[c] ?? editing.warehouse ?? "PRM")}
+                          onChange={(e) => {
+                            const v = e.target.value as "PRM" | "REALE";
+                            setEditExcel((prev) => ({ ...prev, [c]: v }));
+                            setEditing((prev) => (prev ? { ...prev, warehouse: v } : prev));
+                          }}
+                          style={{ flex: 1 }}
+                        >
+                          <option value="PRM">PRM</option>
+                          <option value="REALE">REALE</option>
+                        </select>
+                      ) : (
+                        <input
+                          id={id}
+                          name={id}
+                          className="input"
+                          disabled={disabled}
+                          value={String(computedValue ?? "")}
+                          style={{ ...inputStyle, flex: 1 }}
+                          onChange={(e) => {
+                            if (disabled) return;
+                            const v = e.target.value;
+                            setEditExcel((prev) => ({ ...prev, [c]: v }));
+                          }}
+                        />
+                      )}
 
+                      {/* Matita */}
                       <button
                         type="button"
                         className="btn"

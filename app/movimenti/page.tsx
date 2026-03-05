@@ -115,6 +115,15 @@ function PencilIcon({ muted }: { muted?: boolean }) {
   );
 }
 
+type ExcelLiveRow = {
+  code: string;
+  warehouse: "PRM" | "REALE";
+  qty_free: number | null;
+  qty_blocked: number | null;
+  qty_quality: number | null;
+  row_json: Record<string, any> | null;
+};
+
 export default function MovimentiPage() {
   const supabase = createClient();
 
@@ -192,27 +201,62 @@ export default function MovimentiPage() {
     setReferents((data ?? []) as ReferentRow[]);
   }
 
-  async function loadSuggestions(text: string) {
-    const s = text.trim();
-    if (!s) {
-      setSuggestions([]);
-      return;
-    }
+  function escapeIlike(v: string) {
+  // Escape per ILIKE: % e _ sono wildcard, \ è escape
+  // Inoltre togliamo apici/backtick che possono rompere il parser del filtro
+  return v
+    .replace(/\\/g, "\\\\")
+    .replace(/%/g, "\\%")
+    .replace(/_/g, "\\_")
+    .replace(/['"`]/g, " ")
+    .trim();
+}
 
-    const { data, error } = await supabase
+async function loadSuggestions(text: string) {
+  const s = String(text ?? "").trim();
+  if (!s) {
+    setSuggestions([]);
+    return;
+  }
+
+  try {
+    // 1) query per codice
+    const q1 = await supabase
       .from("items")
       .select("code,name,um")
-      .or(`code.ilike.%${s}%,name.ilike.%${s}%`)
+      .ilike("code", `%${s}%`)
       .order("code", { ascending: true })
       .limit(12);
 
-    if (error) {
-      console.error("loadSuggestions error:", error);
+    // 2) query per descrizione
+    const q2 = await supabase
+      .from("items")
+      .select("code,name,um")
+      .ilike("name", `%${s}%`)
+      .order("code", { ascending: true })
+      .limit(12);
+
+    // Debug “grezzo” (qui vediamo se è RLS: di solito q1.status=401/403 o error con message)
+    if (q1.error || q2.error) {
+      console.error("loadSuggestions raw:", {
+        q1: { status: (q1 as any).status, error: q1.error, dataLen: q1.data?.length ?? 0 },
+        q2: { status: (q2 as any).status, error: q2.error, dataLen: q2.data?.length ?? 0 },
+      });
       setSuggestions([]);
       return;
     }
-    setSuggestions((data ?? []) as DbItem[]);
+
+    // merge univoco per code
+    const map = new Map<string, DbItem>();
+    for (const it of (q1.data ?? []) as any[]) map.set(it.code, it as DbItem);
+    for (const it of (q2.data ?? []) as any[]) map.set(it.code, it as DbItem);
+
+    setSuggestions(Array.from(map.values()).slice(0, 12));
+  } catch (e: any) {
+    console.error("loadSuggestions catch:", e);
+    setSuggestions([]);
   }
+}
 
   async function loadHistory() {
     setLoading(true);
@@ -364,69 +408,225 @@ export default function MovimentiPage() {
     setActiveIndex(0);
   }
 
-  async function saveMovement() {
-  setMsg(null);
-  if (!userId) return setMsg("Devi essere loggato per salvare movimenti.");
-  if (!picked) return setMsg("Seleziona un materiale (scrivi per cercare o scansiona).");
+  async function getOrCreateExcelLiveRow(code: string, wh: "PRM" | "REALE") {
+    // Se manca la riga in excel_live, proviamo a copiarla da excel_original.
+    const { data: live, error: eLive } = await supabase
+      .from("excel_live")
+      .select("code,warehouse,qty_free,qty_blocked,qty_quality,row_json")
+      .eq("code", code)
+      .eq("warehouse", wh)
+      .maybeSingle();
 
-  const qn = toNumber(qty);
-  if (!Number.isFinite(qn) || qn <= 0) return setMsg("Quantità non valida (deve essere > 0).");
+    if (eLive) throw eLive;
+    if (live) return live as ExcelLiveRow;
 
-  // 🔹 recupera nome e cognome dal profilo
-  const { data: prof } = await supabase
-    .from("profiles")
-    .select("first_name,last_name")
-    .eq("id", userId)
-    .maybeSingle();
+    const { data: orig, error: eOrig } = await supabase
+      .from("excel_original")
+      .select("code,warehouse,qty_free,qty_blocked,qty_quality,row_json")
+      .eq("code", code)
+      .eq("warehouse", wh)
+      .maybeSingle();
 
-  const fullName =
-    `${String((prof as any)?.first_name ?? "").trim()} ${String((prof as any)?.last_name ?? "").trim()}`.trim() || null;
+    if (eOrig) throw eOrig;
 
-  const payload: Partial<MovementRow> = {
-    type,
-    code: picked.code,
-    qty: qn,
-    note: note.trim() || null,
-    created_by: userId,
-    created_by_name: fullName, // ✅ ora salva nome e cognome
-    warehouse,
-    status: type === "OUT" ? "OPEN" : "CLOSED",
-    returned_qty: 0,
-    return_note: null,
-    closed_at: type === "OUT" ? null : new Date().toISOString(),
-    closed_by: type === "OUT" ? null : userId,
-    referent_id: null,
-    referee_email: null,
-  };
+    if (!orig) return null;
 
-  const { error } = await supabase.from("movements").insert(payload as any);
-  if (error) return setMsg("Errore salvataggio: " + (error as any)?.message);
+    const ins = orig as any;
+    const { data: created, error: eIns } = await supabase
+      .from("excel_live")
+      .insert({
+        code: ins.code,
+        warehouse: ins.warehouse,
+        qty_free: ins.qty_free ?? 0,
+        qty_blocked: ins.qty_blocked ?? 0,
+        qty_quality: ins.qty_quality ?? 0,
+        row_json: ins.row_json ?? {},
+      })
+      .select("code,warehouse,qty_free,qty_blocked,qty_quality,row_json")
+      .maybeSingle();
 
-  setQty("");
-  setNote("");
-  setMsg("Movimento salvato ✅");
-  await loadHistory();
-  setTimeout(() => qtyRef.current?.focus(), 80);
-}
-
-  async function deleteMovement(id: string) {
-    if (!isAdmin) return alert("Solo l'admin può eliminare i movimenti.");
-    const ok = confirm("Eliminare questo movimento?");
-    if (!ok) return;
-
-    const { error } = await supabase.from("movements").delete().eq("id", id);
-    if (error) return alert("Non posso eliminare: " + (error as any)?.message);
-
-    if (closing?.id === id) {
-      setCloseOpen(false);
-      setClosing(null);
-      setClosingMeta(null);
-      setEditRectify(false);
-    }
-    await loadHistory();
+    if (eIns) throw eIns;
+    return (created ?? null) as ExcelLiveRow | null;
   }
 
-  // fallback: se items ha name/um vuoti, prova a prenderli dall’altro magazzino (item_stocks.excel)
+  async function applyDeltaToExcelLive(code: string, wh: "PRM" | "REALE", deltaFree: number) {
+    const live = await getOrCreateExcelLiveRow(code, wh);
+    if (!live) {
+      throw new Error(`Riga non trovata in excel_live (né in excel_original) per ${code} ${wh}. Importa l'Excel prima.`);
+    }
+
+    const rowJson = { ...(live.row_json ?? {}) };
+    const currentFromJson = n(rowJson["Qnt. a Mag. libero"]);
+    const currentFree = Number.isFinite(Number(live.qty_free)) ? n(live.qty_free) : currentFromJson;
+
+    // Preferiamo qty_free se presente, altrimenti JSON
+    const base = Number.isFinite(currentFree) ? currentFree : currentFromJson;
+    const next = base + deltaFree;
+
+    rowJson["Qnt. a Mag. libero"] = next;
+
+    const { error: eUp } = await supabase
+      .from("excel_live")
+      .update({
+        qty_free: next,
+        row_json: rowJson,
+      })
+      .eq("code", code)
+      .eq("warehouse", wh);
+
+    if (eUp) throw eUp;
+  }
+
+  async function saveMovement() {
+    setMsg(null);
+    if (!userId) return setMsg("Devi essere loggato per salvare movimenti.");
+    if (!picked) return setMsg("Seleziona un materiale.");
+
+    const qn = toNumber(qty);
+    if (!Number.isFinite(qn) || qn <= 0) {
+      return setMsg("Quantità non valida.");
+    }
+
+    // recupera nome utente
+    const { data: prof } = await supabase.from("profiles").select("first_name,last_name").eq("id", userId).maybeSingle();
+
+    const fullName =
+      `${String((prof as any)?.first_name ?? "").trim()} ${String((prof as any)?.last_name ?? "").trim()}`.trim() || null;
+
+    // -------------------------
+    // SALVA MOVIMENTO
+    // -------------------------
+    const payload: Partial<MovementRow> = {
+      type,
+      code: picked.code,
+      qty: qn,
+      note: note.trim() || null,
+      created_by: userId,
+      created_by_name: fullName,
+      warehouse,
+      status: type === "OUT" ? "OPEN" : "CLOSED",
+      returned_qty: 0,
+      return_note: null,
+      closed_at: type === "OUT" ? null : new Date().toISOString(),
+      closed_by: type === "OUT" ? null : userId,
+      referent_id: null,
+      referee_email: null,
+    };
+
+    const { error } = await supabase.from("movements").insert(payload as any);
+    if (error) return setMsg("Errore salvataggio movimento: " + error.message);
+
+    // -------------------------
+    // AGGIORNA EXCEL LIVE
+    // -------------------------
+    try {
+      const delta = type === "IN" ? qn : -qn;
+      await applyDeltaToExcelLive(picked.code, warehouse, delta);
+    } catch (e: any) {
+      console.error("excel_live update error:", e);
+      // Non blocchiamo l'utente, ma lo avvisiamo chiaramente
+      setMsg(
+        "Movimento salvato ✅\n\n⚠️ Attenzione: non sono riuscito ad aggiornare excel_live (giacenze). " +
+          (e?.message ?? "Errore sconosciuto")
+      );
+      setQty("");
+      setNote("");
+      await loadHistory();
+      setTimeout(() => qtyRef.current?.focus(), 80);
+      return;
+    }
+
+    setQty("");
+    setNote("");
+    setMsg("Movimento salvato ✅");
+
+    await loadHistory();
+    setTimeout(() => qtyRef.current?.focus(), 80);
+  }
+
+  async function deleteMovement(id: string) {
+  if (!isAdmin) return alert("Solo l'admin può eliminare i movimenti.");
+  const ok = confirm("Eliminare questo movimento?");
+  if (!ok) return;
+
+  // 1️⃣ Leggo il movimento
+  const { data: mov, error: readError } = await supabase
+    .from("movements")
+    .select("id,code,warehouse,type,qty")
+    .eq("id", id)
+    .single();
+
+  if (readError || !mov) {
+    console.error("Errore lettura movimento:", readError);
+    return alert("Impossibile leggere il movimento.");
+  }
+
+  const code = mov.code;
+  const warehouse = mov.warehouse;
+  const qty = Math.abs(Number(mov.qty ?? 0));
+
+  // 2️⃣ Calcolo il delta inverso
+  const delta = mov.type === "IN"
+    ? -qty   // se era +10 → diventa -10
+    : +qty;  // se era -10 → diventa +10
+
+  // 3️⃣ Leggo la giacenza corrente
+  const { data: stock, error: stockError } = await supabase
+    .from("excel_live")
+    .select("qty_free,row_json")
+    .eq("code", code)
+    .eq("warehouse", warehouse)
+    .single();
+
+  if (stockError || !stock) {
+    console.error("Errore lettura giacenza:", stockError);
+    return alert("Impossibile leggere la giacenza.");
+  }
+
+  const currentQty = Number(stock.qty_free ?? 0);
+  const newQty = currentQty + delta;
+
+  const newJson = { ...(stock.row_json ?? {}) };
+  newJson["Qnt. a Mag. libero"] = newQty;
+
+  // 4️⃣ Aggiorno la giacenza
+  const { error: updateError } = await supabase
+    .from("excel_live")
+    .update({
+      qty_free: newQty,
+      row_json: newJson,
+    })
+    .eq("code", code)
+    .eq("warehouse", warehouse);
+
+  if (updateError) {
+    console.error("Errore aggiornamento giacenza:", updateError);
+    return alert("Errore aggiornamento giacenza.");
+  }
+
+  // 5️⃣ Elimino il movimento
+  const { error: deleteError } = await supabase
+    .from("movements")
+    .delete()
+    .eq("id", id);
+
+  if (deleteError) {
+    console.error("Errore eliminazione:", deleteError);
+    return alert("Non posso eliminare: " + deleteError.message);
+  }
+
+  // refresh UI
+  if (closing?.id === id) {
+    setCloseOpen(false);
+    setClosing(null);
+    setClosingMeta(null);
+    setEditRectify(false);
+  }
+
+  await loadHistory();
+}
+
+  // fallback: se items ha name/um vuoti, prova a prenderli dall’altro magazzino (excel_live.row_json)
   async function loadItemMetaWithFallback(code: string, wh: "PRM" | "REALE" | null) {
     const { data: it, error: e1 } = await supabase.from("items").select("code,name,um").eq("code", code).maybeSingle();
     if (e1) console.error("meta items error:", e1);
@@ -438,15 +638,15 @@ export default function MovimentiPage() {
 
     const other = wh === "PRM" ? "REALE" : "PRM";
     const { data: s2, error: e2 } = await supabase
-      .from("item_stocks")
-      .select("excel")
+      .from("excel_live")
+      .select("row_json")
       .eq("code", code)
       .eq("warehouse", other)
       .maybeSingle();
 
-    if (e2) console.error("meta item_stocks error:", e2);
+    if (e2) console.error("meta excel_live error:", e2);
 
-    const ex = ((s2 as any)?.excel ?? {}) as Record<string, any>;
+    const ex = (((s2 as any)?.row_json ?? {}) as Record<string, any>) || {};
     const name2 = String(ex["Descrizione Materiale"] ?? ex["Descrizione"] ?? "").trim();
     const um2 = String(ex["Unità di Misura"] ?? ex["UM"] ?? "").trim();
 
@@ -479,7 +679,7 @@ export default function MovimentiPage() {
       return;
     }
 
-    const outQty = Math.abs(n(closing.qty)); // se in DB l'OUT è negativo, qui normalizziamo
+    const outQty = Math.abs(n(closing.qty));
     const r = toNumber(returnQty);
 
     if (!Number.isFinite(r) || r < 0) {
@@ -509,6 +709,26 @@ export default function MovimentiPage() {
 
     if (error) {
       setMsg("Errore chiusura: " + (error as any)?.message);
+      return;
+    }
+
+    // Aggiorna giacenza: rientro = aumenta il libero
+    try {
+      if (r > 0) {
+        const wh = (closing.warehouse ?? null) as "PRM" | "REALE" | null;
+        if (wh) await applyDeltaToExcelLive(closing.code, wh, r);
+      }
+    } catch (e: any) {
+      console.error("excel_live return update error:", e);
+      setMsg(
+        "Chiusura salvata ✅\n\n⚠️ Attenzione: non sono riuscito ad aggiornare excel_live (rientro). " +
+          (e?.message ?? "Errore sconosciuto")
+      );
+      setCloseOpen(false);
+      setClosing(null);
+      setClosingMeta(null);
+      setEditRectify(false);
+      await loadHistory();
       return;
     }
 
@@ -599,7 +819,6 @@ export default function MovimentiPage() {
     const channel = supabase
       .channel("movements-live")
       .on("postgres_changes", { event: "*", schema: "public", table: "movements" }, async () => {
-        // se stai editando nel popup, non ricaricare per non “saltare” i campi
         if (closeOpen) return;
         await loadHistory();
       })
@@ -624,9 +843,8 @@ export default function MovimentiPage() {
   const active = useMemo(() => suggestions[activeIndex], [suggestions, activeIndex]);
 
   return (
-    <main className="panel">
+    <main className="panel" style={{ overflowX: "hidden" }}>
       <style jsx global>{`
-        /* banner "aperto" strisce animate */
         .openStripe {
           background: repeating-linear-gradient(
             135deg,
@@ -650,17 +868,6 @@ export default function MovimentiPage() {
 
       <div className="pageBar">
         <div className="pageBarTitle">Magazzino - Movimenti</div>
-        <div className="pageBarActions">
-          <a className="btn" href="/giacenze">
-            Giacenze
-          </a>
-          <a className="btn" href="/import">
-            Import
-          </a>
-          <a className="btn" href="/">
-            Dashboard
-          </a>
-        </div>
       </div>
 
       {/* FILTRI STORICO */}
@@ -877,7 +1084,7 @@ export default function MovimentiPage() {
           </div>
         )}
 
-        {msg && <div style={{ marginTop: 10, fontWeight: 800 }}>{msg}</div>}
+        {msg && <div style={{ marginTop: 10, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
       </div>
 
       {/* STORICO */}
@@ -958,7 +1165,10 @@ export default function MovimentiPage() {
 
                       <td>{m.warehouse ? <span style={pillStyle(m.warehouse)}>{m.warehouse}</span> : "-"}</td>
 
-                      <td style={{ fontWeight: 900 }}>{m.type === "IN" ? "+" : "-"}{outAbs}</td>
+                      <td style={{ fontWeight: 900 }}>
+                        {m.type === "IN" ? "+" : "-"}
+                        {outAbs}
+                      </td>
 
                       <td>{m.type === "OUT" ? n(m.returned_qty) : "-"}</td>
                       <td style={{ fontWeight: 900 }}>{m.type === "OUT" ? net : "-"}</td>
@@ -990,11 +1200,11 @@ export default function MovimentiPage() {
         </div>
       </div>
 
-      {/* POPUP DETTAGLIO / CHIUSURA (formato come tuo screenshot “vecchio”) */}
+      {/* POPUP DETTAGLIO / CHIUSURA */}
       {closeOpen && closing && (
         <div
           onMouseDown={() => {
-            if (editRectify) return; // evita chiusura accidentale mentre stai modificando
+            if (editRectify) return;
             setCloseOpen(false);
             setClosing(null);
             setClosingMeta(null);
@@ -1033,7 +1243,7 @@ export default function MovimentiPage() {
               </div>
 
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <span style={{ ...pillStyle((closing.status ?? "OPEN") as any), ...(closing.status === "OPEN" ? { } : {}) }}>
+                <span style={{ ...pillStyle((closing.status ?? "OPEN") as any) }}>
                   {(closing.status ?? (closing.type === "OUT" ? "OPEN" : "CLOSED")) === "OPEN" ? "APERTO" : "CHIUSO"}
                 </span>
 
@@ -1052,7 +1262,7 @@ export default function MovimentiPage() {
               </div>
             </div>
 
-            {/* Riga info “vecchia” */}
+            {/* Riga info */}
             <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
               <div style={{ gridColumn: "span 3" }}>
                 <label className="label" htmlFor="mvType">
@@ -1105,7 +1315,6 @@ export default function MovimentiPage() {
                   <div style={{ fontWeight: 900 }}>Rettifica / Chiusura uscita</div>
 
                   <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    {/* Matita (sblocca/chiude) */}
                     <button
                       type="button"
                       className="btn"
@@ -1198,13 +1407,7 @@ export default function MovimentiPage() {
                     <label className="label" htmlFor="netInfo">
                       Quantità netta (uscita - rientro)
                     </label>
-                    <input
-                      id="netInfo"
-                      name="netInfo"
-                      className="input"
-                      value={String(Math.max(0, Math.abs(n(closing.qty)) - n(toNumber(returnQty))))}
-                      disabled
-                    />
+                    <input id="netInfo" name="netInfo" className="input" value={String(Math.max(0, Math.abs(n(closing.qty)) - n(toNumber(returnQty))))} disabled />
                   </div>
                 </div>
 
@@ -1225,7 +1428,7 @@ export default function MovimentiPage() {
               )}
             </div>
 
-            {msg && <div style={{ marginTop: 10, fontWeight: 800 }}>{msg}</div>}
+            {msg && <div style={{ marginTop: 10, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
           </div>
         </div>
       )}

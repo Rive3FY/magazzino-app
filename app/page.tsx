@@ -24,7 +24,7 @@ type DbItem = {
 type DbStock = {
   code: string;
   warehouse: "PRM" | "REALE";
-  initial_qty: number | null;
+  excel: any;
 };
 
 function isSameDay(d: Date, ref: Date) {
@@ -115,7 +115,7 @@ export default function Home() {
     // base stock (item_stocks)
     const { data: base, error: eBase } = await supabase
       .from("item_stocks")
-      .select("code,warehouse,initial_qty")
+.select("code,warehouse,excel")
       .eq("code", code);
 
     if (eBase) {
@@ -125,11 +125,14 @@ export default function Home() {
     }
 
     let basePRM = 0;
-    let baseREALE = 0;
-    for (const r of (base ?? []) as DbStock[]) {
-      if (r.warehouse === "PRM") basePRM = n(r.initial_qty);
-      if (r.warehouse === "REALE") baseREALE = n(r.initial_qty);
-    }
+let baseREALE = 0;
+
+for (const r of (base ?? []) as DbStock[]) {
+  const q = Number(r.excel?.["Qnt. a Mag. libero"] ?? 0);
+
+  if (r.warehouse === "PRM") basePRM = q;
+  if (r.warehouse === "REALE") baseREALE = q;
+}
 
     // delta movements
     const { data: movs, error: eMovs } = await supabase
@@ -360,10 +363,7 @@ export default function Home() {
           <div style={{ opacity: 0.85, marginTop: 6 }}>Panoramica rapida di anagrafica e operatività.</div>
         </div>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <a className="btn btnPrimary" href="/movimenti"> Nuovo movimento</a>
-          <a className="btn" href="/giacenze"> Vai a giacenze</a>
-        </div>
+        
       </div>
 
       {/* ✅ CERCA MATERIALE + BARCODE */}
@@ -389,11 +389,9 @@ export default function Home() {
               <option value="REALE">Solo REALE</option>
             </select>
 
-            <button className="btn" onClick={() => (scanning ? stopScan() : startScan())}>
-              {scanning ? "⏹ Ferma scansione" : " Scansiona barcode"}
-            </button>
+            
 
-            <button className="btn" onClick={resetSearch}>Pulisci</button>
+            
           </div>
         </div>
 
@@ -568,7 +566,7 @@ export default function Home() {
       <div style={{ marginTop: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <h2 style={{ margin: 0 }}>Ultimi movimenti</h2>
-          <a className="btn" href="/movimenti">Vedi tutto</a>
+          <a className="btn btnPrimary" href="/movimenti">Vedi tutto</a>
         </div>
 
         <div style={{ overflowX: "auto", marginTop: 10 }}>

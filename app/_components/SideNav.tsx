@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 
 export default function SideNav() {
   const pathname = usePathname();
+  const router = useRouter();
   const supabase = createClient();
 
   const [isAdmin, setIsAdmin] = useState(false);
@@ -23,14 +24,34 @@ export default function SideNav() {
     (async () => {
       try {
         const { data: u } = await supabase.auth.getUser();
-        if (!u.user) {
+        const user = u.user;
+
+        if (!user) {
           if (!alive) return;
           setIsAdmin(false);
           setChecked(true);
           return;
         }
 
+        /* 🔹 controllo profilo compilato */
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("badge_number, first_name, last_name")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (
+          profile &&
+          (!profile.badge_number || !profile.first_name || !profile.last_name) &&
+          pathname !== "/profilo"
+        ) {
+          router.replace("/profilo");
+          return;
+        }
+
+        /* 🔹 controllo admin */
         const { data, error } = await supabase.rpc("is_admin");
+
         if (!alive) return;
 
         if (error) {
@@ -47,8 +68,7 @@ export default function SideNav() {
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [pathname, router, supabase]);
 
   return (
     <aside className="sidebar">
@@ -59,27 +79,27 @@ export default function SideNav() {
 
       <nav className="sideNav">
         <Link className={cls("/")} href="/">Dashboard</Link>
+
+        <Link className={cls("/profilo")} href="/profilo">Profilo</Link>
+
         <Link className={cls("/movimenti")} href="/movimenti">Movimenti</Link>
         <Link className={cls("/giacenze")} href="/giacenze">Giacenze</Link>
 
-        {/* Import: se vuoi che lo vedano solo admin */}
         {isAdmin && <Link className={cls("/import")} href="/import">Import</Link>}
 
-        {/* Admin: solo admin */}
         {isAdmin && <Link className={cls("/admin")} href="/admin">Admin</Link>}
 
-        {/* Se vuoi far vedere un placeholder mentre controlla */}
         {!checked && (
-          <div className="sideLink" style={{ opacity: 0.6, pointerEvents: "none" }}>
+          <div
+            className="sideLink"
+            style={{ opacity: 0.6, pointerEvents: "none" }}
+          >
             …
           </div>
         )}
       </nav>
 
-      <div className="sidebarFooter">
-        <div>• Operatori</div>
-        <div>• Impostazioni</div>
-      </div>
+      <div className="sidebarFooter"></div>
     </aside>
   );
 }

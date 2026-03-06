@@ -58,25 +58,76 @@ export default function ProfiloPage() {
   }, []);
 
   async function save() {
-    setMsg(null);
+  setMsg(null);
 
-    const b = badge.trim();
-    const f = first.trim();
-    const l = last.trim();
+  const b = badge.trim();
+  const f = first.trim();
+  const l = last.trim();
 
-    if (!b || !f || !l) {
-      setMsg("Compila badge, nome e cognome.");
+  if (!b || !f || !l) {
+    setMsg("Compila badge, nome e cognome.");
+    return;
+  }
+
+  setSaving(true);
+  try {
+    const { data: u } = await supabase.auth.getUser();
+    const user = u.user;
+    if (!user) {
+      window.location.href = "/login";
       return;
     }
 
-    setSaving(true);
-    try {
-      const { data: u } = await supabase.auth.getUser();
-      const user = u.user;
-      if (!user) {
-        window.location.href = "/login";
-        return;
-      }
+    const { data: existing, error: readError } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (readError) {
+      setMsg("Errore verifica profilo: " + readError.message);
+      return;
+    }
+
+    let saveError = null;
+
+    if (existing) {
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          badge_number: b,
+          first_name: f,
+          last_name: l,
+        })
+        .eq("id", user.id);
+
+      saveError = error;
+    } else {
+      const { error } = await supabase
+        .from("profiles")
+        .insert({
+          id: user.id,
+          badge_number: b,
+          first_name: f,
+          last_name: l,
+        });
+
+      saveError = error;
+    }
+
+    if (saveError) {
+      setMsg("Errore salvataggio: " + saveError.message);
+      return;
+    }
+
+    setMsg("Profilo salvato ✅");
+    setTimeout(() => {
+      window.location.href = "/";
+    }, 600);
+  } finally {
+    setSaving(false);
+  }
+}
 
       const { error } = await supabase
         .from("profiles")

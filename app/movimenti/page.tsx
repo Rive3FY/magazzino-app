@@ -959,7 +959,7 @@ async function loadSuggestions(text: string) {
               {scanning ? "Chiudi camera" : "Scanner"}
             </button>
             <button className="btn" type="button" onClick={resetSearch}>
-              Pulisci
+              Babbà
             </button>
           </div>
         </div>

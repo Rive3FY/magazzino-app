@@ -6,6 +6,25 @@ import { BrowserMultiFormatReader } from "@zxing/browser";
 import jsPDF from "jspdf";
 
 const PAGE_LIMIT = 300;
+//NFC
+type CartRow = {
+  code: string;
+  name: string;
+  um: string | null;
+  warehouse: "PRM" | "REALE";
+  qtyAvailable: number;
+  qtyPick: number;
+};
+
+type QuickMaterialInfo = {
+  code: string;
+  name: string;
+  um: string | null;
+  warehouse: "PRM" | "REALE";
+  qtyFree: number;
+  qtyBlocked: number;
+  qtyQuality: number;
+};
 
 type DbItem = {
   code: string;
@@ -163,7 +182,17 @@ type ExcelLiveRow = {
 
 export default function MovimentiPage() {
   const supabase = createClient();
+  //NFC
+  const [cartOpen, setCartOpen] = useState(false);
+const [cart, setCart] = useState<CartRow[]>([]);
+const [cartBusy, setCartBusy] = useState(false);
 
+const [scanMode, setScanMode] = useState<"NORMAL" | "CART" | "QUICK">("NORMAL");
+
+const [scanPopupOpen, setScanPopupOpen] = useState(false);
+const [scanInfo, setScanInfo] = useState<QuickMaterialInfo | null>(null);
+const [scanQty, setScanQty] = useState("1");
+//NFC 
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -273,7 +302,56 @@ export default function MovimentiPage() {
 
     setReferents((data ?? []) as ReferentRow[]);
   }
+//NFC 
+async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<QuickMaterialInfo | null> {
+  const { data: stock, error: stockErr } = await supabase
+    .from("excel_live")
+    .select("code,warehouse,qty_free,qty_blocked,qty_quality")
+    .eq("code", code)
+    .eq("warehouse", wh)
+    .maybeSingle();
 
+  if (stockErr) {
+    console.error("loadMaterialForScan stock error:", stockErr);
+    return null;
+  }
+
+  if (!stock) return null;
+
+  const { data: item, error: itemErr } = await supabase
+    .from("items")
+    .select("code,name,um")
+    .eq("code", code)
+    .maybeSingle();
+
+  if (itemErr) {
+    console.error("loadMaterialForScan item error:", itemErr);
+  }
+
+  return {
+    code,
+    warehouse: wh,
+    name: String((item as any)?.name ?? "").trim() || code,
+    um: (item as any)?.um ?? null,
+    qtyFree: Number((stock as any)?.qty_free ?? 0),
+    qtyBlocked: Number((stock as any)?.qty_blocked ?? 0),
+    qtyQuality: Number((stock as any)?.qty_quality ?? 0),
+  };
+}
+async function handleScannedCode(codeRaw: string) {
+  const code = String(codeRaw ?? "").trim();
+  if (!code) return;
+
+  const info = await loadMaterialForScan(code, warehouse);
+  if (!info) {
+    setMsg(`Materiale ${code} non trovato in ${warehouse}.`);
+    return;
+  }
+
+  setScanInfo(info);
+  setScanQty("1");
+  setScanPopupOpen(true);
+}
   async function loadImageAsDataUrl(src: string): Promise<string> {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -632,7 +710,11 @@ export default function MovimentiPage() {
 
         scanLockedRef.current = true;
         stopScan();
-        await pickItemByCode(text);
+        if (scanMode === "NORMAL") {
+  await pickItemByCode(text);
+} else {
+  await handleScannedCode(text);
+}
       });
     } catch (e: any) {
       console.error(e);
@@ -640,7 +722,132 @@ export default function MovimentiPage() {
       stopScan();
     }
   }
+  function addScannedToCart() {
+  if (!scanInfo) return;
 
+  const qn = toNumber(scanQty);
+  if (!Number.isFinite(qn) || qn <= 0) {
+    setMsg("Quantità non valida.");
+    return;
+  }
+
+  if (qn > scanInfo.qtyFree) {
+    setMsg(`Quantità superiore alla disponibilità (${scanInfo.qtyFree}).`);
+    return;
+  }
+
+  setCart((prev) => {
+    const idx = prev.findIndex(
+      (r) => r.code === scanInfo.code && r.warehouse === scanInfo.warehouse
+    );
+
+    if (idx === -1) {
+      return [
+        ...prev,
+        {
+          code: scanInfo.code,
+          name: scanInfo.name,
+          um: scanInfo.um,
+          warehouse: scanInfo.warehouse,
+          qtyAvailable: scanInfo.qtyFree,
+          qtyPick: qn,
+        },
+      ];
+    }
+
+    const copy = [...prev];
+    const nextQty = copy[idx].qtyPick + qn;
+
+    if (nextQty > copy[idx].qtyAvailable) {
+      setMsg(`Totale richiesto superiore alla disponibilità (${copy[idx].qtyAvailable}).`);
+      return prev;
+    }
+
+    copy[idx] = { ...copy[idx], qtyPick: nextQty };
+    return copy;
+  });
+
+  setScanPopupOpen(false);
+  setScanInfo(null);
+  setScanQty("1");
+  setMsg(null);
+}
+function removeCartRow(code: string, wh: "PRM" | "REALE") {
+  setCart((prev) => prev.filter((r) => !(r.code === code && r.warehouse === wh)));
+}
+async function confirmCartPickup() {
+  if (!userId) {
+    setMsg("Devi essere loggato.");
+    return;
+  }
+
+  if (cart.length === 0) {
+    setMsg("Il carrello è vuoto.");
+    return;
+  }
+
+  setCartBusy(true);
+  setMsg(null);
+
+  try {
+    const { data: prof } = await supabase
+      .from("profiles")
+      .select("first_name,last_name")
+      .eq("id", userId)
+      .maybeSingle();
+
+    const fullName =
+      `${String((prof as any)?.first_name ?? "").trim()} ${String((prof as any)?.last_name ?? "").trim()}`.trim() || null;
+
+    for (const row of cart) {
+      const payload: Partial<MovementRow> = {
+        type: "OUT",
+        code: row.code,
+        qty: row.qtyPick,
+        note: note.trim() || "Prelievo multiplo",
+        created_by: userId,
+        created_by_name: fullName,
+        warehouse: row.warehouse,
+        status: "OPEN",
+        returned_qty: 0,
+        return_note: null,
+        closed_at: null,
+        closed_by: null,
+        referent_id: null,
+        referee_email: null,
+      };
+
+      const { error } = await supabase.from("movements").insert(payload as any);
+      if (error) throw error;
+
+      await applyDeltaToExcelLive(row.code, row.warehouse, -row.qtyPick);
+
+      await writeAuditLog({
+        action: "MOVEMENT_CREATED",
+        entity_type: "movement",
+        code: row.code,
+        warehouse: row.warehouse,
+        details_json: {
+          type: "OUT",
+          qty: row.qtyPick,
+          note: note.trim() || "Prelievo multiplo",
+          mode: "cart",
+        },
+      });
+    }
+
+    setCart([]);
+    setCartOpen(false);
+    setScanMode("NORMAL");
+    setMsg("Prelievo multiplo salvato ✅");
+    await loadHistory();
+  } catch (e: any) {
+    console.error("confirmCartPickup error:", e);
+    setMsg("Errore salvataggio carrello: " + (e?.message ?? "sconosciuto"));
+  } finally {
+    setCartBusy(false);
+  }
+}
   function resetSearch() {
     stopScan();
     setSearch("");
@@ -1326,6 +1533,35 @@ export default function MovimentiPage() {
             <button className="btn" type="button" onClick={resetSearch}>
               Pulisci
             </button>
+            <button
+  className={`btn ${scanMode === "NORMAL" ? "btnPrimary" : ""}`}
+  type="button"
+  onClick={() => setScanMode("NORMAL")}
+>
+  Normale
+</button>
+
+<button
+  className={`btn ${scanMode === "CART" ? "btnPrimary" : ""}`}
+  type="button"
+  onClick={() => {
+    setScanMode("CART");
+  setScanPopupOpen(false);
+  setScanInfo(null);
+  setCartOpen(true);
+  setMsg(null);
+}}
+>
+  Carrello
+</button>
+
+<button
+  className={`btn ${scanMode === "QUICK" ? "btnPrimary" : ""}`}
+  type="button"
+  onClick={() => setScanMode("QUICK")}
+>
+  Lettura rapida
+</button>
           </div>
         </div>
 
@@ -1910,6 +2146,172 @@ export default function MovimentiPage() {
           </div>
         </div>
       )}
+      {scanPopupOpen && scanInfo && (
+  <div
+    onMouseDown={() => {
+      setScanPopupOpen(false);
+      setScanInfo(null);
+    }}
+    style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(15,23,42,0.35)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 14,
+      zIndex: 1000,
+    }}
+  >
+    <div
+      onMouseDown={(e) => e.stopPropagation()}
+      style={{
+        width: "min(640px, 100%)",
+        background: "white",
+        borderRadius: 14,
+        border: "1px solid rgba(15,23,42,0.16)",
+        boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
+        padding: 12,
+      }}
+    >
+      <div style={{ fontWeight: 900, fontSize: 18 }}>
+        {scanMode === "QUICK" ? "Dettaglio materiale" : "Aggiungi al carrello"}
+      </div>
+
+      <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+        <div><b>Codice:</b> {scanInfo.code}</div>
+        <div><b>Descrizione:</b> {scanInfo.name}</div>
+        <div><b>UM:</b> {scanInfo.um ?? "-"}</div>
+        <div><b>Magazzino:</b> {scanInfo.warehouse}</div>
+        <div><b>Libero:</b> {scanInfo.qtyFree}</div>
+        <div><b>Bloccato:</b> {scanInfo.qtyBlocked}</div>
+        <div><b>Qualità:</b> {scanInfo.qtyQuality}</div>
+      </div>
+
+      {scanMode === "CART" && (
+        <div style={{ marginTop: 12 }}>
+          <label className="label" htmlFor="scanQty">
+            Quantità da prelevare
+          </label>
+          <input
+            id="scanQty"
+            className="input"
+            value={scanQty}
+            onChange={(e) => setScanQty(e.target.value)}
+            inputMode="decimal"
+          />
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+        <button className="btn" onClick={() => {
+          setScanPopupOpen(false);
+          setScanInfo(null);
+        }}>
+          Chiudi
+        </button>
+
+        {scanMode === "CART" && (
+          <button className="btn btnPrimary" onClick={addScannedToCart}>
+            Aggiungi al carrello
+          </button>
+        )}
+      </div>
+    </div>
+  </div>
+)}
+{cartOpen && (
+  <div
+    onMouseDown={() => {
+      if (cartBusy) return;
+      setCartOpen(false);
+    }}
+    style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(15,23,42,0.35)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 14,
+      zIndex: 999,
+    }}
+  >
+    <div
+      onMouseDown={(e) => e.stopPropagation()}
+      style={{
+        width: "min(900px, 100%)",
+        maxHeight: "85vh",
+        overflow: "auto",
+        background: "white",
+        borderRadius: 14,
+        border: "1px solid rgba(15,23,42,0.16)",
+        boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
+        padding: 12,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+        <div style={{ fontWeight: 900 }}>Carrello prelievo</div>
+        <button className="btn" onClick={() => setCartOpen(false)} disabled={cartBusy}>
+          Chiudi
+        </button>
+      </div>
+
+      <div style={{ marginTop: 10, fontSize: 12, opacity: 0.8 }}>
+        Scansiona i materiali in modalità <b>Carrello</b>, imposta la quantità e aggiungili qui.
+      </div>
+
+      <div style={{ overflowX: "auto", marginTop: 12 }}>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Codice</th>
+              <th>Descrizione</th>
+              <th>Mag.</th>
+              <th>Disponibile</th>
+              <th>Da prelevare</th>
+              <th>Azioni</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cart.length === 0 ? (
+              <tr>
+                <td colSpan={6} style={{ padding: 12 }}>
+                  Carrello vuoto.
+                </td>
+              </tr>
+            ) : (
+              cart.map((r) => (
+                <tr key={`${r.code}__${r.warehouse}`}>
+                  <td style={{ fontWeight: 900 }}>{r.code}</td>
+                  <td>{r.name}</td>
+                  <td>{r.warehouse}</td>
+                  <td>{r.qtyAvailable}</td>
+                  <td style={{ fontWeight: 900 }}>{r.qtyPick}</td>
+                  <td>
+                    <button className="btn" onClick={() => removeCartRow(r.code, r.warehouse)} disabled={cartBusy}>
+                      Rimuovi
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+        <div style={{ fontWeight: 800 }}>
+          Righe: {cart.length}
+        </div>
+
+        <button className="btn btnPrimary" onClick={confirmCartPickup} disabled={cartBusy || cart.length === 0}>
+          {cartBusy ? "Salvataggio..." : "Conferma prelievo"}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
     </main>
   );
 }

@@ -728,3 +728,162 @@ html, body {
 .giacenzeTopScrollInner {
   height: 1px;
 }
+/* =========================
+   MOBILE GLOBAL FIX
+   migliora tutte le pagine
+========================= */
+
+@media (max-width: 900px){
+
+  /* layout principale diventa verticale */
+  .app{
+    grid-template-columns: 1fr;
+  }
+
+  /* sidebar diventa barra superiore */
+  .sidebar{
+    position: sticky;
+    top: 0;
+    z-index: 50;
+
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid rgba(255,255,255,0.18);
+
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+  }
+
+  .sideNav{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .sideLink{
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+
+  /* content meno margine */
+  .content{
+    padding: 12px;
+  }
+
+  /* toolbar responsive */
+  .pageBar{
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .pageBarTitle{
+    white-space: normal;
+  }
+
+  .pageBarActions{
+    justify-content: stretch;
+  }
+
+  .pageBarActions .btn{
+    flex: 1;
+  }
+
+  /* filtri diventano verticali */
+  .filters{
+    grid-template-columns: 1fr !important;
+  }
+
+  /* azioni su più righe */
+  .actionsRow{
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .actionsRow .btn{
+    width: 100%;
+  }
+
+  /* input e bottoni più grandi per touch */
+  .input{
+    height: 44px;
+  }
+
+  .btn{
+    height: 44px;
+  }
+
+}
+
+/* =========================
+   MOBILE TABLE IMPROVEMENT
+========================= */
+
+@media (max-width: 780px){
+
+  .table{
+    font-size: 12px;
+  }
+
+  .table thead th,
+  .table tbody td{
+    padding: 8px 8px;
+  }
+
+}
+/* =========================
+   MOBILE CARD TABLE
+   Per tabelle standard su telefono
+========================= */
+@media (max-width: 780px) {
+  .table.mobileCards {
+    min-width: 0 !important;
+    width: 100% !important;
+    border-collapse: separate;
+    border-spacing: 0 10px;
+  }
+
+  .table.mobileCards thead {
+    display: none;
+  }
+
+  .table.mobileCards tbody,
+  .table.mobileCards tr,
+  .table.mobileCards td {
+    display: block;
+    width: 100%;
+  }
+
+  .table.mobileCards tr {
+    border: 1px solid rgba(15, 23, 42, 0.10);
+    border-radius: 14px;
+    background: #ffffff;
+    box-shadow: 0 8px 22px rgba(0,0,0,0.05);
+    overflow: hidden;
+    margin-bottom: 10px;
+  }
+
+  .table.mobileCards tbody td {
+    white-space: normal !important;
+    border-bottom: 1px solid rgba(15,23,42,0.06);
+    padding: 10px 12px 10px 12px;
+    position: relative;
+    min-height: 44px;
+  }
+
+  .table.mobileCards tbody td:last-child {
+    border-bottom: none;
+  }
+
+  .table.mobileCards tbody td::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 11px;
+    font-weight: 900;
+    color: #64748b;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+}

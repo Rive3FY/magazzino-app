@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { BrowserMultiFormatReader } from "@zxing/browser";
+import jsPDF from "jspdf";
 
 const PAGE_LIMIT = 300;
 
@@ -67,6 +68,7 @@ function toIsoStartOfDay(d: string) {
   if (!d) return null;
   return new Date(`${d}T00:00:00.000`).toISOString();
 }
+
 function toIsoEndOfDay(d: string) {
   if (!d) return null;
   return new Date(`${d}T23:59:59.999`).toISOString();
@@ -76,7 +78,6 @@ function sameUser(a: string | null | undefined, b: string | null | undefined) {
   return !!a && !!b && a === b;
 }
 
-/** Pill “aziendali” tutti uguali, cambiano solo colore */
 function pillStyle(kind: "IN" | "OUT" | "OPEN" | "CLOSED" | "PRM" | "REALE") {
   const base: React.CSSProperties = {
     display: "inline-flex",
@@ -93,17 +94,53 @@ function pillStyle(kind: "IN" | "OUT" | "OPEN" | "CLOSED" | "PRM" | "REALE") {
     whiteSpace: "nowrap",
   };
 
-  if (kind === "IN") return { ...base, borderColor: "rgba(16,185,129,0.35)", background: "rgba(16,185,129,0.10)" };
-  if (kind === "OUT") return { ...base, borderColor: "rgba(239,68,68,0.35)", background: "rgba(239,68,68,0.10)" };
+  if (kind === "IN") {
+    return {
+      ...base,
+      borderColor: "rgba(16,185,129,0.35)",
+      background: "rgba(16,185,129,0.10)",
+    };
+  }
 
-  if (kind === "OPEN") return { ...base, borderColor: "rgba(245,158,11,0.55)", background: "rgba(245,158,11,0.12)" };
-  if (kind === "CLOSED") return { ...base, borderColor: "rgba(59,130,246,0.45)", background: "rgba(59,130,246,0.10)" };
+  if (kind === "OUT") {
+    return {
+      ...base,
+      borderColor: "rgba(239,68,68,0.35)",
+      background: "rgba(239,68,68,0.10)",
+    };
+  }
 
-  if (kind === "PRM") return { ...base, borderColor: "rgba(2,132,199,0.45)", background: "rgba(2,132,199,0.10)" };
-  return { ...base, borderColor: "rgba(99,102,241,0.45)", background: "rgba(99,102,241,0.10)" };
+  if (kind === "OPEN") {
+    return {
+      ...base,
+      borderColor: "rgba(245,158,11,0.55)",
+      background: "rgba(245,158,11,0.12)",
+    };
+  }
+
+  if (kind === "CLOSED") {
+    return {
+      ...base,
+      borderColor: "rgba(59,130,246,0.45)",
+      background: "rgba(59,130,246,0.10)",
+    };
+  }
+
+  if (kind === "PRM") {
+    return {
+      ...base,
+      borderColor: "rgba(2,132,199,0.45)",
+      background: "rgba(2,132,199,0.10)",
+    };
+  }
+
+  return {
+    ...base,
+    borderColor: "rgba(99,102,241,0.45)",
+    background: "rgba(99,102,241,0.10)",
+  };
 }
 
-/** Matita “stile giacenze” (SVG inline, niente immagini esterne) */
 function PencilIcon({ muted }: { muted?: boolean }) {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style={{ opacity: muted ? 0.45 : 1 }}>
@@ -127,19 +164,16 @@ type ExcelLiveRow = {
 export default function MovimentiPage() {
   const supabase = createClient();
 
-  // auth
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // form movimento
-  const [type, setType] = useState<"IN" | "OUT">("IN");
+  const [type, setType] = useState<"IN" | "OUT">("OUT");
   const [warehouse, setWarehouse] = useState<"PRM" | "REALE">("PRM");
   const [qty, setQty] = useState("");
   const [note, setNote] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
 
-  // autocomplete
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -149,41 +183,79 @@ export default function MovimentiPage() {
   const boxRef = useRef<HTMLDivElement | null>(null);
   const qtyRef = useRef<HTMLInputElement | null>(null);
 
-  // storico + filtri
   const [history, setHistory] = useState<MovementRow[]>([]);
   const [nameMap, setNameMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const [fFrom, setFFrom] = useState(""); // yyyy-mm-dd
+  const [fFrom, setFFrom] = useState("");
   const [fTo, setFTo] = useState("");
   const [fType, setFType] = useState<"ALL" | "IN" | "OUT">("ALL");
   const [fWarehouse, setFWarehouse] = useState<"ALL" | "PRM" | "REALE">("ALL");
+  const [fMaterial, setFMaterial] = useState("");
 
-  // scanner
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const [scanning, setScanning] = useState(false);
   const scanLockedRef = useRef(false);
 
-  // popup dettaglio/chiusura
   const [closeOpen, setCloseOpen] = useState(false);
   const [closing, setClosing] = useState<MovementRow | null>(null);
   const [closingMeta, setClosingMeta] = useState<{ name: string; um: string } | null>(null);
 
-  // rettifica (campi)
   const [returnQty, setReturnQty] = useState<string>("0");
   const [returnNote, setReturnNote] = useState<string>("");
   const [referents, setReferents] = useState<ReferentRow[]>([]);
   const [selReferentId, setSelReferentId] = useState<string>("");
 
-  // “matita” per sbloccare SOLO i campi di rettifica
   const [editRectify, setEditRectify] = useState(false);
+
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyCode, setHistoryCode] = useState<string | null>(null);
+  const [historyRows, setHistoryRows] = useState<
+    Array<{
+      id: string;
+      created_at: string;
+      type: "IN" | "OUT";
+      qty: number;
+      note: string | null;
+      created_by_name?: string | null;
+      created_by_email?: string | null;
+      warehouse?: string | null;
+    }>
+  >([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   function canEditRow(m: MovementRow) {
     const st = (m.status ?? (m.type === "OUT" ? "OPEN" : "CLOSED")) as "OPEN" | "CLOSED";
     if (m.type !== "OUT") return false;
     if (st === "CLOSED") return false;
     return isAdmin || sameUser(m.created_by, userId);
+  }
+
+  async function writeAuditLog(payload: {
+    action: string;
+    entity_type: string;
+    entity_id?: string | null;
+    code?: string | null;
+    warehouse?: string | null;
+    details_json?: Record<string, any> | null;
+  }) {
+    try {
+      await supabase.from("audit_log").insert({
+        action: payload.action,
+        entity_type: payload.entity_type,
+        entity_id: payload.entity_id ?? null,
+        code: payload.code ?? null,
+        warehouse: payload.warehouse ?? null,
+        user_id: userId ?? null,
+        user_email: userEmail ?? null,
+        user_name: null,
+        details_json: payload.details_json ?? null,
+      });
+    } catch (e) {
+      console.error("audit_log error:", e);
+    }
   }
 
   async function loadReferents() {
@@ -198,68 +270,197 @@ export default function MovimentiPage() {
       setReferents([]);
       return;
     }
+
     setReferents((data ?? []) as ReferentRow[]);
   }
 
-  function escapeIlike(v: string) {
-  // Escape per ILIKE: % e _ sono wildcard, \ è escape
-  // Inoltre togliamo apici/backtick che possono rompere il parser del filtro
-  return v
-    .replace(/\\/g, "\\\\")
-    .replace(/%/g, "\\%")
-    .replace(/_/g, "\\_")
-    .replace(/['"`]/g, " ")
-    .trim();
-}
+  async function loadImageAsDataUrl(src: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
 
-async function loadSuggestions(text: string) {
-  const s = String(text ?? "").trim();
-  if (!s) {
-    setSuggestions([]);
-    return;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Canvas context non disponibile"));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL("image/png"));
+      };
+
+      img.onerror = () => reject(new Error("Impossibile caricare l'immagine del banner"));
+      img.src = src;
+    });
   }
 
-  try {
-    // 1) query per codice
-    const q1 = await supabase
-      .from("items")
-      .select("code,name,um")
-      .ilike("code", `%${s}%`)
-      .order("code", { ascending: true })
-      .limit(12);
+  async function downloadRegistroPDF(rows: MovementRow[]) {
+    try {
+      const pdf = new jsPDF("p", "mm", "a4");
 
-    // 2) query per descrizione
-    const q2 = await supabase
-      .from("items")
-      .select("code,name,um")
-      .ilike("name", `%${s}%`)
-      .order("code", { ascending: true })
-      .limit(12);
+      const bannerDataUrl = await loadImageAsDataUrl("/banner_terna.png");
 
-    // Debug “grezzo” (qui vediamo se è RLS: di solito q1.status=401/403 o error con message)
-    if (q1.error || q2.error) {
-      console.error("loadSuggestions raw:", {
-        q1: { status: (q1 as any).status, error: q1.error, dataLen: q1.data?.length ?? 0 },
-        q2: { status: (q2 as any).status, error: q2.error, dataLen: q2.data?.length ?? 0 },
+      const img = new Image();
+      img.src = bannerDataUrl;
+
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("Impossibile leggere il banner"));
       });
+
+      const imgWidth = 120;
+      const imgHeight = (img.height * imgWidth) / img.width;
+
+      pdf.addImage(bannerDataUrl, "PNG", 0, 6, imgWidth, imgHeight);
+
+      pdf.setTextColor(20, 20, 20);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(12);
+      pdf.text("Registro Movimenti Magazzino", 10, 45);
+
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(10);
+
+      const periodo =
+        fFrom || fTo
+          ? `Periodo: ${fFrom || "..."} - ${fTo || "..."}`
+          : "Periodo: tutti i movimenti filtrati";
+
+      pdf.text(periodo, 10, 52);
+
+      pdf.setDrawColor(180, 180, 180);
+      pdf.setLineWidth(0.4);
+      pdf.line(10, 56, 200, 56);
+
+      let y = 64;
+
+      const drawTableHeader = () => {
+        pdf.setFillColor(242, 242, 242);
+        pdf.rect(10, y - 5, 190, 8, "F");
+
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(8.5);
+        pdf.setTextColor(30, 30, 30);
+
+        pdf.text("Data", 12, y);
+        pdf.text("Materiale", 42, y);
+        pdf.text("Tipo", 92, y);
+        pdf.text("Qta", 112, y);
+        pdf.text("Mag.", 126, y);
+        pdf.text("Operatore", 142, y);
+
+        y += 8;
+      };
+
+      const drawFooter = () => {
+        pdf.setDrawColor(210, 210, 210);
+        pdf.line(10, 286, 200, 286);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(8);
+        pdf.setTextColor(100, 100, 100);
+        pdf.text(`Generato da: ${userEmail ?? userId ?? "-"}`, 10, 290);
+        pdf.text(`Pagina ${pdf.getNumberOfPages()}`, 180, 290);
+      };
+
+      drawTableHeader();
+
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(8);
+
+      rows.forEach((r, index) => {
+        const date = fmtDate(r.created_at);
+        const code = String(r.code).slice(0, 24);
+        const tipo = r.type === "IN" ? "Entrata" : "Uscita";
+        const qta = `${r.type === "IN" ? "+" : "-"}${Math.abs(Number(r.qty ?? 0))}`;
+        const mag = String(r.warehouse ?? "");
+        const operatore = String(r.created_by_name ?? r.created_by ?? "").slice(0, 26);
+
+        if (index % 2 === 0) {
+          pdf.setFillColor(250, 250, 250);
+          pdf.rect(10, y - 4, 190, 6, "F");
+        }
+
+        pdf.setTextColor(35, 35, 35);
+        pdf.text(date, 12, y);
+
+        pdf.setFont("courier", "normal");
+        pdf.text(code, 42, y);
+
+        pdf.setFont("helvetica", "normal");
+        if (r.type === "IN") {
+          pdf.setTextColor(20, 120, 60);
+        } else {
+          pdf.setTextColor(170, 40, 40);
+        }
+
+        pdf.text(tipo, 92, y);
+        pdf.text(qta, 112, y);
+
+        pdf.setTextColor(35, 35, 35);
+        pdf.text(mag, 126, y);
+        pdf.text(operatore, 142, y);
+
+        y += 6;
+
+        if (y > 278) {
+          drawFooter();
+          pdf.addPage();
+          y = 20;
+          drawTableHeader();
+          pdf.setFont("helvetica", "normal");
+          pdf.setFontSize(8);
+        }
+      });
+
+      drawFooter();
+      pdf.save("registro_movimenti.pdf");
+    } catch (e: any) {
+      console.error("PDF error:", e);
+      setMsg("Errore generazione PDF: " + (e?.message ?? "sconosciuto"));
+    }
+  }
+
+  async function loadSuggestions(text: string) {
+    const s = String(text ?? "").trim();
+    if (!s) {
       setSuggestions([]);
       return;
     }
 
-    // merge univoco per code
-    const map = new Map<string, DbItem>();
-    for (const it of (q1.data ?? []) as any[]) map.set(it.code, it as DbItem);
-    for (const it of (q2.data ?? []) as any[]) map.set(it.code, it as DbItem);
+    try {
+      const q1 = await supabase.from("items").select("code,name,um").ilike("code", `%${s}%`).order("code", { ascending: true }).limit(12);
 
-    setSuggestions(Array.from(map.values()).slice(0, 12));
-  } catch (e: any) {
-    console.error("loadSuggestions catch:", e);
-    setSuggestions([]);
+      const q2 = await supabase.from("items").select("code,name,um").ilike("name", `%${s}%`).order("code", { ascending: true }).limit(12);
+
+      if (q1.error || q2.error) {
+        console.error("loadSuggestions raw:", {
+          q1: { status: (q1 as any).status, error: q1.error, dataLen: q1.data?.length ?? 0 },
+          q2: { status: (q2 as any).status, error: q2.error, dataLen: q2.data?.length ?? 0 },
+        });
+        setSuggestions([]);
+        return;
+      }
+
+      const map = new Map<string, DbItem>();
+      for (const it of (q1.data ?? []) as any[]) map.set(it.code, it as DbItem);
+      for (const it of (q2.data ?? []) as any[]) map.set(it.code, it as DbItem);
+
+      setSuggestions(Array.from(map.values()).slice(0, 12));
+    } catch (e: any) {
+      console.error("loadSuggestions catch:", e);
+      setSuggestions([]);
+    }
   }
-}
 
-  async function loadHistory() {
-    setLoading(true);
+  async function loadHistory(silent = false) {
+    if (silent) setRefreshing(true);
+    else setLoading(true);
+
     setMsg(null);
 
     let q = supabase
@@ -272,10 +473,43 @@ async function loadSuggestions(text: string) {
 
     const isoFrom = toIsoStartOfDay(fFrom);
     const isoTo = toIsoEndOfDay(fTo);
+
     if (isoFrom) q = q.gte("created_at", isoFrom);
     if (isoTo) q = q.lte("created_at", isoTo);
     if (fType !== "ALL") q = q.eq("type", fType);
     if (fWarehouse !== "ALL") q = q.eq("warehouse", fWarehouse);
+
+    const materialSearch = fMaterial.trim();
+    const shouldFilterMaterial = materialSearch.length >= 2;
+
+    if (shouldFilterMaterial) {
+      const { data: foundItems, error: itemsErr } = await supabase
+        .from("items")
+        .select("code")
+        .or(`code.ilike.%${materialSearch}%,name.ilike.%${materialSearch}%`)
+        .limit(300);
+
+      if (itemsErr) {
+        console.error("items filter error:", itemsErr);
+        setHistory([]);
+        setNameMap({});
+        if (silent) setRefreshing(false);
+        else setLoading(false);
+        return;
+      }
+
+      const codes = Array.from(new Set((foundItems ?? []).map((x: any) => x.code).filter(Boolean)));
+
+      if (codes.length === 0) {
+        setHistory([]);
+        setNameMap({});
+        if (silent) setRefreshing(false);
+        else setLoading(false);
+        return;
+      }
+
+      q = q.in("code", codes);
+    }
 
     const { data, error } = await q;
 
@@ -283,7 +517,8 @@ async function loadSuggestions(text: string) {
       console.error("loadHistory error:", error);
       setHistory([]);
       setNameMap({});
-      setLoading(false);
+      if (silent) setRefreshing(false);
+      else setLoading(false);
       return;
     }
 
@@ -293,15 +528,18 @@ async function loadSuggestions(text: string) {
     const codes = Array.from(new Set(rows.map((r) => r.code).filter(Boolean)));
     if (codes.length === 0) {
       setNameMap({});
-      setLoading(false);
+      if (silent) setRefreshing(false);
+      else setLoading(false);
       return;
     }
 
     const { data: itemsData, error: e2 } = await supabase.from("items").select("code,name").in("code", codes);
+
     if (e2) {
       console.error("items nameMap error:", e2);
       setNameMap({});
-      setLoading(false);
+      if (silent) setRefreshing(false);
+      else setLoading(false);
       return;
     }
 
@@ -311,8 +549,11 @@ async function loadSuggestions(text: string) {
       const nm = (it as any).name as string | null;
       if (c) map[c] = nm ?? "";
     }
+
     setNameMap(map);
-    setLoading(false);
+
+    if (silent) setRefreshing(false);
+    else setLoading(false);
   }
 
   async function pickItem(it: DbItem) {
@@ -328,6 +569,7 @@ async function loadSuggestions(text: string) {
     if (!code) return;
 
     const { data: item, error } = await supabase.from("items").select("code,name,um").eq("code", code).maybeSingle();
+
     if (error) {
       console.error("pickItemByCode error:", error);
       setMsg("Errore ricerca articolo: " + (error as any)?.message);
@@ -350,6 +592,7 @@ async function loadSuggestions(text: string) {
     try {
       (readerRef.current as any)?.reset?.();
     } catch {}
+
     try {
       (readerRef.current as any)?.stopContinuousDecode?.();
     } catch {}
@@ -409,7 +652,6 @@ async function loadSuggestions(text: string) {
   }
 
   async function getOrCreateExcelLiveRow(code: string, wh: "PRM" | "REALE") {
-    // Se manca la riga in excel_live, proviamo a copiarla da excel_original.
     const { data: live, error: eLive } = await supabase
       .from("excel_live")
       .select("code,warehouse,qty_free,qty_blocked,qty_quality,row_json")
@@ -428,7 +670,6 @@ async function loadSuggestions(text: string) {
       .maybeSingle();
 
     if (eOrig) throw eOrig;
-
     if (!orig) return null;
 
     const ins = orig as any;
@@ -458,8 +699,6 @@ async function loadSuggestions(text: string) {
     const rowJson = { ...(live.row_json ?? {}) };
     const currentFromJson = n(rowJson["Qnt. a Mag. libero"]);
     const currentFree = Number.isFinite(Number(live.qty_free)) ? n(live.qty_free) : currentFromJson;
-
-    // Preferiamo qty_free se presente, altrimenti JSON
     const base = Number.isFinite(currentFree) ? currentFree : currentFromJson;
     const next = base + deltaFree;
 
@@ -479,23 +718,21 @@ async function loadSuggestions(text: string) {
 
   async function saveMovement() {
     setMsg(null);
+
     if (!userId) return setMsg("Devi essere loggato per salvare movimenti.");
     if (!picked) return setMsg("Seleziona un materiale.");
+    if (!isAdmin && type === "IN") return setMsg("Solo i tecnici/admin possono fare entrate.");
 
     const qn = toNumber(qty);
     if (!Number.isFinite(qn) || qn <= 0) {
       return setMsg("Quantità non valida.");
     }
 
-    // recupera nome utente
     const { data: prof } = await supabase.from("profiles").select("first_name,last_name").eq("id", userId).maybeSingle();
 
     const fullName =
       `${String((prof as any)?.first_name ?? "").trim()} ${String((prof as any)?.last_name ?? "").trim()}`.trim() || null;
 
-    // -------------------------
-    // SALVA MOVIMENTO
-    // -------------------------
     const payload: Partial<MovementRow> = {
       type,
       code: picked.code,
@@ -516,15 +753,24 @@ async function loadSuggestions(text: string) {
     const { error } = await supabase.from("movements").insert(payload as any);
     if (error) return setMsg("Errore salvataggio movimento: " + error.message);
 
-    // -------------------------
-    // AGGIORNA EXCEL LIVE
-    // -------------------------
+    await writeAuditLog({
+      action: "MOVEMENT_CREATED",
+      entity_type: "movement",
+      code: picked.code,
+      warehouse,
+      details_json: {
+        type,
+        qty: qn,
+        note: note.trim() || null,
+        status: type === "OUT" ? "OPEN" : "CLOSED",
+      },
+    });
+
     try {
       const delta = type === "IN" ? qn : -qn;
       await applyDeltaToExcelLive(picked.code, warehouse, delta);
     } catch (e: any) {
       console.error("excel_live update error:", e);
-      // Non blocchiamo l'utente, ma lo avvisiamo chiaramente
       setMsg(
         "Movimento salvato ✅\n\n⚠️ Attenzione: non sono riuscito ad aggiornare excel_live (giacenze). " +
           (e?.message ?? "Errore sconosciuto")
@@ -544,89 +790,113 @@ async function loadSuggestions(text: string) {
     setTimeout(() => qtyRef.current?.focus(), 80);
   }
 
+  async function openHistory(code: string) {
+    setHistoryCode(code);
+    setHistoryOpen(true);
+    setHistoryLoading(true);
+
+    const { data, error } = await supabase
+      .from("movements")
+      .select("id,created_at,type,qty,note,created_by_name,created_by_email,warehouse")
+      .eq("code", code)
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    if (error) {
+      console.error("history error:", error);
+      setHistoryRows([]);
+      setHistoryLoading(false);
+      return;
+    }
+
+    setHistoryRows((data ?? []) as any);
+    setHistoryLoading(false);
+  }
+
   async function deleteMovement(id: string) {
-  if (!isAdmin) return alert("Solo l'admin può eliminare i movimenti.");
-  const ok = confirm("Eliminare questo movimento?");
-  if (!ok) return;
+    if (!isAdmin) return alert("Solo l'admin può eliminare i movimenti.");
 
-  // 1️⃣ Leggo il movimento
-  const { data: mov, error: readError } = await supabase
-    .from("movements")
-    .select("id,code,warehouse,type,qty")
-    .eq("id", id)
-    .single();
+    const ok = confirm("Eliminare questo movimento?");
+    if (!ok) return;
 
-  if (readError || !mov) {
-    console.error("Errore lettura movimento:", readError);
-    return alert("Impossibile leggere il movimento.");
+    const { data: mov, error: readError } = await supabase
+      .from("movements")
+      .select("id,code,warehouse,type,qty")
+      .eq("id", id)
+      .single();
+
+    if (readError || !mov) {
+      console.error("Errore lettura movimento:", readError);
+      return alert("Impossibile leggere il movimento.");
+    }
+
+    await writeAuditLog({
+      action: "MOVEMENT_DELETED",
+      entity_type: "movement",
+      entity_id: mov.id,
+      code: mov.code,
+      warehouse: mov.warehouse,
+      details_json: {
+        type: mov.type,
+        qty: mov.qty,
+      },
+    });
+
+    const code = mov.code;
+    const warehouse = mov.warehouse;
+    const qty = Math.abs(Number(mov.qty ?? 0));
+
+    const delta = mov.type === "IN" ? -qty : +qty;
+
+    const { data: stock, error: stockError } = await supabase
+      .from("excel_live")
+      .select("qty_free,row_json")
+      .eq("code", code)
+      .eq("warehouse", warehouse)
+      .single();
+
+    if (stockError || !stock) {
+      console.error("Errore lettura giacenza:", stockError);
+      return alert("Impossibile leggere la giacenza.");
+    }
+
+    const currentQty = Number(stock.qty_free ?? 0);
+    const newQty = currentQty + delta;
+
+    const newJson = { ...(stock.row_json ?? {}) };
+    newJson["Qnt. a Mag. libero"] = newQty;
+
+    const { error: updateError } = await supabase
+      .from("excel_live")
+      .update({
+        qty_free: newQty,
+        row_json: newJson,
+      })
+      .eq("code", code)
+      .eq("warehouse", warehouse);
+
+    if (updateError) {
+      console.error("Errore aggiornamento giacenza:", updateError);
+      return alert("Errore aggiornamento giacenza.");
+    }
+
+    const { error: deleteError } = await supabase.from("movements").delete().eq("id", id);
+
+    if (deleteError) {
+      console.error("Errore eliminazione:", deleteError);
+      return alert("Non posso eliminare: " + deleteError.message);
+    }
+
+    if (closing?.id === id) {
+      setCloseOpen(false);
+      setClosing(null);
+      setClosingMeta(null);
+      setEditRectify(false);
+    }
+
+    await loadHistory();
   }
 
-  const code = mov.code;
-  const warehouse = mov.warehouse;
-  const qty = Math.abs(Number(mov.qty ?? 0));
-
-  // 2️⃣ Calcolo il delta inverso
-  const delta = mov.type === "IN"
-    ? -qty   // se era +10 → diventa -10
-    : +qty;  // se era -10 → diventa +10
-
-  // 3️⃣ Leggo la giacenza corrente
-  const { data: stock, error: stockError } = await supabase
-    .from("excel_live")
-    .select("qty_free,row_json")
-    .eq("code", code)
-    .eq("warehouse", warehouse)
-    .single();
-
-  if (stockError || !stock) {
-    console.error("Errore lettura giacenza:", stockError);
-    return alert("Impossibile leggere la giacenza.");
-  }
-
-  const currentQty = Number(stock.qty_free ?? 0);
-  const newQty = currentQty + delta;
-
-  const newJson = { ...(stock.row_json ?? {}) };
-  newJson["Qnt. a Mag. libero"] = newQty;
-
-  // 4️⃣ Aggiorno la giacenza
-  const { error: updateError } = await supabase
-    .from("excel_live")
-    .update({
-      qty_free: newQty,
-      row_json: newJson,
-    })
-    .eq("code", code)
-    .eq("warehouse", warehouse);
-
-  if (updateError) {
-    console.error("Errore aggiornamento giacenza:", updateError);
-    return alert("Errore aggiornamento giacenza.");
-  }
-
-  // 5️⃣ Elimino il movimento
-  const { error: deleteError } = await supabase
-    .from("movements")
-    .delete()
-    .eq("id", id);
-
-  if (deleteError) {
-    console.error("Errore eliminazione:", deleteError);
-    return alert("Non posso eliminare: " + deleteError.message);
-  }
-
-  // refresh UI
-  if (closing?.id === id) {
-    setCloseOpen(false);
-    setClosing(null);
-    setClosingMeta(null);
-    setEditRectify(false);
-  }
-
-  await loadHistory();
-}
-
-  // fallback: se items ha name/um vuoti, prova a prenderli dall’altro magazzino (excel_live.row_json)
   async function loadItemMetaWithFallback(code: string, wh: "PRM" | "REALE" | null) {
     const { data: it, error: e1 } = await supabase.from("items").select("code,name,um").eq("code", code).maybeSingle();
     if (e1) console.error("meta items error:", e1);
@@ -686,12 +956,18 @@ async function loadSuggestions(text: string) {
       setMsg("Quantità rientro non valida (>= 0).");
       return;
     }
+
     if (r > outQty) {
       setMsg(`Il rientro non può superare l’uscita (${outQty}).`);
       return;
     }
 
     const ref = referents.find((x) => x.id === selReferentId) ?? null;
+    if (!ref?.email) {
+      setMsg("Seleziona un referente valido prima di confermare la chiusura.");
+      return;
+    }
+
     const closedAtIso = new Date().toISOString();
 
     const { error } = await supabase
@@ -712,7 +988,6 @@ async function loadSuggestions(text: string) {
       return;
     }
 
-    // Aggiorna giacenza: rientro = aumenta il libero
     try {
       if (r > 0) {
         const wh = (closing.warehouse ?? null) as "PRM" | "REALE" | null;
@@ -749,9 +1024,27 @@ async function loadSuggestions(text: string) {
       )
     );
 
-    // email hook (non blocca)
+    await writeAuditLog({
+      action: "MOVEMENT_CLOSED",
+      entity_type: "movement",
+      entity_id: closing.id,
+      code: closing.code,
+      warehouse: closing.warehouse,
+      details_json: {
+        type: closing.type,
+        out_qty: outQty,
+        returned_qty: r,
+        net_qty: Math.max(0, outQty - r),
+        return_note: (returnNote ?? "").trim() || null,
+        referent_id: ref?.id ?? null,
+        referent_name: ref?.name ?? null,
+        referent_email: ref?.email ?? null,
+        closed_at: closedAtIso,
+      },
+    });
+
     try {
-      await supabase.functions.invoke("send_close_email", {
+      const res = await supabase.functions.invoke("send_close_email", {
         body: {
           movement_id: closing.id,
           code: closing.code,
@@ -760,12 +1053,24 @@ async function loadSuggestions(text: string) {
           returned_qty: r,
           net_qty: Math.max(0, outQty - r),
           return_note: (returnNote ?? "").trim() || null,
-          referent_name: ref?.name ?? null,
-          referent_email: ref?.email ?? null,
+          referent_name: ref.name,
+          referent_email: ref.email,
           closed_by: userEmail ?? null,
+          closed_at: closedAtIso,
+          type: closing.type,
         },
       });
-    } catch {}
+
+      console.log("EMAIL FUNCTION RESPONSE:", res);
+
+      if (res.error) {
+        console.error("send_close_email invoke error:", res.error);
+        setMsg("Chiusura salvata ma email non inviata.");
+      }
+    } catch (e) {
+      console.error("send_close_email error:", e);
+      setMsg("Errore collegamento funzione email.");
+    }
 
     setMsg("Movimento chiuso ✅");
     setCloseOpen(false);
@@ -776,7 +1081,6 @@ async function loadSuggestions(text: string) {
     await loadHistory();
   }
 
-  // init
   useEffect(() => {
     (async () => {
       await loadHistory();
@@ -798,13 +1102,20 @@ async function loadSuggestions(text: string) {
         setIsAdmin(false);
         return;
       }
-      setIsAdmin(!!isAdm);
+
+      const adminFlag = !!isAdm;
+      setIsAdmin(adminFlag);
+
+      if (!adminFlag) {
+        setType("OUT");
+      }
     })();
 
     function onDocMouseDown(e: MouseEvent) {
       if (!boxRef.current) return;
       if (!boxRef.current.contains(e.target as Node)) setOpen(false);
     }
+
     document.addEventListener("mousedown", onDocMouseDown);
 
     return () => {
@@ -814,7 +1125,6 @@ async function loadSuggestions(text: string) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // realtime: aggiorna lista quando cambia movements (senza dipendenze “strane”)
   useEffect(() => {
     const channel = supabase
       .channel("movements-live")
@@ -830,15 +1140,34 @@ async function loadSuggestions(text: string) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [closeOpen]);
 
-  // debounce suggestions
   useEffect(() => {
     setActiveIndex(0);
+
     const t = setTimeout(() => {
       if (open) loadSuggestions(search);
     }, 220);
+
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, open]);
+
+  useEffect(() => {
+    const text = fMaterial.trim();
+
+    const t = setTimeout(() => {
+      if (!text) {
+        loadHistory(true);
+        return;
+      }
+
+      if (text.length >= 2) {
+        loadHistory(true);
+      }
+    }, 180);
+
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fFrom, fTo, fType, fWarehouse, fMaterial]);
 
   const active = useMemo(() => suggestions[activeIndex], [suggestions, activeIndex]);
 
@@ -856,6 +1185,7 @@ async function loadSuggestions(text: string) {
           background-size: 200% 200% !important;
           animation: stripeMove 1.2s linear infinite !important;
         }
+
         @keyframes stripeMove {
           0% {
             background-position: 0% 50%;
@@ -870,24 +1200,30 @@ async function loadSuggestions(text: string) {
         <div className="pageBarTitle">Magazzino - Movimenti</div>
       </div>
 
-      {/* FILTRI STORICO */}
       <div className="filtersRow" style={{ padding: 12 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
-          <div style={{ gridColumn: "span 3" }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "2fr 2fr 1.2fr 1.2fr 2.6fr auto auto",
+            gap: 10,
+            alignItems: "end",
+          }}
+        >
+          <div>
             <label className="label" htmlFor="fFrom">
               Data da
             </label>
             <input id="fFrom" name="fFrom" className="input" type="date" value={fFrom} onChange={(e) => setFFrom(e.target.value)} />
           </div>
 
-          <div style={{ gridColumn: "span 3" }}>
+          <div>
             <label className="label" htmlFor="fTo">
               Data a
             </label>
             <input id="fTo" name="fTo" className="input" type="date" value={fTo} onChange={(e) => setFTo(e.target.value)} />
           </div>
 
-          <div style={{ gridColumn: "span 2" }}>
+          <div>
             <label className="label" htmlFor="fType">
               Tipo
             </label>
@@ -898,7 +1234,7 @@ async function loadSuggestions(text: string) {
             </select>
           </div>
 
-          <div style={{ gridColumn: "span 2" }}>
+          <div>
             <label className="label" htmlFor="fWh">
               Magazzino
             </label>
@@ -909,14 +1245,20 @@ async function loadSuggestions(text: string) {
             </select>
           </div>
 
-          <div style={{ gridColumn: "span 2", display: "flex", alignItems: "end", gap: 10 }}>
-            <button className="btn" onClick={loadHistory} style={{ width: "100%", justifyContent: "center" }}>
-              Applica filtri
-            </button>
+          <div>
+            <label className="label" htmlFor="fMaterial">
+              Materiale
+            </label>
+            <input
+              id="fMaterial"
+              name="fMaterial"
+              className="input"
+              value={fMaterial}
+              onChange={(e) => setFMaterial(e.target.value)}
+              placeholder="Cerca per codice o descrizione..."
+            />
           </div>
-        </div>
 
-        <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
           <button
             className="btn"
             onClick={() => {
@@ -924,22 +1266,45 @@ async function loadSuggestions(text: string) {
               setFTo("");
               setFType("ALL");
               setFWarehouse("ALL");
-              setTimeout(() => loadHistory(), 0);
+              setFMaterial("");
+              setTimeout(() => loadHistory(true), 0);
             }}
           >
-            Reset filtri
+            Reset
           </button>
 
-          <div style={{ marginLeft: "auto", opacity: 0.75, fontSize: 12, alignSelf: "center" }}>Permessi: {isAdmin ? "Admin" : "Operatore"}</div>
+          <button className="btn" onClick={() => downloadRegistroPDF(history)}>
+            PDF
+          </button>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginTop: 10,
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ fontSize: 12, opacity: 0.72 }}>
+            Ricerca automatica attiva · scrivi almeno 2 caratteri nel campo materiale
+            {refreshing ? " · aggiornamento..." : ""}
+          </div>
+
+          <div style={{ opacity: 0.75, fontSize: 12 }}>Permessi: {isAdmin ? "Admin" : "Operatore"}</div>
         </div>
       </div>
 
-      {/* FORM MOVIMENTO */}
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <button className={`btn ${type === "IN" ? "btnPrimary" : ""}`} onClick={() => setType("IN")} type="button">
-            Entrata
-          </button>
+          {isAdmin && (
+            <button className={`btn ${type === "IN" ? "btnPrimary" : ""}`} onClick={() => setType("IN")} type="button">
+              Entrata
+            </button>
+          )}
+
           <button className={`btn ${type === "OUT" ? "btnPrimary" : ""}`} onClick={() => setType("OUT")} type="button">
             Uscita
           </button>
@@ -959,7 +1324,7 @@ async function loadSuggestions(text: string) {
               {scanning ? "Chiudi camera" : "Scanner"}
             </button>
             <button className="btn" type="button" onClick={resetSearch}>
-              Babbà
+              Pulisci
             </button>
           </div>
         </div>
@@ -1063,7 +1428,16 @@ async function loadSuggestions(text: string) {
             <label className="label" htmlFor="qtyMove">
               Quantità
             </label>
-            <input ref={qtyRef} id="qtyMove" name="qtyMove" className="input" value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="es. 5" />
+            <input
+              ref={qtyRef}
+              id="qtyMove"
+              name="qtyMove"
+              className="input"
+              value={qty}
+              onChange={(e) => setQty(e.target.value)}
+              inputMode="decimal"
+              placeholder="es. 5"
+            />
           </div>
 
           <div style={{ gridColumn: "span 1", display: "flex", alignItems: "end" }}>
@@ -1087,12 +1461,11 @@ async function loadSuggestions(text: string) {
         {msg && <div style={{ marginTop: 10, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
       </div>
 
-      {/* STORICO */}
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
           <div style={{ fontWeight: 900 }}>Storico movimenti</div>
-          <button className="btn" onClick={loadHistory}>
-            Aggiorna
+          <button className="btn" onClick={() => loadHistory()} style={{ width: "100%", justifyContent: "center" }}>
+            Applica filtri
           </button>
         </div>
 
@@ -1200,7 +1573,6 @@ async function loadSuggestions(text: string) {
         </div>
       </div>
 
-      {/* POPUP DETTAGLIO / CHIUSURA */}
       {closeOpen && closing && (
         <div
           onMouseDown={() => {
@@ -1235,7 +1607,6 @@ async function loadSuggestions(text: string) {
               padding: 12,
             }}
           >
-            {/* Header */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
               <div style={{ fontWeight: 900 }}>
                 Dettaglio movimento · <span style={{ opacity: 0.75 }}>{closing.code}</span>{" "}
@@ -1262,7 +1633,6 @@ async function loadSuggestions(text: string) {
               </div>
             </div>
 
-            {/* Riga info */}
             <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
               <div style={{ gridColumn: "span 3" }}>
                 <label className="label" htmlFor="mvType">
@@ -1282,7 +1652,13 @@ async function loadSuggestions(text: string) {
                 <label className="label" htmlFor="mvQty">
                   Quantità
                 </label>
-                <input id="mvQty" name="mvQty" className="input" value={String(closing.type === "OUT" ? -Math.abs(n(closing.qty)) : Math.abs(n(closing.qty)))} disabled />
+                <input
+                  id="mvQty"
+                  name="mvQty"
+                  className="input"
+                  value={String(closing.type === "OUT" ? -Math.abs(n(closing.qty)) : Math.abs(n(closing.qty)))}
+                  disabled
+                />
               </div>
 
               <div style={{ gridColumn: "span 3" }}>
@@ -1300,7 +1676,6 @@ async function loadSuggestions(text: string) {
               </div>
             </div>
 
-            {/* Sezione rettifica/chiusura per OUT OPEN */}
             {closing.type === "OUT" && (closing.status ?? "OPEN") === "OPEN" && (
               <div
                 style={{
@@ -1399,7 +1774,9 @@ async function loadSuggestions(text: string) {
                       ))}
                     </select>
                     <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
-                      {selReferentId ? `Email: ${referents.find((x) => x.id === selReferentId)?.email ?? "-"}` : "Seleziona il referente per associarlo alla chiusura."}
+                      {selReferentId
+                        ? `Email: ${referents.find((x) => x.id === selReferentId)?.email ?? "-"}`
+                        : "Seleziona il referente per associarlo alla chiusura."}
                     </div>
                   </div>
 
@@ -1407,7 +1784,13 @@ async function loadSuggestions(text: string) {
                     <label className="label" htmlFor="netInfo">
                       Quantità netta (uscita - rientro)
                     </label>
-                    <input id="netInfo" name="netInfo" className="input" value={String(Math.max(0, Math.abs(n(closing.qty)) - n(toNumber(returnQty))))} disabled />
+                    <input
+                      id="netInfo"
+                      name="netInfo"
+                      className="input"
+                      value={String(Math.max(0, Math.abs(n(closing.qty)) - n(toNumber(returnQty))))}
+                      disabled
+                    />
                   </div>
                 </div>
 
@@ -1417,7 +1800,6 @@ async function loadSuggestions(text: string) {
               </div>
             )}
 
-            {/* Meta materiale */}
             <div style={{ marginTop: 12, opacity: 0.85, fontSize: 12 }}>
               {closingMeta ? (
                 <>
@@ -1429,6 +1811,102 @@ async function loadSuggestions(text: string) {
             </div>
 
             {msg && <div style={{ marginTop: 10, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
+          </div>
+        </div>
+      )}
+
+      {historyOpen && (
+        <div
+          onMouseDown={() => {
+            setHistoryOpen(false);
+            setHistoryCode(null);
+            setHistoryRows([]);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 14,
+            zIndex: 999,
+          }}
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              width: "min(1000px, 100%)",
+              maxHeight: "85vh",
+              overflow: "auto",
+              background: "white",
+              borderRadius: 14,
+              border: "1px solid rgba(15,23,42,0.16)",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
+              padding: 12,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+              <div style={{ fontWeight: 900 }}>
+                Storico materiale · <span style={{ opacity: 0.75 }}>{historyCode}</span>
+              </div>
+
+              <button
+                className="btn"
+                onClick={() => {
+                  setHistoryOpen(false);
+                  setHistoryCode(null);
+                  setHistoryRows([]);
+                }}
+              >
+                Chiudi
+              </button>
+            </div>
+
+            <div style={{ overflowX: "auto", marginTop: 12 }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Tipo</th>
+                    <th>Q.tà</th>
+                    <th>Mag.</th>
+                    <th>Inserito da</th>
+                    <th>Note</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {historyLoading ? (
+                    <tr>
+                      <td colSpan={6} style={{ padding: 12 }}>
+                        Caricamento…
+                      </td>
+                    </tr>
+                  ) : historyRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ padding: 12 }}>
+                        Nessun movimento per questo materiale.
+                      </td>
+                    </tr>
+                  ) : (
+                    historyRows.map((m) => (
+                      <tr key={m.id}>
+                        <td>{m.created_at ? new Date(m.created_at).toLocaleString("it-IT") : "-"}</td>
+                        <td>{m.type === "IN" ? "Entrata" : "Uscita"}</td>
+                        <td style={{ fontWeight: 900 }}>
+                          {m.type === "IN" ? "+" : "-"}
+                          {Math.abs(Number(m.qty ?? 0))}
+                        </td>
+                        <td>{m.warehouse ?? "-"}</td>
+                        <td>{m.created_by_name ?? m.created_by_email ?? "-"}</td>
+                        <td>{m.note ?? ""}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

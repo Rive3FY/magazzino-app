@@ -109,6 +109,7 @@ export default function GiacenzePage() {
   const [count, setCount] = useState(0);
   const [rows, setRows] = useState<DbRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE));
@@ -126,6 +127,22 @@ export default function GiacenzePage() {
 
   // quali campi sono sbloccati (uno per volta)
   const [unlocked, setUnlocked] = useState<Record<string, boolean>>({});
+  const [historyOpen, setHistoryOpen] = useState(false);
+const [historyCode, setHistoryCode] = useState<string | null>(null);
+const [historyRows, setHistoryRows] = useState<
+  Array<{
+    id: string;
+    created_at: string;
+    type: "IN" | "OUT";
+    qty: number;
+    note: string | null;
+    created_by_name?: string | null;
+    created_by_email?: string | null;
+    warehouse?: string | null;
+  }>
+  
+>([]);
+const [historyLoading, setHistoryLoading] = useState(false);
 
   // ✅ Scrollbar orizzontale “gemella” (in alto) + tabella
   const tableXRef = useRef<HTMLDivElement | null>(null);
@@ -200,62 +217,122 @@ export default function GiacenzePage() {
       return "none";
     });
   }
+async function writeAuditLog(payload: {
+  action: string;
+  entity_type: string;
+  entity_id?: string | null;
+  code?: string | null;
+  warehouse?: string | null;
+  details_json?: Record<string, any> | null;
+}) {
+  try {
+    const { data: u } = await supabase.auth.getUser();
+    const user = u.user ?? null;
 
+    await supabase.from("audit_log").insert({
+      action: payload.action,
+      entity_type: payload.entity_type,
+      entity_id: payload.entity_id ?? null,
+      code: payload.code ?? null,
+      warehouse: payload.warehouse ?? null,
+      user_id: user?.id ?? null,
+      user_email: user?.email ?? null,
+      user_name: null,
+      details_json: payload.details_json ?? null,
+    });
+  } catch (e) {
+    console.error("audit_log error:", e);
+  }
+}
   function sortIcon(col: string) {
     if (sortKey !== col || sortDir === "none") return "↕";
     return sortDir === "asc" ? "↑" : "↓";
   }
+async function openHistory(code: string) {
+  setHistoryCode(code);
+  setHistoryOpen(true);
+  setHistoryLoading(true);
 
-  async function load() {
-    setLoading(true);
-    setMsg(null);
+  const { data, error } = await supabase
+    .from("movements")
+    .select("id,created_at,type,qty,note,created_by_name,created_by_email,warehouse")
+    .eq("code", code)
+    .order("created_at", { ascending: false })
+    .limit(200);
 
-    const search = q.trim() || null;
-    const offset = (page - 1) * PAGE_SIZE;
-
-    const { data, error } = await supabase.rpc("giacenze_list", {
-      p_view: view,
-      p_search: search,
-      p_sort_key: sortKey,
-      p_sort_dir: sortDir,
-      p_limit: PAGE_SIZE,
-      p_offset: offset,
-    });
-
-    if (error) {
-      console.error("giacenze_list error:", error);
-      setRows([]);
-      setCount(0);
-      setLoading(false);
-      setMsg("Errore caricamento giacenze. (RPC giacenze_list)");
-      return;
-    }
-
-    const list = (data ?? []) as DbRow[];
-    setRows(list);
-
-    const tc = Number(list?.[0]?.total_count ?? 0);
-    setCount(Number.isFinite(tc) && tc > 0 ? tc : list.length);
-
-    setLoading(false);
+  if (error) {
+    console.error("history error:", error);
+    setHistoryRows([]);
+    setHistoryLoading(false);
+    return;
   }
 
+  setHistoryRows((data ?? []) as any[]);
+  setHistoryLoading(false);
+}
+  async function load(silent = false) {
+  if (silent) {
+    setRefreshing(true);
+  } else {
+    setLoading(true);
+  }
+
+  setMsg(null);
+
+  const search = q.trim() || null;
+  const offset = (page - 1) * PAGE_SIZE;
+
+  const { data, error } = await supabase.rpc("giacenze_list", {
+    p_view: view,
+    p_search: search,
+    p_sort_key: sortKey,
+    p_sort_dir: sortDir,
+    p_limit: PAGE_SIZE,
+    p_offset: offset,
+  });
+
+  if (error) {
+    console.error("giacenze_list error:", error);
+    setRows([]);
+    setCount(0);
+    if (silent) setRefreshing(false);
+    else setLoading(false);
+    setMsg("Errore caricamento giacenze. (RPC giacenze_list)");
+    return;
+  }
+
+  const list = (data ?? []) as DbRow[];
+  setRows(list);
+
+  const tc = Number(list?.[0]?.total_count ?? 0);
+  setCount(Number.isFinite(tc) && tc > 0 ? tc : list.length);
+
+  if (silent) setRefreshing(false);
+  else setLoading(false);
+}
+
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, view, sortKey, sortDir]);
+  load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
+
+useEffect(() => {
+  if (page === 1 && view === "REALE" && sortKey === "Materiale" && sortDir === "none") return;
+  load(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [page, view, sortKey, sortDir]);
 
   useEffect(() => {
     setPage(1);
   }, [q, view, sortKey, sortDir]);
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      load();
-    }, 250);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
+  const t = setTimeout(() => {
+    load(true);
+  }, 250);
+  return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [q]);
 
   const viewRows = useMemo(() => rows, [rows]);
 
@@ -391,10 +468,24 @@ export default function GiacenzePage() {
           );
 
         if (eLive) {
-          setMsg("Errore creazione (excel_live): " + eLive.message);
-          setSaving(false);
-          return;
-        }
+  setMsg("Errore creazione (excel_live): " + eLive.message);
+  setSaving(false);
+  return;
+}
+await writeAuditLog({
+  action: "MATERIAL_CREATED",
+  entity_type: "material",
+  code,
+  warehouse: editing.warehouse,
+  details_json: {
+    name: String(nextJson["Descrizione Materiale"] ?? "").trim() || null,
+    um: String(nextJson["Unità di Misura"] ?? "").trim() || null,
+    qty_free: qtyFree,
+    qty_blocked: qtyBlocked,
+    qty_quality: qtyQuality,
+    initial_qty: initial,
+  },
+});
       } else {
         // update SOLO live
         const { error } = await supabase
@@ -409,6 +500,20 @@ export default function GiacenzePage() {
           setSaving(false);
           return;
         }
+        await writeAuditLog({
+  action: "MATERIAL_UPDATED",
+  entity_type: "material",
+  code: editing.code,
+  warehouse: editing.warehouse,
+  details_json: {
+    name: String(nextJson["Descrizione Materiale"] ?? "").trim() || null,
+    um: String(nextJson["Unità di Misura"] ?? "").trim() || null,
+    qty_free: qtyFree,
+    qty_blocked: qtyBlocked,
+    qty_quality: qtyQuality,
+    initial_qty: initial,
+  },
+});
 
         // opzionale: se admin cambia descrizione/UM nel popup, aggiorno anche items
         if (isAdmin) {
@@ -441,27 +546,45 @@ export default function GiacenzePage() {
   }
 
   async function deleteRow() {
-    if (!isAdmin) return;
-    if (!editing) return;
-    if (creating) return;
+  if (!isAdmin) return;
+  if (!editing) return;
+  if (creating) return;
 
-    const ok = confirm(`Eliminare questo materiale?\n\nCodice: ${editing.code}\nMagazzino: ${editing.warehouse}`);
-    if (!ok) return;
+  const ok = confirm(`Eliminare questo materiale?\n\nCodice: ${editing.code}\nMagazzino: ${editing.warehouse}`);
+  if (!ok) return;
 
-    // Eliminazione lato live (original resta come storico import)
-    const { error } = await supabase.from("excel_live").delete().eq("code", editing.code).eq("warehouse", editing.warehouse);
+  // Eliminazione lato live (original resta come storico import)
+  const { error } = await supabase
+    .from("excel_live")
+    .delete()
+    .eq("code", editing.code)
+    .eq("warehouse", editing.warehouse);
 
-    if (error) {
-      setMsg("Errore eliminazione: " + error.message);
-      return;
-    }
-
-    setMsg("Eliminato ✅");
-    setEditing(null);
-    setEditExcel({});
-    setUnlocked({});
-    await load();
+  if (error) {
+    setMsg("Errore eliminazione: " + error.message);
+    return;
   }
+
+  await writeAuditLog({
+    action: "MATERIAL_DELETED",
+    entity_type: "material",
+    code: editing.code,
+    warehouse: editing.warehouse,
+    details_json: {
+      qty_free: editing.qty_free,
+      qty_blocked: editing.qty_blocked,
+      qty_quality: editing.qty_quality,
+      initial_qty: editing.initial_qty,
+      row_json: editing.row_json ?? null,
+    },
+  });
+
+  setMsg("Eliminato ✅");
+  setEditing(null);
+  setEditExcel({});
+  setUnlocked({});
+  await load();
+}
 
   function exportXlsx() {
     const data = viewRows.map((r) => {
@@ -536,9 +659,9 @@ export default function GiacenzePage() {
             </button>
           )}
 
-          <button className="btn" onClick={load}>
-            Aggiorna
-          </button>
+          <button className="btn" onClick={() => load()}>
+  Aggiorna
+</button>
 
           <button className="btn" onClick={exportXlsx}>
             Export pagina
@@ -552,6 +675,7 @@ export default function GiacenzePage() {
         <div style={{ marginTop: 10, fontSize: 12, opacity: 0.8 }}>
           Ordinamento: clicca su una colonna → <b>↑</b> (ASC) → <b>↓</b> (DESC) → <b>↕</b> (default).
         </div>
+        
       </div>
 
       {msg && <div style={{ padding: 12, fontWeight: 800 }}>{msg}</div>}
@@ -592,58 +716,88 @@ export default function GiacenzePage() {
             }}
           >
             <table className="table" style={{ minWidth: 2600 }}>
-              <thead>
-                <tr>
-                  <th onClick={() => cycleSort("_warehouse")} style={{ cursor: "pointer", userSelect: "none" }} title="Ordina">
-                    Warehouse <span style={{ opacity: 0.7 }}>{sortIcon("_warehouse")}</span>
-                  </th>
+             <thead>
+  <tr>
+    <th
+      onClick={() => cycleSort("_warehouse")}
+      style={{ cursor: "pointer", userSelect: "none" }}
+      title="Ordina"
+    >
+      Warehouse <span style={{ opacity: 0.7 }}>{sortIcon("_warehouse")}</span>
+    </th>
 
-                  {EXCEL_COLS.map((c) => (
-                    <th key={c} onClick={() => cycleSort(c)} style={{ cursor: "pointer", userSelect: "none" }} title="Ordina">
-                      {c} <span style={{ opacity: 0.7 }}>{sortIcon(c)}</span>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
+    {EXCEL_COLS.map((c) => (
+      <th
+        key={c}
+        onClick={() => cycleSort(c)}
+        style={{ cursor: "pointer", userSelect: "none" }}
+        title="Ordina"
+      >
+        {c} <span style={{ opacity: 0.7 }}>{sortIcon(c)}</span>
+      </th>
+    ))}
+
+    <th>Storico</th>
+  </tr>
+</thead>
 
               <tbody>
-                {viewRows.map((r, idx) => {
-                  const zebraBg = idx % 2 === 0 ? "rgba(15,23,42,0.03)" : "rgba(15,23,42,0.08)";
-                  return (
-                    <tr
-                      key={`${r.code}__${r.warehouse}`}
-                      style={{ background: zebraBg, cursor: "pointer" }}
-                      title="Clicca per aprire e modificare (con matita)"
-                      onClick={() => openEdit(r)}
-                    >
-                      <td style={{ fontWeight: 900 }}>{r.warehouse}</td>
+  {viewRows.map((r, idx) => {
+    const zebraBg =
+      idx % 2 === 0 ? "rgba(15,23,42,0.03)" : "rgba(15,23,42,0.08)";
 
-                      {EXCEL_COLS.map((c) => {
-                        let v: any = r.row_json?.[c] ?? "";
+    return (
+      <tr
+        key={`${r.code}__${r.warehouse}`}
+        style={{ background: zebraBg, cursor: "pointer" }}
+        title="Clicca per aprire e modificare (con matita)"
+        onClick={() => openEdit(r)}
+      >
+        <td style={{ fontWeight: 900 }}>{r.warehouse}</td>
 
-                        if (c === "Materiale") v = r.code;
-                        if (c === "Descrizione Materiale") v = r.name ?? v;
-                        if (c === "Unità di Misura") v = r.um ?? v;
+        {EXCEL_COLS.map((c) => {
+          let v: any = r.row_json?.[c] ?? "";
 
-                        // ✅ quantità reale: preferisci qty_free (sempre allineato ai movimenti)
-                        if (c === "Qnt. a Mag. libero") {
-                          v = Number.isFinite(Number(r.qty_free)) ? Number(r.qty_free) : Number(r.row_json?.["Qnt. a Mag. libero"] ?? 0);
-                        }
+          if (c === "Materiale") v = r.code;
+          if (c === "Descrizione Materiale") v = r.name ?? v;
+          if (c === "Unità di Misura") v = r.um ?? v;
 
-                        return <td key={c}>{String(v ?? "")}</td>;
-                      })}
-                    </tr>
-                  );
-                })}
+          // ✅ quantità reale: preferisci qty_free
+          if (c === "Qnt. a Mag. libero") {
+            v = Number.isFinite(Number(r.qty_free))
+              ? Number(r.qty_free)
+              : Number(r.row_json?.["Qnt. a Mag. libero"] ?? 0);
+          }
 
-                {viewRows.length === 0 && (
-                  <tr>
-                    <td colSpan={1 + EXCEL_COLS.length} style={{ padding: 12, color: "#0f172a" }}>
-                      Nessun risultato.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
+          return <td key={c}>{String(v ?? "")}</td>;
+        })}
+
+        <td>
+          <button
+            className="btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              openHistory(r.code);
+            }}
+          >
+            Storico
+          </button>
+        </td>
+      </tr>
+    );
+  })}
+
+  {viewRows.length === 0 && (
+    <tr>
+      <td
+        colSpan={2 + EXCEL_COLS.length}
+        style={{ padding: 12, color: "#0f172a" }}
+      >
+        Nessun risultato.
+      </td>
+    </tr>
+  )}
+</tbody>
             </table>
           </div>
 
@@ -749,8 +903,16 @@ export default function GiacenzePage() {
             </div>
 
             <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-              Tutto è bloccato. Premi la <b>matita</b> a destra del campo per sbloccare solo quel campo.
-            </div>
+  {isAdmin ? (
+    <>
+      Tutto è bloccato. Premi la <b>matita</b> a destra del campo per sbloccare solo quel campo.
+    </>
+  ) : (
+    <>
+      Vista di sola lettura. Solo gli admin possono modificare i campi.
+    </>
+  )}
+</div>
 
             <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
               {EXCEL_COLS.map((c) => {
@@ -770,7 +932,7 @@ export default function GiacenzePage() {
                       : editing.code
                     : editExcel[c] ?? "";
 
-                const canUnlock = !isMaterialReadOnly && !isAlwaysLocked;
+                const canUnlock = isAdmin && !isMaterialReadOnly && !isAlwaysLocked;
                 const isUnlocked = !!unlocked[c];
                 const disabled = saving || !canUnlock || !isUnlocked;
 
@@ -851,6 +1013,108 @@ export default function GiacenzePage() {
           </div>
         </div>
       )}
+      {historyOpen && (
+  <div
+    onMouseDown={() => {
+      setHistoryOpen(false);
+      setHistoryCode(null);
+      setHistoryRows([]);
+    }}
+    style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(15,23,42,0.35)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 14,
+      zIndex: 999,
+    }}
+  >
+    <div
+      onMouseDown={(e) => e.stopPropagation()}
+      style={{
+        width: "min(1000px, 100%)",
+        maxHeight: "85vh",
+        overflow: "auto",
+        background: "white",
+        borderRadius: 14,
+        border: "1px solid rgba(15,23,42,0.16)",
+        boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
+        padding: 12,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 10,
+        }}
+      >
+        <div style={{ fontWeight: 900 }}>
+          Storico materiale · <span style={{ opacity: 0.75 }}>{historyCode}</span>
+        </div>
+
+        <button
+          className="btn"
+          onClick={() => {
+            setHistoryOpen(false);
+            setHistoryCode(null);
+            setHistoryRows([]);
+          }}
+        >
+          Chiudi
+        </button>
+      </div>
+
+      <div style={{ overflowX: "auto", marginTop: 12 }}>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Tipo</th>
+              <th>Q.tà</th>
+              <th>Mag.</th>
+              <th>Inserito da</th>
+              <th>Note</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {historyLoading ? (
+              <tr>
+                <td colSpan={6} style={{ padding: 12 }}>
+                  Caricamento…
+                </td>
+              </tr>
+            ) : historyRows.length === 0 ? (
+              <tr>
+                <td colSpan={6} style={{ padding: 12 }}>
+                  Nessun movimento per questo materiale.
+                </td>
+              </tr>
+            ) : (
+              historyRows.map((m) => (
+                <tr key={m.id}>
+                  <td>{m.created_at ? new Date(m.created_at).toLocaleString("it-IT") : "-"}</td>
+                  <td>{m.type === "IN" ? "Entrata" : "Uscita"}</td>
+                  <td style={{ fontWeight: 900 }}>
+                    {m.type === "IN" ? "+" : "-"}
+                    {Math.abs(Number(m.qty ?? 0))}
+                  </td>
+                  <td>{m.warehouse ?? "-"}</td>
+                  <td>{m.created_by_name ?? m.created_by_email ?? "-"}</td>
+                  <td>{m.note ?? ""}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+)}
     </main>
   );
 }

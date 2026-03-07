@@ -25,8 +25,8 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [workingId, setWorkingId] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
 
-  // controllo admin
   async function guardAdmin() {
     const { data: u } = await supabase.auth.getUser();
 
@@ -54,7 +54,6 @@ export default function AdminPage() {
     setChecking(false);
   }
 
-  // carica utenti
   async function loadUsers() {
     setLoading(true);
     setMsg(null);
@@ -73,7 +72,6 @@ export default function AdminPage() {
     setLoading(false);
   }
 
-  // approvazione
   async function setApproved(userId: string, approved: boolean) {
     setWorkingId(userId);
 
@@ -89,11 +87,10 @@ export default function AdminPage() {
       return;
     }
 
-    loadUsers();
+    await loadUsers();
     setWorkingId(null);
   }
 
-  // admin
   async function setAdminFlag(userId: string, makeAdmin: boolean) {
     setWorkingId(userId);
 
@@ -109,8 +106,44 @@ export default function AdminPage() {
       return;
     }
 
-    loadUsers();
+    await loadUsers();
     setWorkingId(null);
+  }
+
+  async function handleResetMagazzino() {
+    const ok1 = window.confirm(
+      "ATTENZIONE:\n\nQuesta operazione cancellerà TUTTI i movimenti, TUTTE le giacenze live e TUTTO l'import Excel originale.\n\nL'operazione è irreversibile.\n\nVuoi continuare?"
+    );
+    if (!ok1) return;
+
+    const text = window.prompt(
+      'Per confermare davvero il reset, scrivi esattamente: RESET MAGAZZINO'
+    );
+
+    if (text !== "RESET MAGAZZINO") {
+      alert("Conferma non valida. Reset annullato.");
+      return;
+    }
+
+    try {
+      setResetting(true);
+
+      const { error } = await supabase.rpc("reset_magazzino");
+
+      if (error) {
+        console.error("reset_magazzino error:", error);
+        alert("Errore reset magazzino: " + error.message);
+        return;
+      }
+
+      alert("Reset magazzino completato con successo.");
+      window.location.reload();
+    } catch (e: any) {
+      console.error(e);
+      alert("Errore reset magazzino: " + (e?.message ?? "sconosciuto"));
+    } finally {
+      setResetting(false);
+    }
   }
 
   useEffect(() => {
@@ -118,6 +151,7 @@ export default function AdminPage() {
       await guardAdmin();
       await loadUsers();
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (checking) {
@@ -137,6 +171,21 @@ export default function AdminPage() {
     <main className="panel">
       <div className="pageBar">
         <div className="pageBarTitle">Admin</div>
+
+        <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+          <button
+            className="btn"
+            onClick={handleResetMagazzino}
+            disabled={resetting}
+            style={{
+              borderColor: "rgba(239,68,68,0.5)",
+              background: "rgba(239,68,68,0.10)",
+              color: "#991b1b",
+            }}
+          >
+            {resetting ? "Reset in corso..." : "Reset magazzino"}
+          </button>
+        </div>
       </div>
 
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
@@ -146,6 +195,8 @@ export default function AdminPage() {
             justifyContent: "space-between",
             alignItems: "center",
             marginBottom: 10,
+            gap: 10,
+            flexWrap: "wrap",
           }}
         >
           <div style={{ fontWeight: 900 }}>Utenti registrati</div>
@@ -208,17 +259,17 @@ export default function AdminPage() {
                       </td>
 
                       <td>
-                        <div style={{ display: "flex", gap: 8 }}>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                           {u.approved ? (
-  <button
-    className="btn"
-    disabled={busy || isMe}
-    title={isMe ? "Non puoi disapprovare te stesso" : ""}
-    onClick={() => setApproved(u.id, false)}
-  >
-    Disapprova
-  </button>
-) : (
+                            <button
+                              className="btn"
+                              disabled={busy || isMe}
+                              title={isMe ? "Non puoi disapprovare te stesso" : ""}
+                              onClick={() => setApproved(u.id, false)}
+                            >
+                              Disapprova
+                            </button>
+                          ) : (
                             <button
                               className="btn btnPrimary"
                               disabled={busy}
@@ -232,6 +283,7 @@ export default function AdminPage() {
                             <button
                               className="btn"
                               disabled={busy || isMe}
+                              title={isMe ? "Non puoi rimuovere admin a te stesso" : ""}
                               onClick={() => setAdminFlag(u.id, false)}
                             >
                               Rimuovi admin

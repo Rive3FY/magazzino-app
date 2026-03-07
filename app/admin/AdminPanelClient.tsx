@@ -88,6 +88,9 @@ export default function AdminPanelClient() {
   const [editLast, setEditLast] = useState("");
   const [editBusy, setEditBusy] = useState(false);
 
+  // RESET MAGAZZINO
+  const [resetting, setResetting] = useState(false);
+
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       setMyUserId(data.user?.id ?? null);
@@ -240,6 +243,42 @@ export default function AdminPanelClient() {
     }
   }
 
+  async function handleResetMagazzino() {
+    const ok1 = window.confirm(
+      "ATTENZIONE:\n\nQuesta operazione cancellerà TUTTI i movimenti, TUTTE le giacenze live e TUTTO l'import Excel originale.\n\nL'operazione è irreversibile.\n\nVuoi continuare?"
+    );
+    if (!ok1) return;
+
+    const text = window.prompt(
+      'Per confermare davvero il reset, scrivi esattamente: RESET MAGAZZINO'
+    );
+
+    if (text !== "RESET MAGAZZINO") {
+      alert("Conferma non valida. Reset annullato.");
+      return;
+    }
+
+    try {
+      setResetting(true);
+
+      const { error } = await supabase.rpc("reset_magazzino");
+
+      if (error) {
+        console.error("reset_magazzino error:", error);
+        alert("Errore reset magazzino: " + error.message);
+        return;
+      }
+
+      alert("Reset magazzino completato con successo.");
+      window.location.reload();
+    } catch (e: any) {
+      console.error(e);
+      alert("Errore reset magazzino: " + (e?.message ?? "sconosciuto"));
+    } finally {
+      setResetting(false);
+    }
+  }
+
   async function onFile(file: File) {
     setImportMsg(null);
     setImportBusy(true);
@@ -265,15 +304,11 @@ export default function AdminPanelClient() {
             code,
             name,
             um: String(r["UM"] ?? "").trim() || null,
-
             division: String(r["Divisione"] ?? "").trim() || null,
             division_desc: String(r["Descrizione Divisione"] ?? "").trim() || null,
-
             warehouse: String(r["Magazzino"] ?? "").trim() || null,
             warehouse_desc: String(r["Descrizione Magazzino"] ?? "").trim() || null,
-
             group_desc: String(r["Descrizione Gruppo Merci"] ?? "").trim() || null,
-
             qty_free,
             qty_blocked,
             qty_quality,
@@ -321,12 +356,24 @@ export default function AdminPanelClient() {
       <div className="pageBar">
         <div className="pageBarTitle">Admin Panel</div>
         <div className="pageBarRight" style={{ display: "flex", gap: 8 }}>
+          <button
+            className="btn"
+            onClick={handleResetMagazzino}
+            disabled={resetting}
+            style={{
+              borderColor: "rgba(239,68,68,0.5)",
+              background: "rgba(239,68,68,0.10)",
+              color: "#991b1b",
+            }}
+          >
+            {resetting ? "Reset in corso..." : "Reset magazzino"}
+          </button>
+
           <a className="btn" href="/giacenze">Giacenze</a>
           <a className="btn" href="/movimenti">Movimenti</a>
         </div>
       </div>
 
-      {/* OPERATORI */}
       <div style={{ padding: 12, borderBottom: "1px solid #d9e1ea" }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <h2 style={{ margin: 0, fontSize: 16 }}>Operatori (registrati) & ruoli Admin</h2>
@@ -408,7 +455,6 @@ export default function AdminPanelClient() {
         </div>
       </div>
 
-      {/* IMPORT */}
       <div style={{ padding: 12, borderBottom: "1px solid #d9e1ea" }}>
         <h2 style={{ margin: "0 0 10px", fontSize: 16 }}>Import anagrafica Excel (solo admin)</h2>
 
@@ -419,7 +465,7 @@ export default function AdminPanelClient() {
               className="input"
               type="file"
               accept=".xlsx,.xls"
-              disabled={importBusy}
+              disabled={importBusy || resetting}
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (f) onFile(f);
@@ -430,7 +476,7 @@ export default function AdminPanelClient() {
           <div className="field">
             <label>Stato</label>
             <div className="input" style={{ background: "#f8fafc" }}>
-              {importBusy ? "Importazione…" : "Pronto"}
+              {importBusy ? "Importazione…" : resetting ? "Reset in corso..." : "Pronto"}
             </div>
           </div>
         </div>
@@ -442,7 +488,6 @@ export default function AdminPanelClient() {
         ) : null}
       </div>
 
-      {/* MOVIMENTI */}
       <div style={{ padding: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <h2 style={{ margin: 0, fontSize: 16 }}>Gestione movimenti (elimina)</h2>
@@ -524,7 +569,6 @@ export default function AdminPanelClient() {
         </div>
       </div>
 
-      {/* MODALE EDIT */}
       {editOpen && editUser && (
         <div
           onMouseDown={() => {
@@ -559,7 +603,15 @@ export default function AdminPanelClient() {
                 <div style={{ fontWeight: 900, color: "#111827" }}>Modifica Operatore</div>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>{editUser.email ?? "-"}</div>
               </div>
-              <button className="btn" onClick={() => { if (!editBusy) { setEditOpen(false); setEditUser(null); } }}>
+              <button
+                className="btn"
+                onClick={() => {
+                  if (!editBusy) {
+                    setEditOpen(false);
+                    setEditUser(null);
+                  }
+                }}
+              >
                 Chiudi
               </button>
             </div>
@@ -581,7 +633,14 @@ export default function AdminPanelClient() {
               </div>
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <button className="btn" disabled={editBusy} onClick={() => { setEditOpen(false); setEditUser(null); }}>
+                <button
+                  className="btn"
+                  disabled={editBusy}
+                  onClick={() => {
+                    setEditOpen(false);
+                    setEditUser(null);
+                  }}
+                >
                   Annulla
                 </button>
                 <button className="btn btnPrimary" disabled={editBusy} onClick={saveEdit}>

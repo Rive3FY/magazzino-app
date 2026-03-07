@@ -87,7 +87,11 @@ export default function SideNav() {
 
         {isAdmin && <Link className={cls("/import")} href="/import">Import</Link>}
 
-        {isAdmin && <Link className={cls("/admin")} href="/admin">Admin</Link>}
+{isAdmin && <Link className={cls("/referenti")} href="/referenti">Referenti</Link>}
+
+{isAdmin && <Link className={cls("/audit-log")} href="/audit-log">Audit Log</Link>}
+
+{isAdmin && <Link className={cls("/admin")} href="/admin">Admin</Link>}
 
         {!checked && (
           <div

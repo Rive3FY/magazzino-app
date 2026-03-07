@@ -1520,48 +1520,56 @@ async function confirmCartPickup() {
             <label className="label" htmlFor="whMove" style={{ marginBottom: 0 }}>
               Magazzino
             </label>
-            <select id="whMove" name="whMove" className="input" value={warehouse} onChange={(e) => setWarehouse(e.target.value as any)} style={{ width: 140 }}>
+            <select
+              id="whMove"
+              name="whMove"
+              className="input"
+              value={warehouse}
+              onChange={(e) => setWarehouse(e.target.value as any)}
+              style={{ width: 140 }}
+            >
               <option value="PRM">PRM</option>
               <option value="REALE">REALE</option>
             </select>
           </div>
 
-          <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <button className="btn" type="button" onClick={() => (scanning ? stopScan() : startScan())}>
               {scanning ? "Chiudi camera" : "Scanner"}
             </button>
+
             <button className="btn" type="button" onClick={resetSearch}>
               Pulisci
             </button>
-            <button
-  className={`btn ${scanMode === "NORMAL" ? "btnPrimary" : ""}`}
-  type="button"
-  onClick={() => setScanMode("NORMAL")}
->
-  Normale
-</button>
 
-<button
-  className={`btn ${scanMode === "CART" ? "btnPrimary" : ""}`}
-  type="button"
-  onClick={() => {
-    setScanMode("CART");
-  setScanPopupOpen(false);
-  setScanInfo(null);
-  setCartOpen(true);
-  setMsg(null);
-}}
->
-  Carrello
-</button>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label className="label" htmlFor="scanModeSelect" style={{ marginBottom: 0 }}>
+                Modalità scanner
+              </label>
+              <select
+                id="scanModeSelect"
+                className="input"
+                value={scanMode}
+                onChange={(e) => {
+                  const mode = e.target.value as "NORMAL" | "CART" | "QUICK";
+                  setScanMode(mode);
 
-<button
-  className={`btn ${scanMode === "QUICK" ? "btnPrimary" : ""}`}
-  type="button"
-  onClick={() => setScanMode("QUICK")}
->
-  Lettura rapida
-</button>
+                  if (mode === "CART") {
+                    setScanPopupOpen(false);
+                    setScanInfo(null);
+                    setCartOpen(true);
+                    setMsg(null);
+                  } else {
+                    setCartOpen(false);
+                  }
+                }}
+                style={{ minWidth: 180 }}
+              >
+                <option value="NORMAL">Inserimento singolo</option>
+                <option value="CART">Carrello multiplo</option>
+                <option value="QUICK">Solo lettura (dettaglio)</option>
+              </select>
+            </div>
           </div>
         </div>
 

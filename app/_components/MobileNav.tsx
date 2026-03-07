@@ -14,14 +14,14 @@ export default function MobileNav() {
       style={{
         flex: 1,
         textAlign: "center",
-        padding: "10px 6px",
+        padding: "6px 4px",
         textDecoration: "none",
         fontWeight: 800,
-        fontSize: 12,
+        fontSize: 11,
         color: isActive(href) ? "#0b5566" : "#334155",
       }}
     >
-      <div style={{ fontSize: 20, lineHeight: 1, marginBottom: 2 }}>{icon}</div>
+      <div style={{ fontSize: 18, lineHeight: 1, marginBottom: 2 }}>{icon}</div>
       {label}
     </Link>
   );
@@ -37,8 +37,8 @@ export default function MobileNav() {
         zIndex: 999,
         background: "rgba(255,255,255,0.95)",
         border: "1px solid rgba(15,23,42,0.12)",
-        borderRadius: 18,
-        boxShadow: "0 18px 40px rgba(0,0,0,0.22)",
+        borderRadius: 14,
+        boxShadow: "0 12px 30px rgba(15,23,42,0.25)",
         display: "flex",
         overflow: "hidden",
         backdropFilter: "blur(12px)",

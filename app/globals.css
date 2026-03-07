@@ -685,7 +685,6 @@ html, body {
 .content, .panel {
   overflow-x: hidden !important;
 }
-
 /* =========================
    GIACENZE: header/filtri sempre visibili
 ========================= */
@@ -734,6 +733,17 @@ html, body {
 ========================= */
 
 @media (max-width: 900px){
+
+  /* su mobile permettiamo lo scroll orizzontale
+     sull'intera pagina, senza toccare il desktop */
+  html, body {
+    max-width: none;
+    overflow-x: auto !important;
+  }
+
+  .content, .panel {
+    overflow-x: visible !important;
+  }
 
   /* layout principale diventa verticale */
   .app{

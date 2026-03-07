@@ -499,8 +499,14 @@ for (const r of (base ?? []) as DbStock[]) {
 
         {picked && stock && (
           <div style={{ marginTop: 12 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 12 }}>
-              <div style={{ gridColumn: "span 6" }} className="glass">
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: 12,
+              }}
+            >
+              <div className="glass">
                 <div style={{ opacity: 0.85, fontSize: 12 }}>Materiale</div>
                 <div style={{ fontSize: 18, fontWeight: 900, marginTop: 6 }}>{picked.code}</div>
                 <div style={{ opacity: 0.9, marginTop: 6 }}>{picked.name}</div>
@@ -509,12 +515,12 @@ for (const r of (base ?? []) as DbStock[]) {
                 </div>
               </div>
 
-              <div style={{ gridColumn: "span 3" }} className="glass">
+              <div className="glass">
                 <div style={{ opacity: 0.85, fontSize: 12 }}>PRM</div>
                 <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>{stock.PRM}</div>
               </div>
 
-              <div style={{ gridColumn: "span 3" }} className="glass">
+              <div className="glass">
                 <div style={{ opacity: 0.85, fontSize: 12 }}>REALE</div>
                 <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>{stock.REALE}</div>
               </div>
@@ -528,8 +534,15 @@ for (const r of (base ?? []) as DbStock[]) {
       </div>
 
       {/* KPI */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 12, marginTop: 14 }}>
-        <div className="glass" style={{ gridColumn: "span 4" }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: 12,
+          marginTop: 14,
+        }}
+      >
+        <div className="glass">
           <div style={{ opacity: 0.85, fontSize: 12 }}>Materiali</div>
           <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>
             {loading ? "…" : itemsCount}
@@ -537,7 +550,7 @@ for (const r of (base ?? []) as DbStock[]) {
           <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>Codici in anagrafica</div>
         </div>
 
-        <div className="glass" style={{ gridColumn: "span 4" }}>
+        <div className="glass">
           <div style={{ opacity: 0.85, fontSize: 12 }}>Movimenti oggi</div>
           <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>
             {loading ? "…" : movementsToday}
@@ -547,7 +560,7 @@ for (const r of (base ?? []) as DbStock[]) {
           </div>
         </div>
 
-        <div className="glass" style={{ gridColumn: "span 4" }}>
+        <div className="glass">
           <div style={{ opacity: 0.85, fontSize: 12 }}>Ultimo movimento</div>
           <div style={{ marginTop: 8, fontWeight: 800 }}>
             {loading

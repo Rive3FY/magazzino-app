@@ -231,8 +231,6 @@ export default function MovimentiPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const [scanning, setScanning] = useState(false);
-  const scanLockedRef = useRef(false);
-  const scanReadyAtRef = useRef<number>(0);
 
   const [closeOpen, setCloseOpen] = useState(false);
   const [closing, setClosing] = useState<MovementRow | null>(null);
@@ -868,9 +866,6 @@ async function handleScannedCode(codeRaw: string) {
     }
 
     stopScan();
-    scanLockedRef.current = false;
-    scanReadyAtRef.current = Date.now() + 3000;
-
     setScanning(true);
     await new Promise((r) => setTimeout(r, 100));
 
@@ -886,24 +881,17 @@ async function handleScannedCode(codeRaw: string) {
     }
 
     try {
-
       readerRef.current = new BrowserMultiFormatReader();
-      await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
-        if (!result) return;
-        if (scanLockedRef.current) return;
-        if (Date.now() < scanReadyAtRef.current) return;
-
-        const text = String(result.getText?.() ?? "").trim();
-        if (!text) return;
-
-        scanLockedRef.current = true;
-        stopScan();
+      const result = await readerRef.current.decodeOnceFromVideoDevice(undefined, videoEl);
+      stopScan();
+      const text = String(result?.getText?.() ?? "").trim();
+      if (text) {
         if (scanMode === "NORMAL") {
           await pickItemByCode(text);
         } else {
           await handleScannedCode(text);
         }
-      });
+      }
     } catch (e: any) {
       console.error(e);
       setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));

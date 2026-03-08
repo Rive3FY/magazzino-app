@@ -444,10 +444,19 @@ export default function ScaffaliPage() {
     stopCameraScan();
     scanLockedRef.current = false;
     setCameraScanning(true);
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 100));
+
+    let videoEl = videoRef.current;
+    for (let i = 0; i < 30 && !videoEl; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      videoEl = videoRef.current;
+    }
+    if (!videoEl) {
+      setCameraScanning(false);
+      setMsg("Video non disponibile. Riprova.");
+      return;
+    }
     try {
-      const videoEl = videoRef.current;
-      if (!videoEl) throw new Error("Video non disponibile");
       readerRef.current = new BrowserMultiFormatReader();
       await readerRef.current.decodeFromVideoDevice(undefined, videoEl, (result) => {
         if (!result || scanLockedRef.current) return;
@@ -668,17 +677,16 @@ export default function ScaffaliPage() {
               <div style={{ fontSize: 14, color: "#64748b", marginBottom: 12 }}>
                 {barcodeInput.code} · {barcodeInput.warehouse}
               </div>
-              {cameraScanning ? (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ padding: 12, background: "#0f172a", borderRadius: 12, marginBottom: 8 }}>
-                    <video ref={videoRef} style={{ width: "100%", maxWidth: 360, borderRadius: 8 }} muted playsInline />
-                    <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il barcode</div>
-                  </div>
-                  <button type="button" className="btn" onClick={stopCameraScan} style={{ width: "100%" }}>
-                    Chiudi camera
-                  </button>
+              <div style={{ marginBottom: 16, display: cameraScanning ? "block" : "none" }}>
+                <div style={{ padding: 12, background: "#0f172a", borderRadius: 12, marginBottom: 8 }}>
+                  <video ref={videoRef} style={{ width: "100%", maxWidth: 360, borderRadius: 8 }} muted playsInline />
+                  <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il barcode</div>
                 </div>
-              ) : (
+                <button type="button" className="btn" onClick={stopCameraScan} style={{ width: "100%" }}>
+                  Chiudi camera
+                </button>
+              </div>
+              {!cameraScanning && (
                 <>
                   <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
                     <button

@@ -76,11 +76,15 @@ export default function ScanPage() {
       return;
     }
 
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 100));
 
-    const video = videoRef.current;
+    let video = videoRef.current;
+    for (let i = 0; i < 30 && !video; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      video = videoRef.current;
+    }
     if (!video) {
-      setMsg("Video non disponibile");
+      setMsg("Video non disponibile. Riprova.");
       return;
     }
 

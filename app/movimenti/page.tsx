@@ -711,11 +711,20 @@ async function handleScannedCode(codeRaw: string) {
     scanLockedRef.current = false;
 
     setScanning(true);
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 100));
+
+    let videoEl = videoRef.current;
+    for (let i = 0; i < 30 && !videoEl; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      videoEl = videoRef.current;
+    }
+    if (!videoEl) {
+      setScanning(false);
+      setMsg("Video non disponibile. Riprova.");
+      return;
+    }
 
     try {
-      const videoEl = videoRef.current;
-      if (!videoEl) throw new Error("Video non disponibile");
 
       readerRef.current = new BrowserMultiFormatReader();
       await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
@@ -1826,12 +1835,10 @@ async function confirmCartPickup() {
           )}
         </div>
 
-        {scanning && (
-          <div style={{ marginTop: 12 }}>
-            <video ref={videoRef} style={{ width: "100%", borderRadius: 12, background: "black" }} muted playsInline />
-            <div style={{ fontSize: 12, opacity: 0.85, marginTop: 6 }}>Inquadra il codice a barre con la fotocamera.</div>
-          </div>
-        )}
+        <div style={{ marginTop: 12, display: scanning ? "block" : "none" }}>
+          <video ref={videoRef} style={{ width: "100%", borderRadius: 12, background: "black" }} muted playsInline />
+          <div style={{ fontSize: 12, opacity: 0.85, marginTop: 6 }}>Inquadra il codice a barre con la fotocamera.</div>
+        </div>
 
         <div className="mobileFormRow" style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10, marginTop: 12 }}>
           <div style={{ gridColumn: "span 8" }}>

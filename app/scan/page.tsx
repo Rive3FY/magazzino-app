@@ -72,7 +72,10 @@ export default function ScanPage() {
     setMsg(null);
 
     if (!navigator.mediaDevices?.getUserMedia) {
-      setMsg("La fotocamera richiede HTTPS. Accedi al sito con https:// (non http://). Su localhost funziona comunque.");
+      setMsg(
+        "La fotocamera richiede HTTPS. Da mobile, se accedi via IP (es. 192.168.x.x) non funziona con http://. " +
+        "Usa npm run dev:https sul PC, poi accedi da https://TUO_IP:3000 (accetta il certificato)."
+      );
       return;
     }
 

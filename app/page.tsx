@@ -259,7 +259,10 @@ export default function Home() {
     setOpen(false);
 
     if (!navigator.mediaDevices?.getUserMedia) {
-      setMsg("La fotocamera richiede HTTPS. Accedi al sito con https:// (non http://). Su localhost funziona comunque.");
+      setMsg(
+        "La fotocamera richiede HTTPS. Da mobile, se accedi via IP (es. 192.168.x.x) non funziona con http://. " +
+        "Usa npm run dev:https sul PC, poi accedi da https://TUO_IP:3000 (accetta il certificato)."
+      );
       return;
     }
 
@@ -344,7 +347,11 @@ export default function Home() {
   async function startNfcScan() {
     if (!isNfcSupported) {
       const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-      setMsg(isIOS ? "NFC non disponibile su iPhone/iPad. Usa barcode o ricerca manuale." : "NFC richiede Chrome su Android con HTTPS.");
+      setMsg(
+        isIOS
+          ? "NFC non disponibile su iPhone/iPad. Usa barcode o ricerca manuale."
+          : "NFC richiede Chrome su Android con HTTPS. Da mobile via IP usa npm run dev:https, poi accedi da https://TUO_IP:3000"
+      );
       return;
     }
     setNfcScanning(true);
@@ -613,28 +620,58 @@ export default function Home() {
                 <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>
                   UM: <b>{picked.um ?? "-"}</b> · Presente in: <b>{where}</b>
                 </div>
-                {shelves && (shelves.PRM || shelves.REALE) && (
-                  <div style={{ opacity: 0.9, fontSize: 12, marginTop: 6 }}>
-                    Scaffale · Luogo:{" "}
-                    {[shelves.PRM && `PRM ${shelves.PRM}`, shelves.REALE && `REALE ${shelves.REALE}`]
-                      .filter(Boolean)
-                      .join(" · ") || "—"}
-                  </div>
-                )}
               </div>
 
               <div className="glass">
                 <div style={{ opacity: 0.85, fontSize: 12 }}>PRM</div>
                 <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>{stock.PRM}</div>
-                {shelves?.PRM && <div style={{ fontSize: 11, opacity: 0.8, marginTop: 4 }}>Scaffale · Luogo: {shelves.PRM}</div>}
+                {shelves?.PRM ? (
+                  <div style={{ fontSize: 13, fontWeight: 700, marginTop: 10, color: "#0284c7" }}>
+                    Scaffale · Luogo: {shelves.PRM}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>Posizione non assegnata</div>
+                )}
               </div>
 
               <div className="glass">
                 <div style={{ opacity: 0.85, fontSize: 12 }}>REALE</div>
                 <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>{stock.REALE}</div>
-                {shelves?.REALE && <div style={{ fontSize: 11, opacity: 0.8, marginTop: 4 }}>Scaffale · Luogo: {shelves.REALE}</div>}
+                {shelves?.REALE ? (
+                  <div style={{ fontSize: 13, fontWeight: 700, marginTop: 10, color: "#7c3aed" }}>
+                    Scaffale · Luogo: {shelves.REALE}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>Posizione non assegnata</div>
+                )}
               </div>
             </div>
+
+            {(shelves?.PRM || shelves?.REALE) && (
+              <div
+                className="glass"
+                style={{
+                  marginTop: 12,
+                  padding: 14,
+                  background: "linear-gradient(135deg, rgba(2,132,199,0.08) 0%, rgba(124,58,237,0.08) 100%)",
+                  border: "1px solid rgba(15,23,42,0.1)",
+                }}
+              >
+                <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 8 }}>Dove si trova</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 16, fontSize: 15, fontWeight: 800 }}>
+                  {shelves?.PRM && stock && stock.PRM > 0 && (
+                    <span>
+                      PRM: <span style={{ color: "#0284c7" }}>{shelves.PRM}</span>
+                    </span>
+                  )}
+                  {shelves?.REALE && stock && stock.REALE > 0 && (
+                    <span>
+                      REALE: <span style={{ color: "#7c3aed" }}>{shelves.REALE}</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
 
             {filterHint && (
               <div style={{ marginTop: 10, fontWeight: 800 }}>{filterHint}</div>

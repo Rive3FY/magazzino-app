@@ -24,17 +24,20 @@ function BarcodeSvg({ value, options }: { value: string; options?: Record<string
       try {
         JsBarcode(svgRef.current, value, {
           format: "CODE128",
-          width: 1,
-          height: 28,
+          width: 1.4,
+          height: 18,
           displayValue: true,
           fontSize: 8,
           margin: 1,
           ...options,
         });
+        const svg = svgRef.current;
+        svg.setAttribute("width", "100%");
+        svg.removeAttribute("height");
       } catch {}
     }
   }, [value, options]);
-  return <svg ref={svgRef} style={{ maxWidth: "100%", height: "auto", display: "block" }} />;
+  return <svg ref={svgRef} style={{ width: "100%", height: "auto", display: "block" }} />;
 }
 
 export default function EtichettePage() {
@@ -196,12 +199,14 @@ export default function EtichettePage() {
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       tmp.appendChild(svg);
       try {
-        JsBarcode(svg, l.barcodeValue, { format: "CODE128", width: 1, height: 28, displayValue: true, fontSize: 8, margin: 1 });
+        JsBarcode(svg, l.barcodeValue, { format: "CODE128", width: 1.4, height: 18, displayValue: true, fontSize: 8, margin: 1 });
+        svg.setAttribute("width", "100%");
+        svg.removeAttribute("height");
       } catch {}
       const bcHtml = svg.outerHTML;
       tmp.removeChild(svg);
       const shelfLine = labelType === "scaffale" ? `<div class="etichetta-shelf"><b>${esc(l.warehouse)}</b> · ${esc(l.shelf)}${l.place ? ` · ${esc(l.place)}` : ""}</div>` : "";
-      return `<div class="etichetta-label"><div class="etichetta-content"><div class="etichetta-code">${esc(l.code)}</div><div class="etichetta-name">${esc(l.name)}</div>${shelfLine}<div class="etichetta-barcode">${bcHtml}</div></div></div>`;
+      return `<div class="etichetta-label"><div class="etichetta-content"><div class="etichetta-text"><div class="etichetta-code">${esc(l.code)}</div><div class="etichetta-name">${esc(l.name)}</div>${shelfLine}</div><div class="etichetta-barcode">${bcHtml}</div></div></div>`;
     }).join("");
     tmp.remove();
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etichette</title>
@@ -209,14 +214,15 @@ export default function EtichettePage() {
 @page{size:A4;margin:8mm}
 *{box-sizing:border-box}
 body{margin:0;padding:0;background:#fff}
-.etichette-print-grid{display:grid;grid-template-columns:repeat(6,30mm);gap:2mm;padding:8mm;width:max-content}
-.etichetta-label{width:30mm;height:70mm;border:1px dashed #999;padding:2.5mm;break-inside:avoid;box-sizing:border-box}
-.etichetta-content{display:flex;flex-direction:column;align-items:flex-start;height:100%;gap:1.5mm}
+.etichette-print-grid{display:grid;grid-template-columns:repeat(3,70mm);gap:2mm;padding:8mm;width:max-content}
+.etichetta-label{width:70mm;height:30mm;border:1px dashed #999;padding:2.5mm;break-inside:avoid;box-sizing:border-box}
+.etichetta-content{display:flex;flex-direction:column;height:100%;gap:1.5mm}
+.etichetta-text{display:flex;flex-direction:column;gap:0.5mm;flex-shrink:0;min-width:0;width:100%;align-self:stretch}
 .etichetta-code{font-weight:800;font-size:10px;line-height:1.2;letter-spacing:-0.02em;word-break:break-all;flex-shrink:0}
-.etichetta-name{font-size:8px;color:#555;line-height:1.3;word-wrap:break-word;overflow-wrap:break-word;word-break:break-word;max-height:24mm;overflow:hidden;display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical}
-.etichetta-shelf{font-size:8px;color:#444;line-height:1.2;flex-shrink:0}
-.etichetta-barcode{width:100%;max-width:25mm;overflow:hidden;margin-top:auto;flex-shrink:1;min-height:0}
-.etichetta-barcode svg{max-width:100%;height:auto;display:block}
+.etichetta-name{font-size:9px;color:#555;line-height:1.25;word-wrap:break-word;overflow-wrap:break-word;word-break:break-word;max-height:10mm;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
+.etichetta-shelf{font-size:9px;color:#444;line-height:1.2;flex-shrink:0}
+.etichetta-barcode{width:100%;max-height:14mm;overflow:hidden;margin-top:auto;flex-shrink:1;min-height:0;display:flex;align-items:flex-end}
+.etichetta-barcode svg{width:100%!important;height:auto!important;display:block;max-width:none}
 </style>
 </head><body><div class="etichette-print-grid">${labelHtml}</div></body></html>`;
   }
@@ -409,13 +415,15 @@ body{margin:0;padding:0;background:#fff}
                     {labels.map((l, i) => (
                       <div key={i} className="etichetta-label">
                         <div className="etichetta-content">
-                          <div className="etichetta-code">{l.code}</div>
-                          <div className="etichetta-name">{l.name}</div>
-                          {labelType === "scaffale" && (
-                            <div className="etichetta-shelf">
-                              <b>{l.warehouse}</b> · {l.shelf}{l.place ? ` · ${l.place}` : ""}
-                            </div>
-                          )}
+                          <div className="etichetta-text">
+                            <div className="etichetta-code">{l.code}</div>
+                            <div className="etichetta-name">{l.name}</div>
+                            {labelType === "scaffale" && (
+                              <div className="etichetta-shelf">
+                                <b>{l.warehouse}</b> · {l.shelf}{l.place ? ` · ${l.place}` : ""}
+                              </div>
+                            )}
+                          </div>
                           <div className="etichetta-barcode">
                             <BarcodeSvg value={l.barcodeValue} />
                           </div>
@@ -435,13 +443,15 @@ body{margin:0;padding:0;background:#fff}
         {labels.map((l, i) => (
           <div key={i} className="etichetta-label">
             <div className="etichetta-content">
-              <div className="etichetta-code">{l.code}</div>
-              <div className="etichetta-name">{l.name}</div>
-              {labelType === "scaffale" && (
-                <div className="etichetta-shelf">
-                  <b>{l.warehouse}</b> · {l.shelf}{l.place ? ` · ${l.place}` : ""}
-                </div>
-              )}
+              <div className="etichetta-text">
+                <div className="etichetta-code">{l.code}</div>
+                <div className="etichetta-name">{l.name}</div>
+                {labelType === "scaffale" && (
+                  <div className="etichetta-shelf">
+                    <b>{l.warehouse}</b> · {l.shelf}{l.place ? ` · ${l.place}` : ""}
+                  </div>
+                )}
+              </div>
               <div className="etichetta-barcode">
                 <BarcodeSvg value={l.barcodeValue} />
               </div>

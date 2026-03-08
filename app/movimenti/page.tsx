@@ -185,7 +185,44 @@ export default function MovimentiPage() {
   const urlOpenId = searchParams.get("open");
 
   const [cartOpen, setCartOpen] = useState(false);
-  const [cart, setCart] = useState<CartRow[]>([]);
+  const [cart, setCart] = useState<CartRow[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const cached = localStorage.getItem("magazzino_cart");
+      if (!cached) return [];
+      const parsed = JSON.parse(cached);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(
+        (r: any) =>
+          r &&
+          typeof r.code === "string" &&
+          typeof r.warehouse === "string" &&
+          (r.warehouse === "PRM" || r.warehouse === "REALE") &&
+          typeof r.qtyPick === "number" &&
+          r.qtyPick > 0
+      );
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (cart.length === 0) {
+      localStorage.removeItem("magazzino_cart");
+    } else {
+      localStorage.setItem("magazzino_cart", JSON.stringify(cart));
+    }
+  }, [cart]);
+
+  useEffect(() => {
+    if (cart.length > 0) {
+      setScanMode("CART");
+      setCartOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [cartBusy, setCartBusy] = useState(false);
   const [cartManualCode, setCartManualCode] = useState("");
   const [cartSuggestions, setCartSuggestions] = useState<DbItem[]>([]);
@@ -859,7 +896,10 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
     setScanInfo(null);
 
     if (!navigator.mediaDevices?.getUserMedia) {
-      setMsg("La fotocamera richiede HTTPS. Accedi al sito con https:// (non http://). Su localhost funziona comunque.");
+      setMsg(
+        "La fotocamera richiede HTTPS. Da mobile, se accedi via IP (es. 192.168.x.x) non funziona con http://. " +
+        "Usa npm run dev:https sul PC, poi accedi da https://TUO_IP:3000 (accetta il certificato)."
+      );
       return;
     }
 
@@ -947,7 +987,11 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
   async function startCartNfcScan() {
     if (!isNfcSupported) {
       const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-      setMsg(isIOS ? "NFC non disponibile su iPhone/iPad. Usa barcode o manuale." : "NFC richiede Chrome su Android con HTTPS.");
+      setMsg(
+        isIOS
+          ? "NFC non disponibile su iPhone/iPad. Usa barcode o manuale."
+          : "NFC richiede Chrome su Android con HTTPS. Da mobile via IP usa npm run dev:https, poi accedi da https://TUO_IP:3000"
+      );
       return;
     }
     setCartOpen(false);

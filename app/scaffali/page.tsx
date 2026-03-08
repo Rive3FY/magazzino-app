@@ -250,7 +250,11 @@ export default function ScaffaliPage() {
 
   async function doAssociateNfc(code: string, warehouse: "PRM" | "REALE", forceReassign = false) {
     if (!isNfcSupported) {
-      setMsg(isIOS ? "NFC non disponibile su iPhone/iPad. Safari non supporta la scansione NFC. Usa Associa barcode con la fotocamera." : "NFC non supportato. Usa Chrome su Android con HTTPS.");
+      setMsg(
+        isIOS
+          ? "NFC non disponibile su iPhone/iPad. Safari non supporta la scansione NFC. Usa Associa barcode con la fotocamera."
+          : "NFC richiede Chrome su Android con HTTPS. Da mobile via IP usa npm run dev:https, poi accedi da https://TUO_IP:3000"
+      );
       return;
     }
     setNfcTagReassign(null);
@@ -488,7 +492,10 @@ export default function ScaffaliPage() {
     if (!barcodeInput) return;
     setMsg(null);
     if (!navigator.mediaDevices?.getUserMedia) {
-      setMsg("La fotocamera richiede HTTPS. Accedi al sito con https:// (non http://). Su localhost funziona comunque.");
+      setMsg(
+        "La fotocamera richiede HTTPS. Da mobile, se accedi via IP (es. 192.168.x.x) non funziona con http://. " +
+        "Usa npm run dev:https sul PC, poi accedi da https://TUO_IP:3000 (accetta il certificato)."
+      );
       return;
     }
     stopCameraScan();

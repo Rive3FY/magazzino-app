@@ -128,7 +128,6 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const [scanning, setScanning] = useState(false);
-  const scanLockedRef = useRef(false);
   const [nfcScanning, setNfcScanning] = useState(false);
   const [isNfcSupported, setIsNfcSupported] = useState(false);
 
@@ -265,8 +264,6 @@ export default function Home() {
     }
 
     stopScan();
-    scanLockedRef.current = false;
-
     setScanning(true);
     await new Promise((r) => setTimeout(r, 100));
 
@@ -283,19 +280,10 @@ export default function Home() {
 
     try {
       readerRef.current = new BrowserMultiFormatReader();
-
-      await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
-        if (!result) return;
-        if (scanLockedRef.current) return;
-
-        const text = String(result.getText?.() ?? "").trim();
-        if (!text) return;
-
-        scanLockedRef.current = true;
-
-        stopScan();
-        await pickItemByCode(text);
-      });
+      const result = await readerRef.current.decodeOnceFromVideoDevice(undefined, videoEl);
+      stopScan();
+      const text = String(result?.getText?.() ?? "").trim();
+      if (text) await pickItemByCode(text);
     } catch (e: any) {
       console.error(e);
       setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));

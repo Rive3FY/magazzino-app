@@ -133,7 +133,6 @@ export default function ScaffaliPage() {
   const [cameraScanning, setCameraScanning] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
-  const scanLockedRef = useRef(false);
 
   async function load() {
     setLoading(true);
@@ -493,7 +492,6 @@ export default function ScaffaliPage() {
       return;
     }
     stopCameraScan();
-    scanLockedRef.current = false;
     setCameraScanning(true);
     await new Promise((r) => setTimeout(r, 100));
 
@@ -509,14 +507,10 @@ export default function ScaffaliPage() {
     }
     try {
       readerRef.current = new BrowserMultiFormatReader();
-      await readerRef.current.decodeFromVideoDevice(undefined, videoEl, (result) => {
-        if (!result || scanLockedRef.current) return;
-        const text = String(result.getText?.() ?? "").trim();
-        if (!text) return;
-        scanLockedRef.current = true;
-        setBarcodeInputVal(text);
-        stopCameraScan();
-      });
+      const result = await readerRef.current.decodeOnceFromVideoDevice(undefined, videoEl);
+      stopCameraScan();
+      const text = String(result?.getText?.() ?? "").trim();
+      if (text) setBarcodeInputVal(text);
     } catch (e: any) {
       setMsg("Errore camera: " + (e?.message ?? "sconosciuto"));
       stopCameraScan();

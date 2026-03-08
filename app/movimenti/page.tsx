@@ -262,6 +262,7 @@ export default function MovimentiPage() {
     realeShelf: string;
     prmPlace?: string;
     realePlace?: string;
+    forCart?: boolean;
   } | null>(null);
 
   const [shelfInfoPopup, setShelfInfoPopup] = useState<{
@@ -368,26 +369,6 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
     qtyBlocked: Number((stock as any)?.qty_blocked ?? 0),
     qtyQuality: Number((stock as any)?.qty_quality ?? 0),
   };
-}
-async function handleScannedCode(codeRaw: string) {
-  const code = String(codeRaw ?? "").trim();
-  if (!code) return;
-
-  let info: QuickMaterialInfo | null = null;
-  if (warehouse === "MISTO") {
-    info = await loadMaterialForScan(code, "PRM") ?? await loadMaterialForScan(code, "REALE");
-  } else {
-    info = await loadMaterialForScan(code, warehouse);
-  }
-  if (!info) {
-    setMsg(`Materiale ${code} non trovato${warehouse === "MISTO" ? " in PRM né REALE" : ` in ${warehouse}`}.`);
-    return;
-  }
-
-  setScanInfo(info);
-  setScanQty("1");
-  setScanPopupOpen(true);
-  setScanSource("barcode");
 }
   async function loadImageAsDataUrl(src: string): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -740,7 +721,7 @@ async function handleScannedCode(codeRaw: string) {
     else setLoading(false);
   }
 
-  async function pickItem(it: DbItem) {
+  async function pickItem(it: DbItem, forCart = false) {
     if (type === "OUT") {
       try {
         const { data: prmLive } = await supabase.from("excel_live").select("qty_free,row_json").eq("code", it.code).eq("warehouse", "PRM").maybeSingle();
@@ -762,29 +743,30 @@ async function handleScannedCode(codeRaw: string) {
         const hasPrm = prmFree > 0;
         const hasReale = realeFree > 0;
 
+        const popupData = { code: it.code, name: it.name, um: it.um ?? null, prmFree, realeFree, prmShelf, realeShelf, prmPlace, realePlace, forCart };
         if (!hasPrm && !hasReale) {
-          setWarehouseChoicePopup({ mode: "NONE", code: it.code, name: it.name, um: it.um ?? null, prmFree, realeFree, prmShelf, realeShelf, prmPlace, realePlace });
+          setWarehouseChoicePopup({ mode: "NONE", ...popupData });
           setSearch(`${it.code} — ${it.name}`);
           setOpen(false);
           setMsg(null);
           return;
         }
         if (hasPrm && !hasReale) {
-          setWarehouseChoicePopup({ mode: "PRM_ONLY", code: it.code, name: it.name, um: it.um ?? null, prmFree, realeFree, prmShelf, realeShelf, prmPlace, realePlace });
+          setWarehouseChoicePopup({ mode: "PRM_ONLY", ...popupData });
           setSearch(`${it.code} — ${it.name}`);
           setOpen(false);
           setMsg(null);
           return;
         }
         if (!hasPrm && hasReale) {
-          setWarehouseChoicePopup({ mode: "REALE_ONLY", code: it.code, name: it.name, um: it.um ?? null, prmFree, realeFree, prmShelf, realeShelf, prmPlace, realePlace });
+          setWarehouseChoicePopup({ mode: "REALE_ONLY", ...popupData });
           setSearch(`${it.code} — ${it.name}`);
           setOpen(false);
           setMsg(null);
           return;
         }
         if (hasPrm && hasReale) {
-          setWarehouseChoicePopup({ mode: "BOTH", code: it.code, name: it.name, um: it.um ?? null, prmFree, realeFree, prmShelf, realeShelf, prmPlace, realePlace });
+          setWarehouseChoicePopup({ mode: "BOTH", ...popupData });
           setSearch(`${it.code} — ${it.name}`);
           setOpen(false);
           setMsg(null);
@@ -801,16 +783,32 @@ async function handleScannedCode(codeRaw: string) {
     setTimeout(() => qtyRef.current?.focus(), 50);
   }
 
-  function confirmWarehouseChoice(wh: "PRM" | "REALE" | "MISTO") {
+  async function confirmWarehouseChoice(wh: "PRM" | "REALE" | "MISTO") {
     if (!warehouseChoicePopup) return;
-    setWarehouse(wh);
-    setPicked({ code: warehouseChoicePopup.code, name: warehouseChoicePopup.name, um: warehouseChoicePopup.um });
+    const popup = warehouseChoicePopup;
     setWarehouseChoicePopup(null);
     setMsg(null);
+
+    if (popup.forCart) {
+      const whPick = wh === "MISTO" ? "PRM" : wh;
+      const info = await loadMaterialForScan(popup.code, whPick);
+      if (info) {
+        setScanInfo(info);
+        setScanQty("1");
+        setScanSource(null);
+        setCartOpen(true);
+      } else {
+        setMsg(`Materiale non disponibile in ${whPick}.`);
+      }
+      return;
+    }
+
+    setWarehouse(wh);
+    setPicked({ code: popup.code, name: popup.name, um: popup.um });
     setTimeout(() => qtyRef.current?.focus(), 50);
   }
 
-  async function pickItemByCode(codeRaw: string) {
+  async function pickItemByCode(codeRaw: string, forCart = false) {
     const code = codeRaw.trim();
     if (!code) return;
 
@@ -831,7 +829,7 @@ async function handleScannedCode(codeRaw: string) {
       return;
     }
 
-    await pickItem(item as DbItem);
+    await pickItem(item as DbItem, forCart);
   }
 
   function stopScan() {
@@ -886,11 +884,7 @@ async function handleScannedCode(codeRaw: string) {
       stopScan();
       const text = String(result?.getText?.() ?? "").trim();
       if (text) {
-        if (scanMode === "NORMAL") {
-          await pickItemByCode(text);
-        } else {
-          await handleScannedCode(text);
-        }
+        await pickItemByCode(text, scanMode === "CART");
       }
     } catch (e: any) {
       console.error(e);
@@ -981,14 +975,7 @@ async function handleScannedCode(codeRaw: string) {
         setMsg(`Tag NFC non associato a nessun materiale.`);
         return;
       }
-      const info = await loadMaterialForScan((shelf as any).code, (shelf as any).warehouse);
-      if (!info) {
-        setMsg(`Materiale non trovato in magazzino.`);
-        return;
-      }
-      setScanInfo(info);
-      setScanQty("1");
-      setScanPopupOpen(true);
+      await pickItemByCode((shelf as any).code, true);
     } catch (e: any) {
       setMsg(e?.message ?? "Errore NFC");
     } finally {
@@ -1005,23 +992,10 @@ async function handleScannedCode(codeRaw: string) {
     const c = String(code ?? "").trim();
     if (!c) return;
     setMsg(null);
-    let info: QuickMaterialInfo | null = null;
-    if (warehouse === "MISTO") {
-      info = await loadMaterialForScan(c, "PRM") ?? await loadMaterialForScan(c, "REALE");
-    } else {
-      info = await loadMaterialForScan(c, warehouse);
-    }
-    if (!info) {
-      setMsg(`Materiale ${c} non trovato${warehouse === "MISTO" ? " in PRM né REALE" : ` in ${warehouse}`}.`);
-      return;
-    }
     setCartManualCode("");
     setCartSuggestions([]);
     setCartManualOpen(false);
-    setScanInfo(info);
-    setScanQty("1");
-    setScanPopupOpen(true);
-    setScanSource(null);
+    await pickItemByCode(c, true);
   }
   async function addCartManual() {
     const code = cartManualCode.trim();
@@ -2397,9 +2371,12 @@ async function confirmCartPickup() {
       {warehouseChoicePopup && (
         <div
           onMouseDown={() => {
+            const wasForCart = warehouseChoicePopup.forCart;
+            const hadCart = cart.length > 0;
             setWarehouseChoicePopup(null);
             setPicked(null);
             setSearch("");
+            if (wasForCart && hadCart) setCartOpen(true);
           }}
           style={{
             position: "fixed",
@@ -2453,6 +2430,7 @@ async function confirmCartPickup() {
                   setWarehouseChoicePopup(null);
                   setPicked(null);
                   setSearch("");
+                  if (warehouseChoicePopup.forCart && cart.length > 0) setCartOpen(true);
                 }}
               >
                 Chiudi
@@ -2510,14 +2488,16 @@ async function confirmCartPickup() {
               )}
               {warehouseChoicePopup.mode === "BOTH" && (
                 <>
-                  <button
-                    type="button"
-                    className="btn btnPrimary"
-                    onClick={() => confirmWarehouseChoice("MISTO")}
-                    style={{ width: "100%" }}
-                  >
-                    Prelievo misto (PRM prima)
-                  </button>
+                  {!warehouseChoicePopup.forCart && (
+                    <button
+                      type="button"
+                      className="btn btnPrimary"
+                      onClick={() => confirmWarehouseChoice("MISTO")}
+                      style={{ width: "100%" }}
+                    >
+                      Prelievo misto (PRM prima)
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="btn"

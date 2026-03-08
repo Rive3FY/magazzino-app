@@ -5,6 +5,8 @@ export type CartRow = {
   warehouse: "PRM" | "REALE";
   qtyAvailable: number;
   qtyPick: number;
+  shelf?: string;
+  place?: string;
 };
 
 export type QuickMaterialInfo = {

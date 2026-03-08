@@ -272,7 +272,7 @@ export default function MovimentiPage() {
   const [closeOpen, setCloseOpen] = useState(false);
   const [closing, setClosing] = useState<MovementRow | null>(null);
   const [closingGroup, setClosingGroup] = useState<MovementRow[]>([]);
-  const [closingMeta, setClosingMeta] = useState<{ name: string; um: string } | null>(null);
+  const [closingMeta, setClosingMeta] = useState<{ name: string; um: string; shelf?: string; place?: string } | null>(null);
   const [editingMovementId, setEditingMovementId] = useState<string | null>(null);
   const [selectedClosedRowId, setSelectedClosedRowId] = useState<string | null>(null);
 
@@ -932,7 +932,7 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
       stopScan();
     }
   }
-  function addScannedToCart() {
+  async function addScannedToCart() {
   if (!scanInfo) return;
 
   const qn = toNumber(scanQty);
@@ -945,6 +945,14 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
     setMsg(`Quantità superiore alla disponibilità (${scanInfo.qtyFree}).`);
     return;
   }
+
+  let shelf = "";
+  let place = "";
+  try {
+    const { data: shelfRow } = await supabase.from("material_shelves").select("shelf,place").eq("code", scanInfo.code).eq("warehouse", scanInfo.warehouse).maybeSingle();
+    shelf = (shelfRow as any)?.shelf ?? "";
+    place = ((shelfRow as any)?.place ?? "").trim();
+  } catch {}
 
   setCart((prev) => {
     const idx = prev.findIndex(
@@ -961,6 +969,8 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
           warehouse: scanInfo.warehouse,
           qtyAvailable: scanInfo.qtyFree,
           qtyPick: qn,
+          shelf: shelf || undefined,
+          place: place || undefined,
         },
       ];
     }
@@ -1039,6 +1049,7 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
     setCartManualCode("");
     setCartSuggestions([]);
     setCartManualOpen(false);
+    setCartOpen(false);
     await pickItemByCode(c, true);
   }
   async function addCartManual() {
@@ -1535,23 +1546,31 @@ async function confirmCartPickup() {
     const name1 = String((it as any)?.name ?? "").trim();
     const um1 = String((it as any)?.um ?? "").trim();
 
-    if (name1 || um1) return { name: name1 || "-", um: um1 || "-" };
+    let name = name1 || "-";
+    let um = um1 || "-";
+    if (!name1 && !um1) {
+      const other = wh === "PRM" ? "REALE" : "PRM";
+      const { data: s2, error: e2 } = await supabase
+        .from("excel_live")
+        .select("row_json")
+        .eq("code", code)
+        .eq("warehouse", other)
+        .maybeSingle();
+      if (e2) console.error("meta excel_live error:", e2);
+      const ex = (((s2 as any)?.row_json ?? {}) as Record<string, any>) || {};
+      name = String(ex["Descrizione Materiale"] ?? ex["Descrizione"] ?? "").trim() || "-";
+      um = String(ex["Unità di Misura"] ?? ex["UM"] ?? "").trim() || "-";
+    }
 
-    const other = wh === "PRM" ? "REALE" : "PRM";
-    const { data: s2, error: e2 } = await supabase
-      .from("excel_live")
-      .select("row_json")
-      .eq("code", code)
-      .eq("warehouse", other)
-      .maybeSingle();
+    let shelf = "";
+    let place = "";
+    if (wh) {
+      const { data: shelfRow } = await supabase.from("material_shelves").select("shelf,place").eq("code", code).eq("warehouse", wh).maybeSingle();
+      shelf = (shelfRow as any)?.shelf ?? "";
+      place = ((shelfRow as any)?.place ?? "").trim();
+    }
 
-    if (e2) console.error("meta excel_live error:", e2);
-
-    const ex = (((s2 as any)?.row_json ?? {}) as Record<string, any>) || {};
-    const name2 = String(ex["Descrizione Materiale"] ?? ex["Descrizione"] ?? "").trim();
-    const um2 = String(ex["Unità di Misura"] ?? ex["UM"] ?? "").trim();
-
-    return { name: name2 || "-", um: um2 || "-" };
+    return { name, um, shelf: shelf || undefined, place: place || undefined };
   }
 
   async function openCloseModal(m: MovementRow) {
@@ -2430,7 +2449,7 @@ async function confirmCartPickup() {
             alignItems: "center",
             justifyContent: "center",
             padding: 14,
-            zIndex: 999,
+            zIndex: warehouseChoicePopup.forCart ? 1100 : 999,
           }}
         >
           <div
@@ -2958,7 +2977,7 @@ async function confirmCartPickup() {
                   id="mvMaterial"
                   name="mvMaterial"
                   className="input"
-                  value={closingMeta ? `${closingMeta.name}${closingMeta.um ? ` · UM: ${closingMeta.um}` : ""}` : "-"}
+                  value={closingMeta ? `${closingMeta.name}${closingMeta.um ? ` · UM: ${closingMeta.um}` : ""}${(closingMeta.shelf || closingMeta.place) ? ` · Posizione: ${[closingMeta.shelf, closingMeta.place].filter(Boolean).join(" · ")}` : ""}` : "-"}
                   disabled
                 />
               </div>
@@ -3022,6 +3041,7 @@ async function confirmCartPickup() {
                       { label: "Codice", value: closing.code },
                       { label: "Descrizione", value: closingMeta ? closingMeta.name : (nameMap[closing.code] ?? "-") },
                       { label: "Unità di misura", value: closingMeta?.um ?? "-" },
+                      { label: "Scaffale · Luogo", value: (closingMeta?.shelf || closingMeta?.place) ? [closingMeta.shelf, closingMeta.place].filter(Boolean).join(" · ") : "-" },
                       { label: "Magazzino uscita", value: closing.warehouse ?? "-" },
                       { label: "Quantità uscita", value: String(Math.abs(n(closing.qty))) },
                       { label: "Quantità rientrata", value: String(n(closing.returned_qty)) },
@@ -3618,6 +3638,7 @@ async function confirmCartPickup() {
               <th>Codice</th>
               <th>Descrizione</th>
               <th>Mag.</th>
+              <th>Posizione</th>
               <th>Disponibile</th>
               <th>Da prelevare</th>
               <th>Azioni</th>
@@ -3626,7 +3647,7 @@ async function confirmCartPickup() {
           <tbody>
             {cart.length === 0 ? (
               <tr>
-                <td colSpan={6} style={{ padding: 12 }}>
+                <td colSpan={7} style={{ padding: 12 }}>
                   Carrello vuoto.
                 </td>
               </tr>
@@ -3636,6 +3657,7 @@ async function confirmCartPickup() {
                   <td style={{ fontWeight: 900 }}>{r.code}</td>
                   <td>{r.name}</td>
                   <td>{r.warehouse}</td>
+                  <td style={{ fontSize: 12, color: "#64748b" }}>{(r.shelf || r.place) ? [r.shelf, r.place].filter(Boolean).join(" · ") : "—"}</td>
                   <td>{r.qtyAvailable}</td>
                   <td style={{ fontWeight: 900 }}>{r.qtyPick}</td>
                   <td>

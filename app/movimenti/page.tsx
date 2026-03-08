@@ -113,7 +113,7 @@ export default function MovimentiPage() {
   const [scanQty, setScanQty] = useState("1");
 
   const [type, setType] = useState<"IN" | "OUT">("OUT");
-  const [warehouse, setWarehouse] = useState<"PRM" | "REALE">("PRM");
+  const [warehouse, setWarehouse] = useState<"PRM" | "REALE" | "MISTO">("PRM");
   const [qty, setQty] = useState("");
   const [note, setNote] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
@@ -148,6 +148,8 @@ export default function MovimentiPage() {
   const [closingMeta, setClosingMeta] = useState<{ name: string; um: string } | null>(null);
 
   const [returnQty, setReturnQty] = useState<string>("0");
+  const [returnToPrm, setReturnToPrm] = useState<string>("0");
+  const [returnToReale, setReturnToReale] = useState<string>("0");
   const [returnNote, setReturnNote] = useState<string>("");
   const [referents, setReferents] = useState<ReferentRow[]>([]);
   const [selReferentId, setSelReferentId] = useState<string>("");
@@ -156,6 +158,25 @@ export default function MovimentiPage() {
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deletingBulk, setDeletingBulk] = useState(false);
+
+  const [warehouseChoicePopup, setWarehouseChoicePopup] = useState<{
+    mode: "BOTH" | "PRM_ONLY" | "REALE_ONLY" | "NONE";
+    code: string;
+    name: string;
+    um: string | null;
+    prmFree: number;
+    realeFree: number;
+    prmShelf: string;
+    realeShelf: string;
+    prmPlace?: string;
+    realePlace?: string;
+  } | null>(null);
+
+  const [shelfInfoPopup, setShelfInfoPopup] = useState<{
+    code: string;
+    name: string;
+    items: { warehouse: "PRM" | "REALE"; shelf: string; place?: string | null }[];
+  } | null>(null);
 
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyCode, setHistoryCode] = useState<string | null>(null);
@@ -260,9 +281,14 @@ async function handleScannedCode(codeRaw: string) {
   const code = String(codeRaw ?? "").trim();
   if (!code) return;
 
-  const info = await loadMaterialForScan(code, warehouse);
+  let info: QuickMaterialInfo | null = null;
+  if (warehouse === "MISTO") {
+    info = await loadMaterialForScan(code, "PRM") ?? await loadMaterialForScan(code, "REALE");
+  } else {
+    info = await loadMaterialForScan(code, warehouse);
+  }
   if (!info) {
-    setMsg(`Materiale ${code} non trovato in ${warehouse}.`);
+    setMsg(`Materiale ${code} non trovato${warehouse === "MISTO" ? " in PRM né REALE" : ` in ${warehouse}`}.`);
     return;
   }
 
@@ -556,9 +582,71 @@ async function handleScannedCode(codeRaw: string) {
   }
 
   async function pickItem(it: DbItem) {
+    if (type === "OUT") {
+      try {
+        const { data: prmLive } = await supabase.from("excel_live").select("qty_free,row_json").eq("code", it.code).eq("warehouse", "PRM").maybeSingle();
+        const { data: realeLive } = await supabase.from("excel_live").select("qty_free,row_json").eq("code", it.code).eq("warehouse", "REALE").maybeSingle();
+        const { data: prmOrig } = await supabase.from("excel_original").select("qty_free,row_json").eq("code", it.code).eq("warehouse", "PRM").maybeSingle();
+        const { data: realeOrig } = await supabase.from("excel_original").select("qty_free,row_json").eq("code", it.code).eq("warehouse", "REALE").maybeSingle();
+        const prmRow = prmLive ?? prmOrig;
+        const realeRow = realeLive ?? realeOrig;
+        const prmFree = prmRow ? (Number.isFinite(Number(prmRow.qty_free)) ? n(prmRow.qty_free) : n((prmRow.row_json as any)?.["Qnt. a Mag. libero"] ?? 0)) : 0;
+        const realeFree = realeRow ? (Number.isFinite(Number(realeRow.qty_free)) ? n(realeRow.qty_free) : n((realeRow.row_json as any)?.["Qnt. a Mag. libero"] ?? 0)) : 0;
+        const { data: shelfRows } = await supabase.from("material_shelves").select("warehouse,shelf,place").eq("code", it.code);
+        const prmShelfRow = (shelfRows ?? []).find((r: any) => r.warehouse === "PRM");
+        const realeShelfRow = (shelfRows ?? []).find((r: any) => r.warehouse === "REALE");
+        const prmShelf = prmShelfRow?.shelf ?? "";
+        const realeShelf = realeShelfRow?.shelf ?? "";
+        const prmPlace = (prmShelfRow?.place ?? "").trim() || undefined;
+        const realePlace = (realeShelfRow?.place ?? "").trim() || undefined;
+
+        const hasPrm = prmFree > 0;
+        const hasReale = realeFree > 0;
+
+        if (!hasPrm && !hasReale) {
+          setWarehouseChoicePopup({ mode: "NONE", code: it.code, name: it.name, um: it.um ?? null, prmFree, realeFree, prmShelf, realeShelf, prmPlace, realePlace });
+          setSearch(`${it.code} — ${it.name}`);
+          setOpen(false);
+          setMsg(null);
+          return;
+        }
+        if (hasPrm && !hasReale) {
+          setWarehouseChoicePopup({ mode: "PRM_ONLY", code: it.code, name: it.name, um: it.um ?? null, prmFree, realeFree, prmShelf, realeShelf, prmPlace, realePlace });
+          setSearch(`${it.code} — ${it.name}`);
+          setOpen(false);
+          setMsg(null);
+          return;
+        }
+        if (!hasPrm && hasReale) {
+          setWarehouseChoicePopup({ mode: "REALE_ONLY", code: it.code, name: it.name, um: it.um ?? null, prmFree, realeFree, prmShelf, realeShelf, prmPlace, realePlace });
+          setSearch(`${it.code} — ${it.name}`);
+          setOpen(false);
+          setMsg(null);
+          return;
+        }
+        if (hasPrm && hasReale) {
+          setWarehouseChoicePopup({ mode: "BOTH", code: it.code, name: it.name, um: it.um ?? null, prmFree, realeFree, prmShelf, realeShelf, prmPlace, realePlace });
+          setSearch(`${it.code} — ${it.name}`);
+          setOpen(false);
+          setMsg(null);
+          return;
+        }
+      } catch (e) {
+        console.error("warehouse choice check:", e);
+      }
+    }
     setPicked(it);
     setSearch(`${it.code} — ${it.name}`);
     setOpen(false);
+    setMsg(null);
+    setTimeout(() => qtyRef.current?.focus(), 50);
+  }
+
+  function confirmWarehouseChoice(wh: "PRM" | "REALE" | "MISTO") {
+    if (!warehouseChoicePopup) return;
+    setWarehouse(wh);
+    setPicked({ code: warehouseChoicePopup.code, name: warehouseChoicePopup.name, um: warehouseChoicePopup.um });
+    setWarehouseChoicePopup(null);
     setMsg(null);
     setTimeout(() => qtyRef.current?.focus(), 50);
   }
@@ -783,6 +871,8 @@ async function confirmCartPickup() {
     setOpen(false);
     setMsg(null);
     setActiveIndex(0);
+    setWarehouseChoicePopup(null);
+    setShelfInfoPopup(null);
   }
 
   async function getOrCreateExcelLiveRow(code: string, wh: "PRM" | "REALE") {
@@ -865,9 +955,91 @@ async function confirmCartPickup() {
       return setMsg("Quantità non valida.");
     }
 
+    if (type === "OUT" && warehouse === "MISTO") {
+      try {
+        const livePRM = await getOrCreateExcelLiveRow(picked.code, "PRM");
+        const liveREALE = await getOrCreateExcelLiveRow(picked.code, "REALE");
+        const prmFree = livePRM ? (Number.isFinite(Number(livePRM.qty_free)) ? n(livePRM.qty_free) : n((livePRM.row_json as any)?.["Qnt. a Mag. libero"] ?? 0)) : 0;
+        const realeFree = liveREALE ? (Number.isFinite(Number(liveREALE.qty_free)) ? n(liveREALE.qty_free) : n((liveREALE.row_json as any)?.["Qnt. a Mag. libero"] ?? 0)) : 0;
+        const totalAvailable = prmFree + realeFree;
+        if (totalAvailable < qn) {
+          return setMsg(`Quantità insufficiente. Disponibile: PRM ${prmFree} + REALE ${realeFree} = ${totalAvailable}, richiesta: ${qn}.`);
+        }
+        const fromPRM = Math.min(prmFree, qn);
+        const fromREALE = qn - fromPRM;
+
+        const { data: prof } = await supabase.from("profiles").select("first_name,last_name").eq("id", userId).maybeSingle();
+        const fullName = `${String((prof as any)?.first_name ?? "").trim()} ${String((prof as any)?.last_name ?? "").trim()}`.trim() || null;
+
+        if (fromPRM > 0) {
+          const payloadPRM: Partial<MovementRow> = {
+            type: "OUT",
+            code: picked.code,
+            qty: fromPRM,
+            note: note.trim(),
+            created_by: userId,
+            created_by_name: fullName,
+            warehouse: "PRM",
+            status: "OPEN",
+            returned_qty: 0,
+            return_note: null,
+            closed_at: null,
+            closed_by: null,
+            referent_id: null,
+            referee_email: null,
+          };
+          const { error: e1 } = await supabase.from("movements").insert(payloadPRM as any);
+          if (e1) return setMsg("Errore salvataggio movimento PRM: " + e1.message);
+          await writeAuditLog({ action: "MOVEMENT_CREATED", entity_type: "movement", code: picked.code, warehouse: "PRM", details_json: { type: "OUT", qty: fromPRM, note: note.trim(), status: "OPEN" } });
+          await applyDeltaToExcelLive(picked.code, "PRM", -fromPRM);
+        }
+        if (fromREALE > 0) {
+          const payloadREALE: Partial<MovementRow> = {
+            type: "OUT",
+            code: picked.code,
+            qty: fromREALE,
+            note: note.trim(),
+            created_by: userId,
+            created_by_name: fullName,
+            warehouse: "REALE",
+            status: "OPEN",
+            returned_qty: 0,
+            return_note: null,
+            closed_at: null,
+            closed_by: null,
+            referent_id: null,
+            referee_email: null,
+          };
+          const { error: e2 } = await supabase.from("movements").insert(payloadREALE as any);
+          if (e2) return setMsg("Errore salvataggio movimento REALE: " + e2.message);
+          await writeAuditLog({ action: "MOVEMENT_CREATED", entity_type: "movement", code: picked.code, warehouse: "REALE", details_json: { type: "OUT", qty: fromREALE, note: note.trim(), status: "OPEN" } });
+          await applyDeltaToExcelLive(picked.code, "REALE", -fromREALE);
+        }
+
+        setQty("");
+        setNote("");
+        setMsg(`Prelievo misto salvato ✅ (PRM: ${fromPRM}, REALE: ${fromREALE})`);
+        const shelfItems: { warehouse: "PRM" | "REALE"; shelf: string; place?: string | null }[] = [];
+        if (fromPRM > 0) {
+          const { data: prmRow } = await supabase.from("material_shelves").select("shelf,place").eq("code", picked.code).eq("warehouse", "PRM").maybeSingle();
+          if (prmRow?.shelf) shelfItems.push({ warehouse: "PRM", shelf: (prmRow as any).shelf, place: (prmRow as any).place });
+        }
+        if (fromREALE > 0) {
+          const { data: realeRow } = await supabase.from("material_shelves").select("shelf,place").eq("code", picked.code).eq("warehouse", "REALE").maybeSingle();
+          if (realeRow?.shelf) shelfItems.push({ warehouse: "REALE", shelf: (realeRow as any).shelf, place: (realeRow as any).place });
+        }
+        if (shelfItems.length > 0) setShelfInfoPopup({ code: picked.code, name: picked.name ?? "", items: shelfItems });
+        await loadHistory();
+        setTimeout(() => qtyRef.current?.focus(), 80);
+        return;
+      } catch (e: any) {
+        return setMsg(e?.message ?? "Errore prelievo misto.");
+      }
+    }
+
     if (type === "OUT") {
       try {
-        const live = await getOrCreateExcelLiveRow(picked.code, warehouse);
+        const live = await getOrCreateExcelLiveRow(picked.code, warehouse as "PRM" | "REALE");
         if (!live) {
           return setMsg(`Materiale ${picked.code} non trovato in ${warehouse}. Importa l'Excel prima.`);
         }
@@ -889,6 +1061,7 @@ async function confirmCartPickup() {
     const fullName =
       `${String((prof as any)?.first_name ?? "").trim()} ${String((prof as any)?.last_name ?? "").trim()}`.trim() || null;
 
+    const wh = warehouse === "MISTO" ? "PRM" : warehouse;
     const payload: Partial<MovementRow> = {
       type,
       code: picked.code,
@@ -896,7 +1069,7 @@ async function confirmCartPickup() {
       note: note.trim(),
       created_by: userId,
       created_by_name: fullName,
-      warehouse,
+      warehouse: wh,
       status: type === "OUT" ? "OPEN" : "CLOSED",
       returned_qty: 0,
       return_note: null,
@@ -913,7 +1086,7 @@ async function confirmCartPickup() {
       action: "MOVEMENT_CREATED",
       entity_type: "movement",
       code: picked.code,
-      warehouse,
+      warehouse: wh,
       details_json: {
         type,
         qty: qn,
@@ -924,7 +1097,7 @@ async function confirmCartPickup() {
 
     try {
       const delta = type === "IN" ? qn : -qn;
-      await applyDeltaToExcelLive(picked.code, warehouse, delta);
+      await applyDeltaToExcelLive(picked.code, wh, delta);
     } catch (e: any) {
       console.error("excel_live update error:", e);
       setMsg(
@@ -941,6 +1114,17 @@ async function confirmCartPickup() {
     setQty("");
     setNote("");
     setMsg("Movimento salvato ✅");
+
+    if (type === "OUT") {
+      const { data: shelfRow } = await supabase.from("material_shelves").select("warehouse,shelf,place").eq("code", picked.code).eq("warehouse", wh).maybeSingle();
+      if (shelfRow?.shelf) {
+        setShelfInfoPopup({
+          code: picked.code,
+          name: picked.name ?? "",
+          items: [{ warehouse: wh, shelf: (shelfRow as any).shelf, place: (shelfRow as any).place }],
+        });
+      }
+    }
 
     await loadHistory();
     setTimeout(() => qtyRef.current?.focus(), 80);
@@ -979,7 +1163,7 @@ async function confirmCartPickup() {
 
     const { data: mov, error: readError } = await supabase
       .from("movements")
-      .select("id,code,warehouse,type,qty")
+      .select("id,code,warehouse,type,qty,returned_qty")
       .eq("id", id)
       .single();
 
@@ -997,45 +1181,28 @@ async function confirmCartPickup() {
       details_json: {
         type: mov.type,
         qty: mov.qty,
+        returned_qty: mov.returned_qty,
       },
     });
 
     const code = mov.code;
     const warehouse = mov.warehouse;
-    const qty = Math.abs(Number(mov.qty ?? 0));
-
-    const delta = mov.type === "IN" ? -qty : +qty;
-
-    const { data: stock, error: stockError } = await supabase
-      .from("excel_live")
-      .select("qty_free,row_json")
-      .eq("code", code)
-      .eq("warehouse", warehouse)
-      .single();
-
-    if (stockError || !stock) {
-      console.error("Errore lettura giacenza:", stockError);
-      return alert("Impossibile leggere la giacenza.");
+    if (!warehouse) {
+      return alert("Movimento senza magazzino, impossibile ripristinare la giacenza.");
     }
+    const qty = Math.abs(Number(mov.qty ?? 0));
+    const returnedQty = n(mov.returned_qty);
 
-    const currentQty = Number(stock.qty_free ?? 0);
-    const newQty = currentQty + delta;
+    const delta =
+      mov.type === "IN"
+        ? -qty
+        : +(qty - returnedQty);
 
-    const newJson = { ...(stock.row_json ?? {}) };
-    newJson["Qnt. a Mag. libero"] = newQty;
-
-    const { error: updateError } = await supabase
-      .from("excel_live")
-      .update({
-        qty_free: newQty,
-        row_json: newJson,
-      })
-      .eq("code", code)
-      .eq("warehouse", warehouse);
-
-    if (updateError) {
-      console.error("Errore aggiornamento giacenza:", updateError);
-      return alert("Errore aggiornamento giacenza.");
+    try {
+      await applyDeltaToExcelLive(code, warehouse as "PRM" | "REALE", delta);
+    } catch (e: any) {
+      console.error("Errore ripristino giacenza:", e);
+      return alert("Errore ripristino giacenza: " + (e?.message ?? "sconosciuto"));
     }
 
     const { error: deleteError } = await supabase.from("movements").delete().eq("id", id);
@@ -1121,7 +1288,11 @@ async function confirmCartPickup() {
     setClosing(m);
     setCloseOpen(true);
 
-    setReturnQty(String(n(m.returned_qty)));
+    const r = n(m.returned_qty);
+    setReturnQty(String(r));
+    const wh = m.warehouse ?? "PRM";
+    setReturnToPrm(wh === "PRM" ? String(r) : "0");
+    setReturnToReale(wh === "REALE" ? String(r) : "0");
     setReturnNote(m.return_note ?? "");
     setSelReferentId(m.referent_id ?? "");
     setEditRectify(false);
@@ -1155,6 +1326,13 @@ async function confirmCartPickup() {
       return;
     }
 
+    const rPrm = toNumber(returnToPrm);
+    const rReale = toNumber(returnToReale);
+    if (r > 0 && (rPrm < 0 || rReale < 0 || Math.abs(rPrm + rReale - r) > 0.001)) {
+      setMsg("Rientro in PRM + Rientro in REALE deve essere uguale alla quantità rientro.");
+      return;
+    }
+
     const ref = referents.find((x) => x.id === selReferentId) ?? null;
     if (!ref?.email) {
       setMsg("Seleziona un referente valido prima di confermare la chiusura.");
@@ -1184,8 +1362,8 @@ async function confirmCartPickup() {
 
     try {
       if (r > 0) {
-        const wh = (closing.warehouse ?? null) as "PRM" | "REALE" | null;
-        if (wh) await applyDeltaToExcelLive(closing.code, wh, r);
+        if (rPrm > 0) await applyDeltaToExcelLive(closing.code, "PRM", rPrm);
+        if (rReale > 0) await applyDeltaToExcelLive(closing.code, "REALE", rReale);
       }
     } catch (e: any) {
       console.error("excel_live return update error:", e);
@@ -1229,6 +1407,8 @@ async function confirmCartPickup() {
         type: closing.type,
         out_qty: outQty,
         returned_qty: r,
+        return_to_prm: rPrm,
+        return_to_reale: rReale,
         net_qty: Math.max(0, outQty - r),
         return_note: (returnNote ?? "").trim() || null,
         referent_id: ref?.id ?? null,
@@ -1484,7 +1664,14 @@ async function confirmCartPickup() {
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
         <div className="mobileFlexCol" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           {isAdmin && (
-            <button className={`btn ${type === "IN" ? "btnPrimary" : ""}`} onClick={() => setType("IN")} type="button">
+            <button
+              className={`btn ${type === "IN" ? "btnPrimary" : ""}`}
+              onClick={() => {
+                setType("IN");
+                if (warehouse === "MISTO") setWarehouse("PRM");
+              }}
+              type="button"
+            >
               Entrata
             </button>
           )}
@@ -1493,22 +1680,24 @@ async function confirmCartPickup() {
             Uscita
           </button>
 
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <label className="label" htmlFor="whMove" style={{ marginBottom: 0 }}>
-              Magazzino
-            </label>
-            <select
-              id="whMove"
-              name="whMove"
-              className="input mobileInputFull"
-              value={warehouse}
-              onChange={(e) => setWarehouse(e.target.value as any)}
-              style={{ width: 140 }}
-            >
-              <option value="PRM">PRM</option>
-              <option value="REALE">REALE</option>
-            </select>
-          </div>
+          {type === "IN" && (
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <label className="label" htmlFor="whMove" style={{ marginBottom: 0 }}>
+                Magazzino
+              </label>
+              <select
+                id="whMove"
+                name="whMove"
+                className="input mobileInputFull"
+                value={warehouse === "MISTO" ? "PRM" : warehouse}
+                onChange={(e) => setWarehouse(e.target.value as "PRM" | "REALE")}
+                style={{ width: 140 }}
+              >
+                <option value="PRM">PRM</option>
+                <option value="REALE">REALE</option>
+              </select>
+            </div>
+          )}
 
           <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
             <button className="btn" type="button" onClick={() => (scanning ? stopScan() : startScan())} aria-label={scanning ? "Ferma scansione barcode" : "Avvia scansione barcode"}>
@@ -1680,6 +1869,211 @@ async function confirmCartPickup() {
 
         {msg && <div style={{ marginTop: 10, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
       </div>
+
+      {warehouseChoicePopup && (
+        <div
+          onMouseDown={() => {
+            setWarehouseChoicePopup(null);
+            setPicked(null);
+            setSearch("");
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 14,
+            zIndex: 999,
+          }}
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              width: "min(420px, 100%)",
+              background: "white",
+              borderRadius: 14,
+              border: "1px solid rgba(15,23,42,0.16)",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
+              padding: 12,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: 16 }}>
+                  {warehouseChoicePopup.code} · {warehouseChoicePopup.name}
+                </div>
+                <div
+                  style={{
+                    fontSize: 13,
+                    marginTop: 4,
+                    color: warehouseChoicePopup.mode === "NONE" ? "#dc2626" : "#64748b",
+                    fontWeight: warehouseChoicePopup.mode === "NONE" ? 700 : 400,
+                  }}
+                >
+                  {warehouseChoicePopup.mode === "NONE" &&
+                    "⚠️ Nessuna quantità disponibile in PRM né REALE."}
+                  {warehouseChoicePopup.mode === "PRM_ONLY" &&
+                    "Materiale presente solo in magazzino PRM."}
+                  {warehouseChoicePopup.mode === "REALE_ONLY" &&
+                    "Materiale presente solo in magazzino REALE."}
+                  {warehouseChoicePopup.mode === "BOTH" &&
+                    "Materiale presente in entrambi i magazzini. Scegli da dove prelevare:"}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setWarehouseChoicePopup(null);
+                  setPicked(null);
+                  setSearch("");
+                }}
+              >
+                Chiudi
+              </button>
+            </div>
+
+            <div style={{ display: "flex", gap: 12, marginTop: 16, flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 120px", padding: 12, background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0", opacity: warehouseChoicePopup.prmFree > 0 ? 1 : 0.7 }}>
+                <div style={{ fontSize: 12, color: "#64748b" }}>PRM</div>
+                <div style={{ fontWeight: 900, fontSize: 18 }}>{warehouseChoicePopup.prmFree}</div>
+                <div style={{ fontSize: 12, color: "#64748b" }}>disponibili</div>
+                {(warehouseChoicePopup.prmShelf || warehouseChoicePopup.prmPlace) && (
+                  <div style={{ fontSize: 12, marginTop: 4, fontWeight: 700, color: "#0284c7" }}>
+                    {[warehouseChoicePopup.prmShelf && `Scaffale: ${warehouseChoicePopup.prmShelf}`, warehouseChoicePopup.prmPlace && `Luogo: ${warehouseChoicePopup.prmPlace}`].filter(Boolean).join(" · ")}
+                  </div>
+                )}
+              </div>
+              <div style={{ flex: "1 1 120px", padding: 12, background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0", opacity: warehouseChoicePopup.realeFree > 0 ? 1 : 0.7 }}>
+                <div style={{ fontSize: 12, color: "#64748b" }}>REALE</div>
+                <div style={{ fontWeight: 900, fontSize: 18 }}>{warehouseChoicePopup.realeFree}</div>
+                <div style={{ fontSize: 12, color: "#64748b" }}>disponibili</div>
+                {(warehouseChoicePopup.realeShelf || warehouseChoicePopup.realePlace) && (
+                  <div style={{ fontSize: 12, marginTop: 4, fontWeight: 700, color: "#7c3aed" }}>
+                    {[warehouseChoicePopup.realeShelf && `Scaffale: ${warehouseChoicePopup.realeShelf}`, warehouseChoicePopup.realePlace && `Luogo: ${warehouseChoicePopup.realePlace}`].filter(Boolean).join(" · ")}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16 }}>
+              {warehouseChoicePopup.mode === "NONE" && (
+                <div style={{ fontSize: 13, color: "#64748b" }}>
+                  Nessuna azione disponibile. Chiudi e verifica che il materiale sia stato importato.
+                </div>
+              )}
+              {warehouseChoicePopup.mode === "PRM_ONLY" && (
+                <button
+                  type="button"
+                  className="btn btnPrimary"
+                  onClick={() => confirmWarehouseChoice("PRM")}
+                  style={{ width: "100%" }}
+                >
+                  Preleva da PRM ({warehouseChoicePopup.prmFree} disponibili)
+                </button>
+              )}
+              {warehouseChoicePopup.mode === "REALE_ONLY" && (
+                <button
+                  type="button"
+                  className="btn btnPrimary"
+                  onClick={() => confirmWarehouseChoice("REALE")}
+                  style={{ width: "100%" }}
+                >
+                  Preleva da REALE ({warehouseChoicePopup.realeFree} disponibili)
+                </button>
+              )}
+              {warehouseChoicePopup.mode === "BOTH" && (
+                <>
+                  <button
+                    type="button"
+                    className="btn btnPrimary"
+                    onClick={() => confirmWarehouseChoice("MISTO")}
+                    style={{ width: "100%" }}
+                  >
+                    Prelievo misto (PRM prima)
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => confirmWarehouseChoice("PRM")}
+                    style={{ width: "100%" }}
+                  >
+                    Solo da PRM ({warehouseChoicePopup.prmFree} disponibili)
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => confirmWarehouseChoice("REALE")}
+                    style={{ width: "100%" }}
+                  >
+                    Solo da REALE ({warehouseChoicePopup.realeFree} disponibili)
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {shelfInfoPopup && (
+        <div
+          onMouseDown={() => setShelfInfoPopup(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 14,
+            zIndex: 999,
+          }}
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              width: "min(400px, 100%)",
+              background: "white",
+              borderRadius: 14,
+              border: "1px solid rgba(15,23,42,0.16)",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
+              padding: 12,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: 16 }}>Posizione materiale</div>
+                <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
+                  <b>{shelfInfoPopup.code}</b> · {shelfInfoPopup.name}
+                </div>
+              </div>
+              <button type="button" className="btn" onClick={() => setShelfInfoPopup(null)}>
+                Chiudi
+              </button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 16 }}>
+              {shelfInfoPopup.items.map((it) => (
+                <div
+                  key={it.warehouse}
+                  style={{
+                    padding: 12,
+                    background: it.warehouse === "PRM" ? "rgba(2,132,199,0.08)" : "rgba(124,58,237,0.08)",
+                    borderRadius: 8,
+                    border: `1px solid ${it.warehouse === "PRM" ? "rgba(2,132,199,0.25)" : "rgba(124,58,237,0.25)"}`,
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Magazzino {it.warehouse}</div>
+                  <div style={{ fontWeight: 900, fontSize: 18 }}>
+                    {[it.shelf && `Scaffale ${it.shelf}`, it.place && `Luogo ${it.place}`].filter(Boolean).join(" · ") || "—"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
@@ -2046,7 +2440,16 @@ async function confirmCartPickup() {
                       name="retQty"
                       className="input"
                       value={returnQty}
-                      onChange={(e) => setReturnQty(e.target.value)}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setReturnQty(v);
+                        const r = toNumber(v);
+                        const wh = closing?.warehouse ?? "PRM";
+                        if (Number.isFinite(r) && r >= 0) {
+                          setReturnToPrm(wh === "PRM" ? v : "0");
+                          setReturnToReale(wh === "REALE" ? v : "0");
+                        }
+                      }}
                       inputMode="decimal"
                       disabled={!editRectify}
                       style={!editRectify ? { background: "#f8fafc", color: "#64748b" } : undefined}
@@ -2069,6 +2472,62 @@ async function confirmCartPickup() {
                       placeholder="Esempio: rientrati 2 pezzi"
                     />
                   </div>
+
+                  {toNumber(returnQty) > 0 && (
+                    <>
+                      <div style={{ gridColumn: "span 12", fontSize: 13, color: "#64748b", marginTop: 4 }}>
+                        Ripartisci il rientro tra i magazzini (la somma deve essere uguale alla quantità rientro):
+                      </div>
+                      <div style={{ gridColumn: "span 3" }}>
+                        <label className="label" htmlFor="retPrm">
+                          Rientro in PRM
+                        </label>
+                        <input
+                          id="retPrm"
+                          name="retPrm"
+                          className="input"
+                          value={returnToPrm}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setReturnToPrm(v);
+                            const r = toNumber(returnQty);
+                            const p = toNumber(v);
+                            if (Number.isFinite(r) && Number.isFinite(p) && p >= 0 && p <= r) {
+                              setReturnToReale(String(Math.max(0, r - p)));
+                            }
+                          }}
+                          inputMode="decimal"
+                          disabled={!editRectify}
+                          style={!editRectify ? { background: "#f8fafc", color: "#64748b" } : undefined}
+                          placeholder="0"
+                        />
+                      </div>
+                      <div style={{ gridColumn: "span 3" }}>
+                        <label className="label" htmlFor="retReale">
+                          Rientro in REALE
+                        </label>
+                        <input
+                          id="retReale"
+                          name="retReale"
+                          className="input"
+                          value={returnToReale}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setReturnToReale(v);
+                            const r = toNumber(returnQty);
+                            const re = toNumber(v);
+                            if (Number.isFinite(r) && Number.isFinite(re) && re >= 0 && re <= r) {
+                              setReturnToPrm(String(Math.max(0, r - re)));
+                            }
+                          }}
+                          inputMode="decimal"
+                          disabled={!editRectify}
+                          style={!editRectify ? { background: "#f8fafc", color: "#64748b" } : undefined}
+                          placeholder="0"
+                        />
+                      </div>
+                    </>
+                  )}
 
                   <div style={{ gridColumn: "span 6" }}>
                     <label className="label" htmlFor="refSel">

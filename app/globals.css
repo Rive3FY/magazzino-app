@@ -1752,3 +1752,12 @@ html, body {
     transform: translateZ(0) translateX(-20px);
   }
 }
+
+/* NFC scan pulse indicator */
+@keyframes nfcPulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+.nfc-pulse {
+  animation: nfcPulse 1s ease-in-out infinite;
+}

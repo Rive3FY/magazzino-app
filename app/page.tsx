@@ -21,10 +21,9 @@ type DbItem = {
   um: string | null;
 };
 
-type DbStock = {
-  code: string;
-  warehouse: "PRM" | "REALE";
-  excel: any;
+type ShelfInfo = {
+  PRM: string;
+  REALE: string;
 };
 
 function isSameDay(d: Date, ref: Date) {
@@ -78,6 +77,7 @@ export default function Home() {
 
   const [picked, setPicked] = useState<DbItem | null>(null);
   const [stock, setStock] = useState<StockBoth | null>(null);
+  const [shelves, setShelves] = useState<ShelfInfo | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -112,54 +112,46 @@ export default function Home() {
   }
 
   async function computeStockBoth(code: string) {
-    // base stock (item_stocks)
-    const { data: base, error: eBase } = await supabase
-      .from("item_stocks")
-.select("code,warehouse,excel")
+    const { data: liveRows, error: eLive } = await supabase
+      .from("excel_live")
+      .select("warehouse,qty_free,row_json")
       .eq("code", code);
 
-    if (eBase) {
-      console.error("item_stocks error:", eBase);
+    if (eLive) {
+      console.error("excel_live error:", eLive);
       setStock(null);
+      setShelves(null);
       return;
     }
 
-    let basePRM = 0;
-let baseREALE = 0;
+    let prmQty = 0;
+    let realeQty = 0;
+    for (const r of liveRows ?? []) {
+      const wh = (r as any).warehouse;
+      const q = Number.isFinite(Number((r as any).qty_free))
+        ? n((r as any).qty_free)
+        : n((r as any).row_json?.["Qnt. a Mag. libero"]);
+      if (wh === "PRM") prmQty = q;
+      if (wh === "REALE") realeQty = q;
+    }
 
-for (const r of (base ?? []) as DbStock[]) {
-  const q = Number(r.excel?.["Qnt. a Mag. libero"] ?? 0);
+    setStock({ PRM: prmQty, REALE: realeQty });
 
-  if (r.warehouse === "PRM") basePRM = q;
-  if (r.warehouse === "REALE") baseREALE = q;
-}
-
-    // delta movements
-    const { data: movs, error: eMovs } = await supabase
-      .from("movements")
-      .select("warehouse,type,qty")
+    const { data: shelfRows } = await supabase
+      .from("material_shelves")
+      .select("warehouse,shelf,place")
       .eq("code", code);
 
-    if (eMovs) {
-      console.error("movements stock error:", eMovs);
-      setStock({ PRM: basePRM, REALE: baseREALE });
-      return;
+    const shelfMap: ShelfInfo = { PRM: "", REALE: "" };
+    for (const s of shelfRows ?? []) {
+      const wh = (s as any).warehouse;
+      const sh = (s as any).shelf ?? "";
+      const pl = ((s as any).place ?? "").trim();
+      const display = [sh, pl].filter(Boolean).join(" · ");
+      if (wh === "PRM") shelfMap.PRM = display;
+      if (wh === "REALE") shelfMap.REALE = display;
     }
-
-    let dPRM = 0;
-    let dREALE = 0;
-
-    for (const m of movs ?? []) {
-      const wh = (m as any).warehouse as "PRM" | "REALE" | null;
-      const t = (m as any).type as "IN" | "OUT";
-      const q = n((m as any).qty);
-      const signed = t === "IN" ? q : -q;
-
-      if (wh === "PRM") dPRM += signed;
-      if (wh === "REALE") dREALE += signed;
-    }
-
-    setStock({ PRM: basePRM + dPRM, REALE: baseREALE + dREALE });
+    setShelves(shelfMap);
   }
 
   async function pickItem(it: DbItem) {
@@ -260,6 +252,7 @@ for (const r of (base ?? []) as DbStock[]) {
     setSuggestions([]);
     setPicked(null);
     setStock(null);
+    setShelves(null);
     setOpen(false);
     setMsg(null);
     setActiveIndex(0);
@@ -370,7 +363,7 @@ for (const r of (base ?? []) as DbStock[]) {
           <div>
             <div style={{ fontWeight: 900, fontSize: 16 }}> Controllo veloce materiale</div>
             <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
-              Cerca per codice/descrizione o scansiona. Vedi subito PRM / REALE e dove si trova.
+              Cerca per codice/descrizione o scansiona. Vedi giacenze PRM/REALE, dove si trova e lo scaffale.
             </div>
           </div>
 
@@ -399,11 +392,12 @@ for (const r of (base ?? []) as DbStock[]) {
             value={search}
             onChange={(e) => {
               const v = e.target.value;
-              setSearch(v);
-              setOpen(true);
-              setPicked(null);
-              setStock(null);
-              setMsg(null);
+      setSearch(v);
+      setOpen(true);
+      setPicked(null);
+      setStock(null);
+      setShelves(null);
+      setMsg(null);
               if (!v.trim()) setSuggestions([]);
             }}
             onFocus={() => setOpen(true)}
@@ -509,18 +503,28 @@ for (const r of (base ?? []) as DbStock[]) {
                 <div style={{ fontSize: 18, fontWeight: 900, marginTop: 6 }}>{picked.code}</div>
                 <div style={{ opacity: 0.9, marginTop: 6 }}>{picked.name}</div>
                 <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>
-                  UM: <b>{picked.um ?? "-"}</b> · Dove: <b>{where}</b>
+                  UM: <b>{picked.um ?? "-"}</b> · Presente in: <b>{where}</b>
                 </div>
+                {shelves && (shelves.PRM || shelves.REALE) && (
+                  <div style={{ opacity: 0.9, fontSize: 12, marginTop: 6 }}>
+                    Scaffale · Luogo:{" "}
+                    {[shelves.PRM && `PRM ${shelves.PRM}`, shelves.REALE && `REALE ${shelves.REALE}`]
+                      .filter(Boolean)
+                      .join(" · ") || "—"}
+                  </div>
+                )}
               </div>
 
               <div className="glass">
                 <div style={{ opacity: 0.85, fontSize: 12 }}>PRM</div>
                 <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>{stock.PRM}</div>
+                {shelves?.PRM && <div style={{ fontSize: 11, opacity: 0.8, marginTop: 4 }}>Scaffale · Luogo: {shelves.PRM}</div>}
               </div>
 
               <div className="glass">
                 <div style={{ opacity: 0.85, fontSize: 12 }}>REALE</div>
                 <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>{stock.REALE}</div>
+                {shelves?.REALE && <div style={{ fontSize: 11, opacity: 0.8, marginTop: 4 }}>Scaffale · Luogo: {shelves.REALE}</div>}
               </div>
             </div>
 

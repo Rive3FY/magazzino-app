@@ -6,9 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
-    "pwa:icons": "node scripts/generate-pwa-icons.js",
-    "playstore:init": "echo 'Esegui: npx @bubblewrap/cli init --manifest=https://TUO-DOMINIO/manifest.json'"
+    "lint": "eslint"
   },
   "dependencies": {
     "@supabase/ssr": "^0.8.0",

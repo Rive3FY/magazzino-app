@@ -82,6 +82,7 @@ export default function SideNav() {
           <Link className={cls("/")} href="/" onClick={handleLinkClick}>Dashboard</Link>
           <Link className={cls("/movimenti")} href="/movimenti" onClick={handleLinkClick}>Movimenti</Link>
           <Link className={cls("/giacenze")} href="/giacenze" onClick={handleLinkClick}>Giacenze</Link>
+          {isAdmin && <Link className={cls("/scaffali")} href="/scaffali" onClick={handleLinkClick}>Scaffali</Link>}
           {isAdmin && <Link className={cls("/import")} href="/import" onClick={handleLinkClick}>Import & Export</Link>}
           {isAdmin && <Link className={cls("/admin")} href="/admin" onClick={handleLinkClick}>Admin</Link>}
           {usersCount !== null && (

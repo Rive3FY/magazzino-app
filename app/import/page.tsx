@@ -28,6 +28,8 @@ export default function ImportPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loadedCounts, setLoadedCounts] = useState<LoadedCounts>(null);
+  const [prmUnlocked, setPrmUnlocked] = useState(false);
+  const [realeUnlocked, setRealeUnlocked] = useState(false);
 
   const { isAdmin, loading: checking } = useIsAdmin();
 
@@ -63,8 +65,8 @@ export default function ImportPage() {
 
       for (const r of rows) {
         const code = String(r["Materiale"] ?? "").trim();
-        const name = String(r["Descrizione Materiale"] ?? "").trim();
-        const um = String(r["Unità di Misura"] ?? "").trim();
+        const name = String(r["Descrizione Materiale"] ?? r["Descrizione"] ?? "").trim();
+        const um = String(r["Unità di Misura"] ?? r["UM"] ?? "").trim();
 
         if (!code || !name) continue;
 
@@ -110,14 +112,14 @@ export default function ImportPage() {
 
       for (const r of rows) {
         const code = String(r["Materiale"] ?? "").trim();
-        const name = String(r["Descrizione Materiale"] ?? "").trim();
+        const name = String(r["Descrizione Materiale"] ?? r["Descrizione"] ?? "").trim();
 
         if (!code || !name) continue;
 
         const key = `${code}_${warehouseKind}`;
 
-        // Quantità: la colonna corretta è questa
-        const qtyFree = toNumberLoose(r["Qnt. a Mag. libero"]);
+        // Quantità: prova entrambe le varianti (libero/Libero)
+        const qtyFree = toNumberLoose(r["Qnt. a Mag. libero"] ?? r["Qnt. a Mag. Libero"]);
         const qtyBlocked = toNumberLoose(r["Qnt. a Mag. bloccato"]);
         const qtyQuality = toNumberLoose(r["Controllo Qualità Magazzino"]);
 
@@ -208,7 +210,35 @@ export default function ImportPage() {
       </div>
 
       <div className="card" style={{ padding: 12, margin: 12 }}>
-        <div style={{ fontWeight: 900 }}>Import Magazzino PRM</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => setPrmUnlocked((u) => !u)}
+            title={prmUnlocked ? "Blocca: clicca per disabilitare il caricamento" : "Sblocca: clicca per abilitare il caricamento"}
+            style={{
+              flexShrink: 0,
+              padding: 4,
+              border: "none",
+              background: "none",
+              cursor: "pointer",
+              borderRadius: 4,
+            }}
+          >
+            {prmUnlocked ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: "middle", color: "#22c55e" }}>
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0" />
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: "middle", color: "#64748b" }}>
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            )}
+          </button>
+          <div style={{ fontWeight: 900 }}>Import Magazzino PRM</div>
+          {!prmUnlocked && <span style={{ fontSize: 12, color: "#94a3b8" }}>(clicca il lucchetto per sbloccare)</span>}
+        </div>
         {loadedCounts && (
           <div style={{ fontSize: 13, opacity: 0.9, marginTop: 4 }}>
             Caricati: <b>{loadedCounts.PRM}</b> materiali
@@ -217,17 +247,45 @@ export default function ImportPage() {
         <input
           type="file"
           accept=".xlsx,.xls"
-          disabled={busy}
+          disabled={busy || !prmUnlocked}
           onChange={(e) => {
             const f = e.target.files?.[0];
             if (f) importExcel(f, "PRM");
           }}
-          style={{ marginTop: 8 }}
+          style={{ marginTop: 8, opacity: prmUnlocked ? 1 : 0.6 }}
         />
       </div>
 
       <div className="card" style={{ padding: 12, margin: 12 }}>
-        <div style={{ fontWeight: 900 }}>Import Magazzino REALE</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => setRealeUnlocked((u) => !u)}
+            title={realeUnlocked ? "Blocca: clicca per disabilitare il caricamento" : "Sblocca: clicca per abilitare il caricamento"}
+            style={{
+              flexShrink: 0,
+              padding: 4,
+              border: "none",
+              background: "none",
+              cursor: "pointer",
+              borderRadius: 4,
+            }}
+          >
+            {realeUnlocked ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: "middle", color: "#22c55e" }}>
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0" />
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: "middle", color: "#64748b" }}>
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            )}
+          </button>
+          <div style={{ fontWeight: 900 }}>Import Magazzino REALE</div>
+          {!realeUnlocked && <span style={{ fontSize: 12, color: "#94a3b8" }}>(clicca il lucchetto per sbloccare)</span>}
+        </div>
         {loadedCounts && (
           <div style={{ fontSize: 13, opacity: 0.9, marginTop: 4 }}>
             Caricati: <b>{loadedCounts.REALE}</b> materiali
@@ -236,12 +294,12 @@ export default function ImportPage() {
         <input
           type="file"
           accept=".xlsx,.xls"
-          disabled={busy}
+          disabled={busy || !realeUnlocked}
           onChange={(e) => {
             const f = e.target.files?.[0];
             if (f) importExcel(f, "REALE");
           }}
-          style={{ marginTop: 8 }}
+          style={{ marginTop: 8, opacity: realeUnlocked ? 1 : 0.6 }}
         />
       </div>
 

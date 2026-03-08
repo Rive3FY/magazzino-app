@@ -5,9 +5,10 @@ export const dynamic = "force-dynamic";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
+import jsPDF from "jspdf";
 import { createClient } from "../_lib/supabase/client";
 import { EXCEL_COLS } from "../_lib/excel-cols";
-import { n, toNumberLoose, sanitizeId } from "../_lib/utils";
+import { n, toNumberLoose, sanitizeId, fmtDate } from "../_lib/utils";
 import { useAuth } from "../_lib/hooks/useAuth";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import type { WarehouseView, SortDir } from "../_lib/types";
@@ -201,6 +202,122 @@ async function openHistory(code: string) {
   setHistoryRows((data ?? []) as any[]);
   setHistoryLoading(false);
 }
+
+  async function loadImageAsDataUrl(src: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Canvas context non disponibile"));
+          return;
+        }
+        ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.onerror = () => reject(new Error("Impossibile caricare l'immagine del banner"));
+      img.src = src;
+    });
+  }
+
+  async function downloadStoricoPDF() {
+    if (!historyCode || historyRows.length === 0) return;
+    try {
+      const pdf = new jsPDF("p", "mm", "a4");
+      const bannerDataUrl = await loadImageAsDataUrl("/banner_terna.png");
+      const img = new Image();
+      img.src = bannerDataUrl;
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("Impossibile leggere il banner"));
+      });
+      const imgWidth = 120;
+      const imgHeight = (img.height * imgWidth) / img.width;
+      pdf.addImage(bannerDataUrl, "PNG", 0, 6, imgWidth, imgHeight);
+      pdf.setTextColor(20, 20, 20);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(12);
+      pdf.text("Storico materiale", 10, 45);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(10);
+      pdf.text(`Materiale: ${historyCode}`, 10, 52);
+      pdf.setDrawColor(180, 180, 180);
+      pdf.setLineWidth(0.4);
+      pdf.line(10, 56, 200, 56);
+      let y = 64;
+      const drawTableHeader = () => {
+        pdf.setFillColor(242, 242, 242);
+        pdf.rect(10, y - 5, 190, 8, "F");
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(8.5);
+        pdf.setTextColor(30, 30, 30);
+        pdf.text("Data", 12, y);
+        pdf.text("Tipo", 42, y);
+        pdf.text("Qta", 72, y);
+        pdf.text("Mag.", 92, y);
+        pdf.text("Operatore", 112, y);
+        pdf.text("Note", 152, y);
+        y += 8;
+      };
+      const drawFooter = () => {
+        pdf.setDrawColor(210, 210, 210);
+        pdf.line(10, 286, 200, 286);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(8);
+        pdf.setTextColor(100, 100, 100);
+        pdf.text(`Generato da: ${user?.email ?? user?.id ?? "-"}`, 10, 290);
+        pdf.text(`Pagina ${pdf.getNumberOfPages()}`, 180, 290);
+      };
+      drawTableHeader();
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(8);
+      historyRows.forEach((r, index) => {
+        const date = fmtDate(r.created_at);
+        const tipo = r.type === "IN" ? "Entrata" : "Uscita";
+        const qtyVal = r.type === "IN"
+          ? Math.abs(Number(r.qty ?? 0))
+          : Math.max(0, Math.abs(n(r.qty)) - n(r.returned_qty));
+        const qta = `${r.type === "IN" ? "+" : "-"}${qtyVal}`;
+        const mag = String(r.warehouse ?? "");
+        const operatore = String(r.created_by_name ?? r.created_by_email ?? "").slice(0, 22);
+        const note = String(r.note ?? "").slice(0, 26);
+        if (index % 2 === 0) {
+          pdf.setFillColor(250, 250, 250);
+          pdf.rect(10, y - 4, 190, 6, "F");
+        }
+        pdf.setTextColor(35, 35, 35);
+        pdf.text(date, 12, y);
+        pdf.setFont("helvetica", "normal");
+        if (r.type === "IN") pdf.setTextColor(20, 120, 60);
+        else pdf.setTextColor(170, 40, 40);
+        pdf.text(tipo, 42, y);
+        pdf.setTextColor(35, 35, 35);
+        pdf.text(qta, 72, y);
+        pdf.text(mag, 92, y);
+        pdf.text(operatore, 112, y);
+        pdf.text(note, 152, y);
+        y += 6;
+        if (y > 278) {
+          drawFooter();
+          pdf.addPage();
+          y = 20;
+          drawTableHeader();
+          pdf.setFont("helvetica", "normal");
+          pdf.setFontSize(8);
+        }
+      });
+      drawFooter();
+      pdf.save(`storico_${historyCode}.pdf`);
+    } catch (e: any) {
+      console.error("PDF error:", e);
+      setMsg("Errore generazione PDF: " + (e?.message ?? "sconosciuto"));
+    }
+  }
+
   async function load(silent = false) {
   if (silent) {
     setRefreshing(true);
@@ -775,6 +892,42 @@ await writeAuditLog({
               Pagina <b>{page}</b> di <b>{totalPages}</b> · Totale righe: <b>{count}</b>
             </span>
 
+            {/* Selezione diretta pagina */}
+            <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter((p) => {
+                  if (totalPages <= 9) return true;
+                  return p === 1 || p === totalPages || Math.abs(p - page) <= 2;
+                })
+                .reduce<number[]>((acc, p, idx, arr) => {
+                  if (idx > 0 && p - arr[idx - 1] > 1) acc.push(-1); // -1 = ellipsi
+                  acc.push(p);
+                  return acc;
+                }, [])
+                .map((p, idx) =>
+                  p === -1 ? (
+                    <span key={`ellipsis-${idx}`} style={{ padding: "0 4px", opacity: 0.6 }}>
+                      …
+                    </span>
+                  ) : (
+                    <button
+                      key={p}
+                      className="btn"
+                      onClick={() => setPage(p)}
+                      style={{
+                        minWidth: 36,
+                        padding: "6px 10px",
+                        background: p === page ? "rgba(15,23,42,0.12)" : "transparent",
+                        fontWeight: p === page ? 900 : 500,
+                        borderColor: p === page ? "rgba(15,23,42,0.3)" : "#e2e8f0",
+                      }}
+                    >
+                      {p}
+                    </button>
+                  )
+                )}
+            </div>
+
             <button className="btn" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} style={{ opacity: page >= totalPages ? 0.6 : 1 }}>
               Successiva →
             </button>
@@ -1020,16 +1173,25 @@ await writeAuditLog({
           Storico materiale · <span style={{ opacity: 0.75 }}>{historyCode}</span>
         </div>
 
-        <button
-          className="btn"
-          onClick={() => {
-            setHistoryOpen(false);
-            setHistoryCode(null);
-            setHistoryRows([]);
-          }}
-        >
-          Chiudi
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            className="btn"
+            onClick={downloadStoricoPDF}
+            disabled={historyLoading || historyRows.length === 0}
+          >
+            PDF
+          </button>
+          <button
+            className="btn"
+            onClick={() => {
+              setHistoryOpen(false);
+              setHistoryCode(null);
+              setHistoryRows([]);
+            }}
+          >
+            Chiudi
+          </button>
+        </div>
       </div>
 
       <div className="tableWrap" style={{ marginTop: 12 }}>

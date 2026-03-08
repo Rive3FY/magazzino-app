@@ -12,19 +12,11 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 export const metadata = {
   title: "Gestionale Magazzino",
   description: "Movimenti e Giacenze",
-  manifest: "/manifest.json",
-  themeColor: "#0f172a",
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: "default",
-    title: "Magazzino",
-  },
 };
 export const viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#0f172a",
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

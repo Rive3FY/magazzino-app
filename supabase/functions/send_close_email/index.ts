@@ -145,11 +145,15 @@ serve(async (req: Request) => {
       }),
     });
 
-    const resendData = await resendRes.json();
+    const resendData = await resendRes.json().catch(() => ({}));
 
     if (!resendRes.ok) {
+      const errMsg = resendData?.message ?? resendData?.error ?? JSON.stringify(resendData);
       return new Response(
-        JSON.stringify({ error: resendData }),
+        JSON.stringify({
+          error: `Resend API: ${errMsg}`,
+          details: resendData,
+        }),
         {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -3,15 +3,12 @@
 import * as XLSX from "xlsx";
 import { useEffect, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
+import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
+import { toNumberLoose } from "../_lib/utils";
 
 type WarehouseKind = "PRM" | "REALE";
 
-function toNumber(v: unknown): number {
-  // Gestisce numeri, stringhe con virgola, ecc.
-  const s = String(v ?? "").trim().replace(",", ".");
-  const n = typeof v === "number" ? v : Number(s);
-  return Number.isFinite(n) ? n : 0;
-}
+type LoadedCounts = { PRM: number; REALE: number } | null;
 
 function cleanCell(v: any) {
   if (v === null || v === undefined) return "";
@@ -30,32 +27,23 @@ export default function ImportPage() {
 
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadedCounts, setLoadedCounts] = useState<LoadedCounts>(null);
 
-  const [checking, setChecking] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const { isAdmin, loading: checking } = useIsAdmin();
+
+  async function loadCounts() {
+    try {
+      const { count: prm } = await supabase.from("excel_live").select("*", { count: "exact", head: true }).eq("warehouse", "PRM");
+      const { count: reale } = await supabase.from("excel_live").select("*", { count: "exact", head: true }).eq("warehouse", "REALE");
+      setLoadedCounts({ PRM: prm ?? 0, REALE: reale ?? 0 });
+    } catch {
+      setLoadedCounts({ PRM: 0, REALE: 0 });
+    }
+  }
 
   useEffect(() => {
-    (async () => {
-      const { data: userData } = await supabase.auth.getUser();
-
-      if (!userData.user) {
-        setChecking(false);
-        return;
-      }
-
-      const { data, error } = await supabase.rpc("is_admin");
-
-      if (error) {
-        // Se la RPC non esiste o fallisce, blocchiamo comunque (sicurezza)
-        setIsAdmin(false);
-        setChecking(false);
-        return;
-      }
-
-      setIsAdmin(!!data);
-      setChecking(false);
-    })();
-  }, [supabase]);
+    if (isAdmin) void loadCounts();
+  }, [isAdmin]);
 
   async function importExcel(file: File, warehouseKind: WarehouseKind) {
     setMsg(null);
@@ -129,9 +117,9 @@ export default function ImportPage() {
         const key = `${code}_${warehouseKind}`;
 
         // Quantità: la colonna corretta è questa
-        const qtyFree = toNumber(r["Qnt. a Mag. libero"]);
-        const qtyBlocked = toNumber(r["Qnt. a Mag. bloccato"]);
-        const qtyQuality = toNumber(r["Controllo Qualità Magazzino"]);
+        const qtyFree = toNumberLoose(r["Qnt. a Mag. libero"]);
+        const qtyBlocked = toNumberLoose(r["Qnt. a Mag. bloccato"]);
+        const qtyQuality = toNumberLoose(r["Controllo Qualità Magazzino"]);
 
         const excelJson: Record<string, any> = {};
         for (const k of Object.keys(r)) {
@@ -197,6 +185,7 @@ export default function ImportPage() {
       }
 
       setMsg(`Import ${warehouseKind} completato ✅ (${payload.length} materiali)`);
+      await loadCounts();
     } catch (e: any) {
       setMsg("Errore import: " + (e?.message ?? String(e)));
     } finally {
@@ -215,12 +204,16 @@ export default function ImportPage() {
   return (
     <main className="panel">
       <div className="pageBar">
-        <div className="pageBarTitle">Import Excel</div>
+        <div className="pageBarTitle">Import & Export Excel</div>
       </div>
 
       <div className="card" style={{ padding: 12, margin: 12 }}>
         <div style={{ fontWeight: 900 }}>Import Magazzino PRM</div>
-
+        {loadedCounts && (
+          <div style={{ fontSize: 13, opacity: 0.9, marginTop: 4 }}>
+            Caricati: <b>{loadedCounts.PRM}</b> materiali
+          </div>
+        )}
         <input
           type="file"
           accept=".xlsx,.xls"
@@ -229,12 +222,17 @@ export default function ImportPage() {
             const f = e.target.files?.[0];
             if (f) importExcel(f, "PRM");
           }}
+          style={{ marginTop: 8 }}
         />
       </div>
 
       <div className="card" style={{ padding: 12, margin: 12 }}>
         <div style={{ fontWeight: 900 }}>Import Magazzino REALE</div>
-
+        {loadedCounts && (
+          <div style={{ fontSize: 13, opacity: 0.9, marginTop: 4 }}>
+            Caricati: <b>{loadedCounts.REALE}</b> materiali
+          </div>
+        )}
         <input
           type="file"
           accept=".xlsx,.xls"
@@ -243,7 +241,24 @@ export default function ImportPage() {
             const f = e.target.files?.[0];
             if (f) importExcel(f, "REALE");
           }}
+          style={{ marginTop: 8 }}
         />
+      </div>
+
+      <div className="card" style={{ padding: 12, margin: 12 }}>
+        <div style={{ fontWeight: 900 }}>Download Excel LIVE</div>
+        <div style={{ fontSize: 13, opacity: 0.9, marginTop: 4 }}>
+          Scarica il file Excel con tutte le giacenze aggiornate (PRM + REALE)
+        </div>
+        <button
+          type="button"
+          className="btn btnPrimary"
+          style={{ marginTop: 10 }}
+          onClick={() => { window.location.href = "/api/excel-live/download"; }}
+          title="Scarica il file Excel LIVE (tutte le righe)"
+        >
+          Download Excel LIVE
+        </button>
       </div>
 
       {busy && <div style={{ padding: 12 }}>Import in corso...</div>}

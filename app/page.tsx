@@ -356,15 +356,13 @@ for (const r of (base ?? []) as DbStock[]) {
   }, [picked, stock, warehouseFilter]);
 
   return (
-    <div>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <div>
-          <h1 style={{ margin: 0 }}>Dashboard</h1>
-          <div style={{ opacity: 0.85, marginTop: 6 }}>Panoramica rapida di anagrafica e operatività.</div>
-        </div>
-
-        
+    <main className="panel" style={{ overflowX: "hidden" }}>
+      <div className="pageBar">
+        <div className="pageBarTitle">Magazzino - Dashboard</div>
       </div>
+
+      <div className="filtersRow" style={{ padding: 12 }}>
+        <div style={{ opacity: 0.85, marginBottom: 14 }}>Panoramica rapida di anagrafica e operatività.</div>
 
       {/* ✅ CERCA MATERIALE + BARCODE */}
       <div className="glass" style={{ marginTop: 14 }}>
@@ -378,7 +376,7 @@ for (const r of (base ?? []) as DbStock[]) {
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <select
-              className="input"
+              className="input mobileInputFull"
               value={warehouseFilter}
               onChange={(e) => setWarehouseFilter(e.target.value as any)}
               style={{ width: 170 }}
@@ -582,7 +580,7 @@ for (const r of (base ?? []) as DbStock[]) {
           <a className="btn btnPrimary" href="/movimenti">Vedi tutto</a>
         </div>
 
-        <div style={{ overflowX: "auto", marginTop: 10 }}>
+        <div className="tableWrap" style={{ marginTop: 10 }}>
           <table className="table">
             <thead>
               <tr>
@@ -613,7 +611,7 @@ for (const r of (base ?? []) as DbStock[]) {
                   <tr key={m.id}>
                     <td>{fmtDate(m.created_at)}</td>
                     <td>
-                      <span className={`badge ${m.type === "IN" ? "badgeIn" : "badgeOut"}`}>
+                      <span className={m.type === "IN" ? "badgeIn" : "badgeOut"}>
                         {m.type === "IN" ? "Entrata" : "Uscita"}
                       </span>
                     </td>
@@ -636,6 +634,7 @@ for (const r of (base ?? []) as DbStock[]) {
       <div style={{ marginTop: 12, opacity: 0.8, fontSize: 12 }}>
         Suggerimento: usa “Nuovo movimento” per registrare rapidamente entrate/uscite.
       </div>
-    </div>
+      </div>
+    </main>
   );
 }

@@ -202,6 +202,29 @@ export default function AdminPanelClient() {
     await loadUsers();
   }
 
+  async function deleteUser(userId: string, email: string | null) {
+    const ok = confirm(
+      `Eliminare definitivamente l'utente ${email ?? userId}?\n\nQuesta azione non può essere annullata.`
+    );
+    if (!ok) return;
+
+    const res = await fetch("/api/admin/delete-user", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      alert(data.error ?? "Errore eliminazione utente");
+      return;
+    }
+
+    setUsersMsg("Utente eliminato ✅");
+    await loadUsers();
+  }
+
   function openEdit(u: AdminUserRow) {
     setEditUser(u);
     setEditBadge(u.badge_number ?? "");
@@ -429,7 +452,7 @@ export default function AdminPanelClient() {
                       <td>{u.badge_number ?? "-"}</td>
                       <td>{fullName}</td>
                       <td>{u.is_admin ? "✅" : "—"}</td>
-                      <td style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <td style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                         <button className="btn" onClick={() => openEdit(u)}>Modifica</button>
 
                         {u.is_admin ? (
@@ -440,6 +463,20 @@ export default function AdminPanelClient() {
                           )
                         ) : (
                           <button className="btn btnPrimary" onClick={() => grantAdmin(u.user_id)}>Rendi Admin</button>
+                        )}
+
+                        {u.user_id !== myUserId && (
+                          <button
+                            className="btn"
+                            onClick={() => deleteUser(u.user_id, u.email)}
+                            style={{
+                              borderColor: "rgba(239,68,68,0.5)",
+                              background: "rgba(239,68,68,0.08)",
+                              color: "#991b1b",
+                            }}
+                          >
+                            Elimina
+                          </button>
                         )}
                       </td>
                     </tr>

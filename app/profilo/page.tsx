@@ -150,7 +150,7 @@ export default function ProfiloPage() {
       </div>
 
       <div
-        className="filters"
+        className="filters mobileGrid1"
         style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}
       >
         <div className="field">

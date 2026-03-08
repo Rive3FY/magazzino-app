@@ -29,15 +29,32 @@ export async function middleware(request: NextRequest) {
 
   // Pagine pubbliche (accessibili senza login)
   const isPublic =
-  path === "/login" ||
-  path === "/logout" ||   // ✅ aggiunto
-  path.startsWith("/_next") ||
-  path.startsWith("/favicon.ico");
+    path === "/login" ||
+    path === "/logout" ||
+    path.startsWith("/auth/") ||
+    path.startsWith("/_next") ||
+    path.startsWith("/favicon.ico");
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
+  }
+
+  // Utente loggato ma non approvato: solo /pending, /logout, /login/aggiorna-password
+  if (user && !isPublic && path !== "/pending" && path !== "/login/aggiorna-password") {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("approved")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const approved = (profile as { approved?: boolean } | null)?.approved;
+    if (!approved) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/pending";
+      return NextResponse.redirect(url);
+    }
   }
 
   return response;

@@ -1,4 +1,36 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Gestionale Magazzino
+
+Applicazione Next.js per la gestione di magazzino: movimenti (entrate/uscite), giacenze, referenti, import Excel, audit log.
+
+## Setup
+
+### Variabili d'ambiente
+
+Crea `.env.local` con:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
+```
+
+Per le email di chiusura (Resend):
+
+```
+RESEND_API_KEY=re_...
+FROM_EMAIL=onboarding@resend.dev
+```
+
+### Migrazioni Supabase
+
+Esegui le migration in `supabase/migrations/` tramite Supabase SQL Editor o CLI. Vedi `supabase/README_MIGRATIONS.md`.
+
+## Struttura
+
+- `app/` – App Router, pagine e API
+- `app/_components/` – SideNav, TopBar
+- `app/_lib/` – Supabase client, utils, hooks (useAuth, useIsAdmin), tipi, validazioni Zod, ToastContext
+- `app/api/excel-live/download` – Export Excel giacenze (solo admin)
 
 ## Getting Started
 

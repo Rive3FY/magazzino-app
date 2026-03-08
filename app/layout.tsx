@@ -2,6 +2,11 @@ import "./globals.css";
 import { createClient } from "./_lib/supabase/server";
 import SideNav from "./_components/SideNav";
 import TopBar from "./_components/TopBar";
+import { ToastProvider } from "./_lib/ToastContext";
+import { SidebarProvider } from "./_lib/SidebarContext";
+import { Inter } from "next/font/google";
+
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 export const metadata = {
   title: "Gestionale Magazzino",
   description: "Movimenti e Giacenze",
@@ -35,24 +40,28 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     if (badge) displayBadge = `Badge ${badge}`;
   }
 
+  const hasUser = !!user;
+
   return (
-    <html lang="it">
-      <body>
-        <div className="app">
-          <SideNav />
+    <html lang="it" className={inter.variable}>
+      <body className={inter.className}>
+        <ToastProvider>
+          <SidebarProvider>
+            <div className={hasUser ? "app" : "app appLogin"}>
+              {hasUser && <SideNav />}
 
-          <div className="main">
-            <TopBar displayName={displayName} displayBadge={displayBadge} />
-
-            <div className="content">
-              {children}
-
-              <footer className="app-footer">
-                © {new Date().getFullYear()} · Gestionale Magazzino
-              </footer>
+              <div className="main">
+                {hasUser && <TopBar displayName={displayName} displayBadge={displayBadge} />}
+                <div className="content">
+                  {children}
+                  <footer className="app-footer">
+                    © <span suppressHydrationWarning>{new Date().getFullYear()}</span> · Gestionale Magazzino
+                  </footer>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          </SidebarProvider>
+        </ToastProvider>
       </body>
     </html>
   );

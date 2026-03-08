@@ -1,97 +1,17 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { createClient } from "../_lib/supabase/client";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import jsPDF from "jspdf";
+import { fmtDate, n, toNumber, toIsoStartOfDay, toIsoEndOfDay } from "../_lib/utils";
+import { useAuth } from "../_lib/hooks/useAuth";
+import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
+import { movementNoteSchema } from "../_lib/validations";
+import type { CartRow, QuickMaterialInfo, DbItem, MovementRow, ReferentRow, ExcelLiveRow } from "../_lib/types";
 
 const PAGE_LIMIT = 300;
-//NFC
-type CartRow = {
-  code: string;
-  name: string;
-  um: string | null;
-  warehouse: "PRM" | "REALE";
-  qtyAvailable: number;
-  qtyPick: number;
-};
-
-type QuickMaterialInfo = {
-  code: string;
-  name: string;
-  um: string | null;
-  warehouse: "PRM" | "REALE";
-  qtyFree: number;
-  qtyBlocked: number;
-  qtyQuality: number;
-};
-
-type DbItem = {
-  code: string;
-  name: string;
-  um: string | null;
-};
-
-type MovementRow = {
-  id: string;
-  created_at: string;
-  type: "IN" | "OUT";
-  code: string;
-  qty: number;
-  note: string | null;
-
-  warehouse: "PRM" | "REALE" | null;
-
-  created_by: string | null;
-  created_by_name: string | null;
-
-  status: "OPEN" | "CLOSED" | null;
-  returned_qty: number | null;
-  return_note: string | null;
-
-  referent_id: string | null;
-  referee_email: string | null;
-
-  closed_at: string | null;
-  closed_by: string | null;
-};
-
-type ReferentRow = {
-  id: string;
-  name: string;
-  email: string;
-  is_active: boolean;
-};
-
-function fmtDate(iso: string) {
-  const d = new Date(iso);
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mi = String(d.getMinutes()).padStart(2, "0");
-  return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
-}
-
-function n(v: any) {
-  const x = Number(v ?? 0);
-  return Number.isFinite(x) ? x : 0;
-}
-
-function toNumber(v: any) {
-  const x = Number(String(v ?? "").trim().replace(",", "."));
-  return Number.isFinite(x) ? x : NaN;
-}
-
-function toIsoStartOfDay(d: string) {
-  if (!d) return null;
-  return new Date(`${d}T00:00:00.000`).toISOString();
-}
-
-function toIsoEndOfDay(d: string) {
-  if (!d) return null;
-  return new Date(`${d}T23:59:59.999`).toISOString();
-}
 
 function sameUser(a: string | null | undefined, b: string | null | undefined) {
   return !!a && !!b && a === b;
@@ -171,31 +91,26 @@ function PencilIcon({ muted }: { muted?: boolean }) {
   );
 }
 
-type ExcelLiveRow = {
-  code: string;
-  warehouse: "PRM" | "REALE";
-  qty_free: number | null;
-  qty_blocked: number | null;
-  qty_quality: number | null;
-  row_json: Record<string, any> | null;
-};
-
 export default function MovimentiPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = createClient();
-  //NFC
+  const { user } = useAuth();
+  const { isAdmin } = useIsAdmin();
+  const userId = user?.id ?? null;
+  const userEmail = user?.email ?? null;
+
+  const urlOpenId = searchParams.get("open");
+
   const [cartOpen, setCartOpen] = useState(false);
-const [cart, setCart] = useState<CartRow[]>([]);
-const [cartBusy, setCartBusy] = useState(false);
+  const [cart, setCart] = useState<CartRow[]>([]);
+  const [cartBusy, setCartBusy] = useState(false);
 
-const [scanMode, setScanMode] = useState<"NORMAL" | "CART" | "QUICK">("NORMAL");
+  const [scanMode, setScanMode] = useState<"NORMAL" | "CART" | "QUICK">("NORMAL");
 
-const [scanPopupOpen, setScanPopupOpen] = useState(false);
-const [scanInfo, setScanInfo] = useState<QuickMaterialInfo | null>(null);
-const [scanQty, setScanQty] = useState("1");
-//NFC 
-  const [userId, setUserId] = useState<string | null>(null);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [scanPopupOpen, setScanPopupOpen] = useState(false);
+  const [scanInfo, setScanInfo] = useState<QuickMaterialInfo | null>(null);
+  const [scanQty, setScanQty] = useState("1");
 
   const [type, setType] = useState<"IN" | "OUT">("OUT");
   const [warehouse, setWarehouse] = useState<"PRM" | "REALE">("PRM");
@@ -238,6 +153,9 @@ const [scanQty, setScanQty] = useState("1");
   const [selReferentId, setSelReferentId] = useState<string>("");
 
   const [editRectify, setEditRectify] = useState(false);
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deletingBulk, setDeletingBulk] = useState(false);
 
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyCode, setHistoryCode] = useState<string | null>(null);
@@ -454,7 +372,10 @@ async function handleScannedCode(codeRaw: string) {
         const date = fmtDate(r.created_at);
         const code = String(r.code).slice(0, 24);
         const tipo = r.type === "IN" ? "Entrata" : "Uscita";
-        const qta = `${r.type === "IN" ? "+" : "-"}${Math.abs(Number(r.qty ?? 0))}`;
+        const qtyVal = r.type === "IN"
+          ? Math.abs(Number(r.qty ?? 0))
+          : Math.max(0, Math.abs(n(r.qty)) - n(r.returned_qty));
+        const qta = `${r.type === "IN" ? "+" : "-"}${qtyVal}`;
         const mag = String(r.warehouse ?? "");
         const operatore = String(r.created_by_name ?? r.created_by ?? "").slice(0, 26);
 
@@ -544,7 +465,7 @@ async function handleScannedCode(codeRaw: string) {
     let q = supabase
       .from("movements")
       .select(
-        "id,created_at,type,code,qty,note,warehouse,created_by,created_by_name,status,returned_qty,return_note,referent_id,referee_email,closed_at,closed_by"
+        "id,created_at,type,code,qty,note,warehouse,created_by,created_by_name,status,returned_qty,return_note,referent_id,referee_email,referee_name,closed_at,closed_by"
       )
       .order("created_at", { ascending: false })
       .limit(PAGE_LIMIT);
@@ -786,6 +707,12 @@ async function confirmCartPickup() {
     return;
   }
 
+  const noteParsed = movementNoteSchema.safeParse({ note: note.trim() });
+  if (!noteParsed.success) {
+    setMsg(noteParsed.error.flatten().formErrors[0] ?? "Le note sono obbligatorie.");
+    return;
+  }
+
   setCartBusy(true);
   setMsg(null);
 
@@ -804,7 +731,7 @@ async function confirmCartPickup() {
         type: "OUT",
         code: row.code,
         qty: row.qtyPick,
-        note: note.trim() || "Prelievo multiplo",
+        note: note.trim(),
         created_by: userId,
         created_by_name: fullName,
         warehouse: row.warehouse,
@@ -830,7 +757,7 @@ async function confirmCartPickup() {
         details_json: {
           type: "OUT",
           qty: row.qtyPick,
-          note: note.trim() || "Prelievo multiplo",
+          note: note.trim(),
           mode: "cart",
         },
       });
@@ -930,9 +857,31 @@ async function confirmCartPickup() {
     if (!picked) return setMsg("Seleziona un materiale.");
     if (!isAdmin && type === "IN") return setMsg("Solo i tecnici/admin possono fare entrate.");
 
+    const noteParsed = movementNoteSchema.safeParse({ note: note.trim() });
+    if (!noteParsed.success) return setMsg(noteParsed.error.flatten().formErrors[0] ?? "Le note sono obbligatorie.");
+
     const qn = toNumber(qty);
     if (!Number.isFinite(qn) || qn <= 0) {
       return setMsg("Quantità non valida.");
+    }
+
+    if (type === "OUT") {
+      try {
+        const live = await getOrCreateExcelLiveRow(picked.code, warehouse);
+        if (!live) {
+          return setMsg(`Materiale ${picked.code} non trovato in ${warehouse}. Importa l'Excel prima.`);
+        }
+        const rowJson = { ...(live.row_json ?? {}) };
+        const currentFromJson = n(rowJson["Qnt. a Mag. libero"]);
+        const currentFree = Number.isFinite(Number(live.qty_free)) ? n(live.qty_free) : currentFromJson;
+        if (currentFree < qn) {
+          return setMsg(
+            `Quantità insufficiente. Disponibile: ${currentFree}, richiesta: ${qn}.`
+          );
+        }
+      } catch (e: any) {
+        return setMsg(e?.message ?? "Errore verifica giacenza.");
+      }
     }
 
     const { data: prof } = await supabase.from("profiles").select("first_name,last_name").eq("id", userId).maybeSingle();
@@ -944,7 +893,7 @@ async function confirmCartPickup() {
       type,
       code: picked.code,
       qty: qn,
-      note: note.trim() || null,
+      note: note.trim(),
       created_by: userId,
       created_by_name: fullName,
       warehouse,
@@ -968,7 +917,7 @@ async function confirmCartPickup() {
       details_json: {
         type,
         qty: qn,
-        note: note.trim() || null,
+        note: note.trim(),
         status: type === "OUT" ? "OPEN" : "CLOSED",
       },
     });
@@ -1020,11 +969,13 @@ async function confirmCartPickup() {
     setHistoryLoading(false);
   }
 
-  async function deleteMovement(id: string) {
+  async function deleteMovement(id: string, skipConfirm?: boolean) {
     if (!isAdmin) return alert("Solo l'admin può eliminare i movimenti.");
 
-    const ok = confirm("Eliminare questo movimento?");
-    if (!ok) return;
+    if (!skipConfirm) {
+      const ok = confirm("Eliminare questo movimento?");
+      if (!ok) return;
+    }
 
     const { data: mov, error: readError } = await supabase
       .from("movements")
@@ -1101,6 +1052,41 @@ async function confirmCartPickup() {
       setEditRectify(false);
     }
 
+    await loadHistory();
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (!isAdmin) return;
+    const allSelected = history.length > 0 && history.every((m) => selectedIds.has(m.id));
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(history.map((m) => m.id)));
+    }
+  }
+
+  async function deleteSelectedMovements() {
+    if (!isAdmin || selectedIds.size === 0) return;
+    const ok = confirm(`Eliminare ${selectedIds.size} movimento/i selezionato/i?`);
+    if (!ok) return;
+    setDeletingBulk(true);
+    setMsg(null);
+    const ids = Array.from(selectedIds);
+    for (const id of ids) {
+      await deleteMovement(id, true);
+    }
+    setSelectedIds(new Set());
+    setDeletingBulk(false);
+    setMsg(`${ids.length} movimento/i eliminato/i.`);
     await loadHistory();
   }
 
@@ -1187,6 +1173,7 @@ async function confirmCartPickup() {
         closed_by: userId ?? null,
         referent_id: ref?.id ?? null,
         referee_email: ref?.email ?? null,
+        referee_name: ref?.name ?? null,
       } as any)
       .eq("id", closing.id);
 
@@ -1226,6 +1213,7 @@ async function confirmCartPickup() {
               closed_by: userId ?? null,
               referent_id: ref?.id ?? null,
               referee_email: ref?.email ?? null,
+              referee_name: ref?.name ?? null,
             }
           : row
       )
@@ -1250,36 +1238,48 @@ async function confirmCartPickup() {
       },
     });
 
+    let emailFailed = false;
     try {
-      const res = await supabase.functions.invoke("send_close_email", {
-        body: {
-          movement_id: closing.id,
-          code: closing.code,
-          warehouse: closing.warehouse,
-          out_qty: outQty,
-          returned_qty: r,
-          net_qty: Math.max(0, outQty - r),
-          return_note: (returnNote ?? "").trim() || null,
-          referent_name: ref.name,
-          referent_email: ref.email,
-          closed_by: userEmail ?? null,
-          closed_at: closedAtIso,
-          type: closing.type,
+      const { data: { session } } = await supabase.auth.getSession();
+      const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send_close_email`;
+      const body = {
+        movement_id: closing.id,
+        code: closing.code,
+        warehouse: closing.warehouse,
+        out_qty: outQty,
+        returned_qty: r,
+        net_qty: Math.max(0, outQty - r),
+        return_note: (returnNote ?? "").trim() || null,
+        referent_name: ref.name,
+        referent_email: ref.email,
+        closed_by: userEmail ?? null,
+        closed_at: closedAtIso,
+        type: closing.type,
+      };
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session?.access_token ?? ""}`,
+          "Content-Type": "application/json",
         },
+        body: JSON.stringify(body),
       });
-
-      console.log("EMAIL FUNCTION RESPONSE:", res);
-
-      if (res.error) {
-        console.error("send_close_email invoke error:", res.error);
-        setMsg("Chiusura salvata ma email non inviata.");
+      const respData = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        emailFailed = true;
+        const errMsg =
+          typeof respData?.error === "string"
+            ? respData.error
+            : respData?.error?.message ?? (respData?.error ? JSON.stringify(respData.error) : resp.statusText || "Errore sconosciuto");
+        console.warn("Email non inviata:", errMsg);
+        setMsg(`Movimento chiuso ✅ (email non inviata: ${errMsg})`);
       }
-    } catch (e) {
-      console.error("send_close_email error:", e);
-      setMsg("Errore collegamento funzione email.");
+    } catch (e: any) {
+      emailFailed = true;
+      console.warn("Email non inviata:", e?.message ?? e);
+      setMsg("Movimento chiuso ✅ (email non inviata: " + (e?.message ?? "errore di rete") + ")");
     }
-
-    setMsg("Movimento chiuso ✅");
+    if (!emailFailed) setMsg("Movimento chiuso ✅");
     setCloseOpen(false);
     setClosing(null);
     setClosingMeta(null);
@@ -1292,30 +1292,7 @@ async function confirmCartPickup() {
     (async () => {
       await loadHistory();
       await loadReferents();
-
-      const { data: userData } = await supabase.auth.getUser();
-      const uid = userData.user?.id ?? null;
-      setUserId(uid);
-      setUserEmail(userData.user?.email ?? null);
-
-      if (!uid) {
-        setIsAdmin(false);
-        return;
-      }
-
-      const { data: isAdm, error } = await supabase.rpc("is_admin");
-      if (error) {
-        console.error("is_admin rpc error:", error);
-        setIsAdmin(false);
-        return;
-      }
-
-      const adminFlag = !!isAdm;
-      setIsAdmin(adminFlag);
-
-      if (!adminFlag) {
-        setType("OUT");
-      }
+      if (!userId || !isAdmin) setType("OUT");
     })();
 
     function onDocMouseDown(e: MouseEvent) {
@@ -1330,7 +1307,29 @@ async function confirmCartPickup() {
       stopScan();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [userId, isAdmin]);
+
+  // Apri direttamente il movimento da URL (?open=id)
+  useEffect(() => {
+    if (!urlOpenId) return;
+
+    (async () => {
+      const { data: m, error } = await supabase
+        .from("movements")
+        .select("id,created_at,type,code,qty,note,warehouse,created_by,created_by_name,status,returned_qty,return_note,referent_id,referee_email,referee_name,closed_at,closed_by")
+        .eq("id", urlOpenId)
+        .maybeSingle();
+
+      if (error || !m) {
+        router.replace("/movimenti", { scroll: false });
+        return;
+      }
+
+      await openCloseModal(m as MovementRow);
+      router.replace("/movimenti", { scroll: false });
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlOpenId]);
 
   useEffect(() => {
     const channel = supabase
@@ -1380,35 +1379,13 @@ async function confirmCartPickup() {
 
   return (
     <main className="panel" style={{ overflowX: "hidden" }}>
-      <style jsx global>{`
-        .openStripe {
-          background: repeating-linear-gradient(
-            135deg,
-            rgba(250, 204, 21, 0.38) 0px,
-            rgba(250, 204, 21, 0.38) 10px,
-            rgba(148, 163, 184, 0.22) 10px,
-            rgba(148, 163, 184, 0.22) 20px
-          ) !important;
-          background-size: 200% 200% !important;
-          animation: stripeMove 1.2s linear infinite !important;
-        }
-
-        @keyframes stripeMove {
-          0% {
-            background-position: 0% 50%;
-          }
-          100% {
-            background-position: -100% 50%;
-          }
-        }
-      `}</style>
-
       <div className="pageBar">
         <div className="pageBarTitle">Magazzino - Movimenti</div>
       </div>
 
       <div className="filtersRow" style={{ padding: 12 }}>
         <div
+          className="mobileGrid1"
           style={{
             display: "grid",
             gridTemplateColumns: "2fr 2fr 1.2fr 1.2fr 2.6fr auto auto",
@@ -1416,18 +1393,18 @@ async function confirmCartPickup() {
             alignItems: "end",
           }}
         >
-          <div>
+          <div className="filterDateWrap">
             <label className="label" htmlFor="fFrom">
               Data da
             </label>
-            <input id="fFrom" name="fFrom" className="input" type="date" value={fFrom} onChange={(e) => setFFrom(e.target.value)} />
+            <input id="fFrom" name="fFrom" className="input mobileInputFull" type="date" value={fFrom} onChange={(e) => setFFrom(e.target.value)} />
           </div>
 
-          <div>
+          <div className="filterDateWrap">
             <label className="label" htmlFor="fTo">
               Data a
             </label>
-            <input id="fTo" name="fTo" className="input" type="date" value={fTo} onChange={(e) => setFTo(e.target.value)} />
+            <input id="fTo" name="fTo" className="input mobileInputFull" type="date" value={fTo} onChange={(e) => setFTo(e.target.value)} />
           </div>
 
           <div>
@@ -1505,7 +1482,7 @@ async function confirmCartPickup() {
       </div>
 
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <div className="mobileFlexCol" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           {isAdmin && (
             <button className={`btn ${type === "IN" ? "btnPrimary" : ""}`} onClick={() => setType("IN")} type="button">
               Entrata
@@ -1523,7 +1500,7 @@ async function confirmCartPickup() {
             <select
               id="whMove"
               name="whMove"
-              className="input"
+              className="input mobileInputFull"
               value={warehouse}
               onChange={(e) => setWarehouse(e.target.value as any)}
               style={{ width: 140 }}
@@ -1533,8 +1510,8 @@ async function confirmCartPickup() {
             </select>
           </div>
 
-          <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <button className="btn" type="button" onClick={() => (scanning ? stopScan() : startScan())}>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <button className="btn" type="button" onClick={() => (scanning ? stopScan() : startScan())} aria-label={scanning ? "Ferma scansione barcode" : "Avvia scansione barcode"}>
               {scanning ? "Chiudi camera" : "Scanner"}
             </button>
 
@@ -1542,13 +1519,13 @@ async function confirmCartPickup() {
               Pulisci
             </button>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
               <label className="label" htmlFor="scanModeSelect" style={{ marginBottom: 0 }}>
                 Modalità scanner
               </label>
               <select
                 id="scanModeSelect"
-                className="input"
+                className="input mobileInputFull"
                 value={scanMode}
                 onChange={(e) => {
                   const mode = e.target.value as "NORMAL" | "CART" | "QUICK";
@@ -1563,7 +1540,6 @@ async function confirmCartPickup() {
                     setCartOpen(false);
                   }
                 }}
-                style={{ minWidth: 180 }}
               >
                 <option value="NORMAL">Inserimento singolo</option>
                 <option value="CART">Carrello multiplo</option>
@@ -1660,12 +1636,12 @@ async function confirmCartPickup() {
           </div>
         )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10, marginTop: 12 }}>
+        <div className="mobileFormRow" style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10, marginTop: 12 }}>
           <div style={{ gridColumn: "span 8" }}>
             <label className="label" htmlFor="noteMove">
-              Note (opz.)
+              Note *
             </label>
-            <input id="noteMove" name="noteMove" className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="DDT / commessa / cliente" />
+            <input id="noteMove" name="noteMove" className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="DDT / commessa / cliente (obbligatorio)" required />
           </div>
 
           <div style={{ gridColumn: "span 3" }}>
@@ -1708,15 +1684,38 @@ async function confirmCartPickup() {
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
           <div style={{ fontWeight: 900 }}>Storico movimenti</div>
-          <button className="btn" onClick={() => loadHistory()} style={{ width: "100%", justifyContent: "center" }}>
-            Applica filtri
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {isAdmin && selectedIds.size > 0 && (
+              <button
+                className="btn"
+                onClick={deleteSelectedMovements}
+                disabled={deletingBulk}
+                style={{ background: "rgba(239,68,68,0.12)", borderColor: "rgba(239,68,68,0.4)" }}
+              >
+                {deletingBulk ? "Eliminazione…" : `Elimina ${selectedIds.size} selezionati`}
+              </button>
+            )}
+            <button className="btn" onClick={() => loadHistory()} style={{ justifyContent: "center" }}>
+              Applica filtri
+            </button>
+          </div>
         </div>
 
-        <div style={{ overflowX: "auto", marginTop: 10 }}>
+        <div className="tableWrap" style={{ marginTop: 10 }}>
           <table className="table">
             <thead>
               <tr>
+                {isAdmin && (
+                  <th style={{ width: 40 }}>
+                    <input
+                      type="checkbox"
+                      checked={history.length > 0 && history.every((m) => selectedIds.has(m.id))}
+                      onChange={toggleSelectAll}
+                      title="Seleziona tutti"
+                      aria-label="Seleziona tutti i movimenti"
+                    />
+                  </th>
+                )}
                 <th>Data</th>
                 <th>Stato</th>
                 <th>Tipo</th>
@@ -1728,20 +1727,19 @@ async function confirmCartPickup() {
                 <th>Netta</th>
                 <th>Note</th>
                 <th>Inserito da</th>
-                <th>Azioni</th>
               </tr>
             </thead>
 
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={12} style={{ padding: 12, color: "#0f172a" }}>
+                  <td colSpan={isAdmin ? 12 : 11} style={{ padding: 12, color: "#0f172a" }}>
                     Caricamento…
                   </td>
                 </tr>
               ) : history.length === 0 ? (
                 <tr>
-                  <td colSpan={12} style={{ padding: 12, color: "#0f172a" }}>
+                  <td colSpan={isAdmin ? 12 : 11} style={{ padding: 12, color: "#0f172a" }}>
                     Nessun movimento.
                   </td>
                 </tr>
@@ -1755,20 +1753,31 @@ async function confirmCartPickup() {
                   return (
                     <tr
                       key={m.id}
-                      onClick={() => {
-                        if (!canEditRow(m)) return;
-                        openCloseModal(m);
-                      }}
+                      onClick={() => openCloseModal(m)}
                       style={{
-                        cursor: canEditRow(m) ? "pointer" : "default",
+                        cursor: "pointer",
                         background: isOpenOut ? "rgba(148,163,184,0.18)" : "transparent",
                       }}
-                      title={canEditRow(m) ? "Clicca per chiudere / rettificare" : ""}
+                      title={canEditRow(m) ? "Clicca per chiudere / rettificare" : "Clicca per vedere il dettaglio"}
                     >
+                      {isAdmin && (
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(m.id)}
+                            onChange={() => toggleSelect(m.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            aria-label={`Seleziona movimento ${m.code}`}
+                          />
+                        </td>
+                      )}
                       <td>{fmtDate(m.created_at)}</td>
 
                       <td>
-                        <span className={st === "OPEN" ? "openStripe" : ""} style={pillStyle(st)}>
+                        <span
+                          className={st === "OPEN" ? "openStripe" : ""}
+                          style={st === "OPEN" ? (() => { const s = pillStyle(st); const { background, ...rest } = s; return rest; })() : pillStyle(st)}
+                        >
                           {st === "OPEN" ? "APERTO" : "CHIUSO"}
                         </span>
                       </td>
@@ -1792,22 +1801,6 @@ async function confirmCartPickup() {
 
                       <td>{m.note ?? ""}</td>
                       <td>{m.created_by_name ?? "-"}</td>
-
-                      <td>
-                        {isAdmin ? (
-                          <button
-                            className="btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteMovement(m.id);
-                            }}
-                          >
-                            Elimina
-                          </button>
-                        ) : (
-                          <span style={{ opacity: 0.6 }}>—</span>
-                        )}
-                      </td>
                     </tr>
                   );
                 })
@@ -1858,7 +1851,18 @@ async function confirmCartPickup() {
               </div>
 
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <span style={{ ...pillStyle((closing.status ?? "OPEN") as any) }}>
+                <span
+                  className={(closing.status ?? (closing.type === "OUT" ? "OPEN" : "CLOSED")) === "OPEN" ? "openStripe" : ""}
+                  style={(() => {
+                    const st = (closing.status ?? (closing.type === "OUT" ? "OPEN" : "CLOSED")) as "OPEN" | "CLOSED";
+                    const s = pillStyle(st);
+                    if (st === "OPEN") {
+                      const { background, ...rest } = s;
+                      return rest;
+                    }
+                    return s;
+                  })()}
+                >
                   {(closing.status ?? (closing.type === "OUT" ? "OPEN" : "CLOSED")) === "OPEN" ? "APERTO" : "CHIUSO"}
                 </span>
 
@@ -1919,6 +1923,58 @@ async function confirmCartPickup() {
                 <input id="mvNote" name="mvNote" className="input" value={closing.note ?? ""} disabled />
               </div>
             </div>
+
+            {closing.type === "OUT" && (closing.status ?? "OPEN") === "CLOSED" && (
+              <div
+                style={{
+                  marginTop: 14,
+                  border: "1px solid rgba(59,130,246,0.25)",
+                  borderRadius: 14,
+                  padding: 12,
+                  background: "rgba(59,130,246,0.06)",
+                }}
+              >
+                <div style={{ fontWeight: 900, marginBottom: 10 }}>Dettaglio rettifica / chiusura</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
+                  <div style={{ gridColumn: "span 3" }}>
+                    <label className="label" style={{ marginBottom: 4 }}>Quantità uscita</label>
+                    <div style={{ padding: "8px 12px", background: "#f8fafc", borderRadius: 8 }}>{Math.abs(n(closing.qty))}</div>
+                  </div>
+                  <div style={{ gridColumn: "span 3" }}>
+                    <label className="label" style={{ marginBottom: 4 }}>Quantità rientrata</label>
+                    <div style={{ padding: "8px 12px", background: "#f8fafc", borderRadius: 8 }}>{n(closing.returned_qty)}</div>
+                  </div>
+                  <div style={{ gridColumn: "span 3" }}>
+                    <label className="label" style={{ marginBottom: 4 }}>Quantità netta</label>
+                    <div style={{ padding: "8px 12px", background: "#f8fafc", borderRadius: 8, fontWeight: 900 }}>
+                      {Math.max(0, Math.abs(n(closing.qty)) - n(closing.returned_qty))}
+                    </div>
+                  </div>
+                  <div style={{ gridColumn: "span 3" }}>
+                    <label className="label" style={{ marginBottom: 4 }}>Chiuso da</label>
+                    <div style={{ padding: "8px 12px", background: "#f8fafc", borderRadius: 8 }}>{closing.closed_by ?? "-"}</div>
+                  </div>
+                  <div style={{ gridColumn: "span 6" }}>
+                    <label className="label" style={{ marginBottom: 4 }}>Nota rientro</label>
+                    <div style={{ padding: "8px 12px", background: "#f8fafc", borderRadius: 8 }}>{closing.return_note ?? "-"}</div>
+                  </div>
+                  <div style={{ gridColumn: "span 6" }}>
+                    <label className="label" style={{ marginBottom: 4 }}>Referente</label>
+                    <div style={{ padding: "8px 12px", background: "#f8fafc", borderRadius: 8 }}>
+                      {(closing as any).referee_name || referents.find((r) => r.id === closing.referent_id)?.name || closing.referee_email || "-"}
+                    </div>
+                  </div>
+                  <div style={{ gridColumn: "span 6" }}>
+                    <label className="label" style={{ marginBottom: 4 }}>Email referente</label>
+                    <div style={{ padding: "8px 12px", background: "#f8fafc", borderRadius: 8 }}>{closing.referee_email ?? "-"}</div>
+                  </div>
+                  <div style={{ gridColumn: "span 6" }}>
+                    <label className="label" style={{ marginBottom: 4 }}>Data chiusura</label>
+                    <div style={{ padding: "8px 12px", background: "#f8fafc", borderRadius: 8 }}>{closing.closed_at ? fmtDate(closing.closed_at) : "-"}</div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {closing.type === "OUT" && (closing.status ?? "OPEN") === "OPEN" && (
               <div
@@ -2107,7 +2163,7 @@ async function confirmCartPickup() {
               </button>
             </div>
 
-            <div style={{ overflowX: "auto", marginTop: 12 }}>
+            <div className="tableWrap" style={{ marginTop: 12 }}>
               <table className="table">
                 <thead>
                   <tr>
@@ -2269,7 +2325,7 @@ async function confirmCartPickup() {
         Scansiona i materiali in modalità <b>Carrello</b>, imposta la quantità e aggiungili qui.
       </div>
 
-      <div style={{ overflowX: "auto", marginTop: 12 }}>
+      <div className="tableWrap" style={{ marginTop: 12 }}>
         <table className="table">
           <thead>
             <tr>
@@ -2308,12 +2364,26 @@ async function confirmCartPickup() {
         </table>
       </div>
 
+      <div style={{ marginTop: 12 }}>
+        <label className="label" htmlFor="cartNote">
+          Note *
+        </label>
+        <input
+          id="cartNote"
+          className="input"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="DDT / commessa / cliente (obbligatorio)"
+          style={{ maxWidth: 400 }}
+        />
+      </div>
+
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
         <div style={{ fontWeight: 800 }}>
           Righe: {cart.length}
         </div>
 
-        <button className="btn btnPrimary" onClick={confirmCartPickup} disabled={cartBusy || cart.length === 0}>
+        <button className="btn btnPrimary" onClick={confirmCartPickup} disabled={cartBusy || cart.length === 0} aria-label="Conferma prelievo carrello">
           {cartBusy ? "Salvataggio..." : "Conferma prelievo"}
         </button>
       </div>

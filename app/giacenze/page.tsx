@@ -3,49 +3,18 @@
 export const dynamic = "force-dynamic";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 import { createClient } from "../_lib/supabase/client";
+import { EXCEL_COLS } from "../_lib/excel-cols";
+import { n, toNumberLoose, sanitizeId } from "../_lib/utils";
+import { useAuth } from "../_lib/hooks/useAuth";
+import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
+import type { WarehouseView, SortDir } from "../_lib/types";
 
 const supabase = createClient();
 
 const PAGE_SIZE = 25;
-
-type WarehouseView = "REALE" | "PRM" | "TUTTI";
-type SortDir = "none" | "asc" | "desc";
-
-const EXCEL_COLS = [
-  "Def. Progetto",
-  "Materiale",
-  "Descrizione Materiale",
-  "Divisione",
-  "Descrizione Divisione",
-  "Magazzino",
-  "Descrizione Magazzino",
-  "Qnt. a Mag. bloccato",
-  "Controllo Qualità Progetto",
-  "Valore per Stock",
-  "Controllo Qualità Magazzino",
-  "Valore a Magazzino",
-  "Bloccato Progetto",
-  "Scarico Tot",
-  "Qnt. stock prog",
-  "Finalità di Utilizzo",
-  "Gruppo Merci",
-  "Descrizione Gruppo Merci",
-  "Profit Center",
-  "Descrizione Profit Center",
-  "Unità di Misura",
-  "Qnt. a Mag. libero",
-  "Tipo Valore",
-  "Centro Resp.",
-  "Descrizione Centro Resp.",
-  "Descrizione Contab.",
-  "Data Primo utilizzo previsto",
-  "Data Ultimo utilizzo previsto",
-  "Data Prima EM",
-  "Data Ultima EM",
-  "Materiale Pianif.",
-] as const;
 
 type DbRow = {
   code: string;
@@ -55,49 +24,31 @@ type DbRow = {
   qty_quality: number;
   initial_qty: number;
   row_json: Record<string, any> | null;
-
   name?: string | null;
   um?: string | null;
-
   total_count?: number | null;
 };
 
-function n(v: any) {
-  const x = Number(v ?? 0);
-  return Number.isFinite(x) ? x : 0;
-}
-
-function toNumberLoose(v: any) {
-  const s = String(v ?? "").trim().replace(",", ".");
-  const x = Number(s);
-  return Number.isFinite(x) ? x : 0;
-}
-
-function sanitizeId(s: string) {
-  return "f_" + s.replace(/\W+/g, "_").toLowerCase();
-}
-
 export default function GiacenzePage() {
-  // ✅ auth/approved check
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { user, loading: authLoading, approved } = useAuth();
+  const { isAdmin, loading: adminLoading } = useIsAdmin();
+
+  const urlCode = searchParams.get("code");
+  const urlWarehouse = searchParams.get("warehouse") as "PRM" | "REALE" | null;
+
   useEffect(() => {
-    (async () => {
-      const { data } = await supabase.auth.getUser();
-      const user = data.user;
-
-      if (!user) {
-        window.location.href = "/login";
-        return;
-      }
-
-      const { data: p } = await supabase.from("profiles").select("approved").eq("id", user.id).maybeSingle();
-
-      if (!(p as any)?.approved) {
-        await supabase.auth.signOut();
-        window.location.href = "/pending";
-        return;
-      }
-    })();
-  }, []);
+    if (authLoading) return;
+    if (!user) {
+      window.location.href = "/login";
+      return;
+    }
+    if (!approved) {
+      supabase.auth.signOut();
+      window.location.href = "/pending";
+    }
+  }, [user, approved, authLoading]);
 
   const [view, setView] = useState<WarehouseView>("REALE");
   const [q, setQ] = useState("");
@@ -113,9 +64,6 @@ export default function GiacenzePage() {
   const [msg, setMsg] = useState<string | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE));
-
-  // Admin
-  const [isAdmin, setIsAdmin] = useState(false);
 
   // Popup
   const [editing, setEditing] = useState<DbRow | null>(null);
@@ -135,35 +83,18 @@ const [historyRows, setHistoryRows] = useState<
     created_at: string;
     type: "IN" | "OUT";
     qty: number;
+    returned_qty?: number | null;
     note: string | null;
     created_by_name?: string | null;
     created_by_email?: string | null;
     warehouse?: string | null;
   }>
-  
 >([]);
 const [historyLoading, setHistoryLoading] = useState(false);
 
   // ✅ Scrollbar orizzontale “gemella” (in alto) + tabella
   const tableXRef = useRef<HTMLDivElement | null>(null);
   const topXRef = useRef<HTMLDivElement | null>(null);
-
-  // Admin check
-  useEffect(() => {
-    (async () => {
-      try {
-        const { data, error } = await supabase.rpc("is_admin");
-        if (error) {
-          console.error("is_admin rpc error:", error);
-          setIsAdmin(false);
-          return;
-        }
-        setIsAdmin(!!data);
-      } catch {
-        setIsAdmin(false);
-      }
-    })();
-  }, []);
 
   // ✅ sync scroll top <-> table
   useEffect(() => {
@@ -255,7 +186,7 @@ async function openHistory(code: string) {
 
   const { data, error } = await supabase
     .from("movements")
-    .select("id,created_at,type,qty,note,created_by_name,created_by_email,warehouse")
+    .select("id,created_at,type,qty,returned_qty,note,created_by_name,created_by_email,warehouse")
     .eq("code", code)
     .order("created_at", { ascending: false })
     .limit(200);
@@ -315,6 +246,43 @@ async function openHistory(code: string) {
   load();
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, []);
+
+  // Apri direttamente il materiale da URL (?code=X&warehouse=Y)
+  useEffect(() => {
+    if (!urlCode || !urlWarehouse || urlWarehouse !== "PRM" && urlWarehouse !== "REALE") return;
+
+    setView(urlWarehouse);
+    setQ(urlCode);
+
+    (async () => {
+      const { data: live, error } = await supabase
+        .from("excel_live")
+        .select("code,warehouse,qty_free,qty_blocked,qty_quality,initial_qty,row_json")
+        .eq("code", urlCode)
+        .eq("warehouse", urlWarehouse)
+        .maybeSingle();
+
+      if (error || !live) return;
+
+      const { data: item } = await supabase.from("items").select("name,um").eq("code", urlCode).maybeSingle();
+
+      const row: DbRow = {
+        code: live.code,
+        warehouse: live.warehouse,
+        qty_free: Number(live.qty_free ?? 0),
+        qty_blocked: Number(live.qty_blocked ?? 0),
+        qty_quality: Number(live.qty_quality ?? 0),
+        initial_qty: Number(live.initial_qty ?? 0),
+        row_json: live.row_json ?? {},
+        name: (item as any)?.name ?? null,
+        um: (item as any)?.um ?? null,
+      };
+
+      openEdit(row);
+      router.replace("/giacenze", { scroll: false });
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlCode, urlWarehouse]);
 
 useEffect(() => {
   if (page === 1 && view === "REALE" && sortKey === "Materiale" && sortDir === "none") return;
@@ -606,10 +574,6 @@ await writeAuditLog({
     XLSX.writeFile(wb, `giacenze_${view.toLowerCase()}_pagina_${page}.xlsx`);
   }
 
-  function downloadExcelLive() {
-    window.location.href = "/api/excel-live/download";
-  }
-
   return (
     <main className="panel" style={{ overflowX: "hidden" }}>
       {/* HEADER */}
@@ -620,6 +584,7 @@ await writeAuditLog({
       {/* FILTRI */}
       <div className="card" style={{ padding: 12 }}>
         <div
+          className="mobileGrid1"
           style={{
             display: "grid",
             gridTemplateColumns: "180px minmax(240px,1fr) auto auto auto auto",
@@ -666,10 +631,6 @@ await writeAuditLog({
           <button className="btn" onClick={exportXlsx}>
             Export pagina
           </button>
-
-          <button className="btn" onClick={downloadExcelLive} title="Scarica il file Excel LIVE (tutte le righe)">
-            Download Excel LIVE
-          </button>
         </div>
 
         <div style={{ marginTop: 10, fontSize: 12, opacity: 0.8 }}>
@@ -684,9 +645,10 @@ await writeAuditLog({
         <div style={{ padding: 12 }}>Caricamento…</div>
       ) : (
         <>
-          {/* ✅ SCROLLBAR ORIZZONTALE SEMPRE DISPONIBILE */}
+          {/* ✅ SCROLLBAR ORIZZONTALE SEMPRE DISPONIBILE - nascosta su mobile */}
           <div
             ref={topXRef}
+            className="giacenzeTopScrollBar hideOnMobile"
             style={{
               position: "sticky",
               top: 10,
@@ -704,13 +666,15 @@ await writeAuditLog({
             <div style={{ width: 2600, height: 1 }} />
           </div>
 
-          {/* ✅ TABELLA */}
+          {/* ✅ TABELLA - scroll interno su mobile */}
           <div
             ref={tableXRef}
+            className="tableWrap"
             style={{
               overflowX: "auto",
               overflowY: "hidden",
               width: "100%",
+              maxWidth: "100%",
               marginTop: 10,
               WebkitOverflowScrolling: "touch",
             }}
@@ -1068,7 +1032,7 @@ await writeAuditLog({
         </button>
       </div>
 
-      <div style={{ overflowX: "auto", marginTop: 12 }}>
+      <div className="tableWrap" style={{ marginTop: 12 }}>
         <table className="table">
           <thead>
             <tr>
@@ -1101,7 +1065,9 @@ await writeAuditLog({
                   <td>{m.type === "IN" ? "Entrata" : "Uscita"}</td>
                   <td style={{ fontWeight: 900 }}>
                     {m.type === "IN" ? "+" : "-"}
-                    {Math.abs(Number(m.qty ?? 0))}
+                    {m.type === "IN"
+                      ? Math.abs(Number(m.qty ?? 0))
+                      : Math.max(0, Math.abs(Number(m.qty ?? 0)) - Number(m.returned_qty ?? 0))}
                   </td>
                   <td>{m.warehouse ?? "-"}</td>
                   <td>{m.created_by_name ?? m.created_by_email ?? "-"}</td>

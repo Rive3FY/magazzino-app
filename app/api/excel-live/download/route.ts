@@ -1,41 +1,8 @@
 import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { createClient } from "@supabase/supabase-js";
-
-// Stesse colonne della pagina giacenze
-const EXCEL_COLS = [
-  "Def. Progetto",
-  "Materiale",
-  "Descrizione Materiale",
-  "Divisione",
-  "Descrizione Divisione",
-  "Magazzino",
-  "Descrizione Magazzino",
-  "Qnt. a Mag. bloccato",
-  "Controllo Qualità Progetto",
-  "Valore per Stock",
-  "Controllo Qualità Magazzino",
-  "Valore a Magazzino",
-  "Bloccato Progetto",
-  "Scarico Tot",
-  "Qnt. stock prog",
-  "Finalità di Utilizzo",
-  "Gruppo Merci",
-  "Descrizione Gruppo Merci",
-  "Profit Center",
-  "Descrizione Profit Center",
-  "Unità di Misura",
-  "Qnt. a Mag. libero",
-  "Tipo Valore",
-  "Centro Resp.",
-  "Descrizione Centro Resp.",
-  "Descrizione Contab.",
-  "Data Primo utilizzo previsto",
-  "Data Ultimo utilizzo previsto",
-  "Data Prima EM",
-  "Data Ultima EM",
-  "Materiale Pianif.",
-] as const;
+import { createClient as createServerClient } from "../../../_lib/supabase/server";
+import { EXCEL_COLS } from "../../../_lib/excel-cols";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -52,6 +19,15 @@ function getSupabaseAdmin() {
 
 export async function GET() {
   try {
+    const serverSupabase = await createServerClient();
+    const { data: { user } } = await serverSupabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
+    }
+    const { data: isAdm, error: errAdmin } = await serverSupabase.rpc("is_admin");
+    if (errAdmin || !isAdm) {
+      return NextResponse.json({ error: "Accesso negato: solo admin" }, { status: 403 });
+    }
     const supabase = getSupabaseAdmin();
 
     // Prendo tutto excel_live

@@ -78,6 +78,7 @@ export default function ScaffaliPage() {
   const [popupForm, setPopupForm] = useState<{ PRM: { shelf: string; place: string }; REALE: { shelf: string; place: string } } | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [isNfcSupported, setIsNfcSupported] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
   const [cameraScanning, setCameraScanning] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
@@ -129,6 +130,8 @@ export default function ScaffaliPage() {
 
   useEffect(() => {
     setIsNfcSupported(typeof (window as any).NDEFReader !== "undefined");
+    const ua = navigator.userAgent;
+    setIsIOS(/iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
   }, []);
 
   async function saveShelf(code: string, warehouse: "PRM" | "REALE", shelf: string, place: string, preserveNfcBarcode = true) {
@@ -197,7 +200,7 @@ export default function ScaffaliPage() {
 
   async function doAssociateNfc(code: string, warehouse: "PRM" | "REALE", forceReassign = false) {
     if (!isNfcSupported) {
-      setMsg("NFC non supportato. Usa Chrome su Android con HTTPS.");
+      setMsg(isIOS ? "NFC non disponibile su iPhone/iPad. Safari non supporta la scansione NFC. Usa Associa barcode con la fotocamera." : "NFC non supportato. Usa Chrome su Android con HTTPS.");
       return;
     }
     setNfcTagReassign(null);
@@ -514,7 +517,11 @@ export default function ScaffaliPage() {
         )}
         {!isNfcSupported && (
           <div style={{ fontSize: 12, padding: 10, background: "#fef3c7", borderRadius: 8, marginBottom: 12, border: "1px solid #f59e0b" }}>
-            ℹ️ NFC: disponibile solo su <b>Chrome Android</b> con <b>HTTPS</b>. Se non vedi il pulsante o non funziona, verifica che il sito sia su https:// e usa Chrome (non Samsung Internet).
+            {isIOS ? (
+              <>ℹ️ <b>NFC non disponibile su iPhone/iPad.</b> Safari non supporta l&apos;API Web NFC. Usa <b>Associa barcode</b> (fotocamera o scanner) per associare i materiali.</>
+            ) : (
+              <>ℹ️ NFC: disponibile solo su <b>Chrome Android</b> con <b>HTTPS</b>. Su iOS non è supportato. Usa <b>Associa barcode</b> come alternativa.</>
+            )}
           </div>
         )}
 

@@ -1761,3 +1761,98 @@ html, body {
 .nfc-pulse {
   animation: nfcPulse 1s ease-in-out infinite;
 }
+
+/* Stampa etichette - layout condiviso anteprima e stampa (5x10 = 50 per pagina A4) */
+.etichette-print-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 37mm);
+  gap: 1.5mm;
+  padding: 8mm;
+}
+.etichetta-label {
+  width: 37mm;
+  min-height: 25mm;
+  border: 1px dashed #999;
+  padding: 1.5mm;
+  box-sizing: border-box;
+}
+.etichetta-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  font-size: 9px;
+}
+.etichette-preview-wrap {
+  overflow: auto;
+  max-height: 420px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+.etichette-preview {
+  background: white;
+  margin: 12px;
+}
+
+.print-area {
+  position: absolute;
+  left: -99999px;
+  top: 0;
+  width: 210mm;
+  /* Sempre renderizzato per la stampa, ma fuori schermo */
+}
+/* Stampa: nascondi tutto tranne le etichette, una sola pagina per il contenuto */
+@media print {
+  @page {
+    size: A4;
+    margin: 8mm;
+  }
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+  .no-print,
+  aside.sidebar,
+  .sidebarOverlay,
+  header.topbar,
+  .pageBar,
+  .card,
+  .app-footer,
+  .etichette-preview-wrap {
+    display: none !important;
+  }
+  .app, .main, .content, .panel {
+    display: block !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+  .print-area {
+    position: static !important;
+    left: auto !important;
+    display: grid !important;
+    width: auto !important;
+    max-width: 210mm !important;
+    min-height: 0 !important;
+    height: auto !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    background: white !important;
+    color: black !important;
+  }
+  .print-area .etichetta-content,
+  .print-area .etichetta-content * {
+    color: #000 !important;
+  }
+  .etichetta-label {
+    break-inside: avoid;
+  }
+  .print-area {
+    page-break-inside: avoid;
+  }
+}

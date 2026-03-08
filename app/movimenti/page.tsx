@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams, useRouter } from "next/navigation";
 import { createClient } from "../_lib/supabase/client";
 import { BrowserMultiFormatReader } from "@zxing/browser";
@@ -142,6 +143,7 @@ export default function MovimentiPage() {
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const [scanning, setScanning] = useState(false);
   const scanLockedRef = useRef(false);
+  const scanReadyAtRef = useRef<number>(0);
 
   const [closeOpen, setCloseOpen] = useState(false);
   const [closing, setClosing] = useState<MovementRow | null>(null);
@@ -708,6 +710,7 @@ async function handleScannedCode(codeRaw: string) {
 
     stopScan();
     scanLockedRef.current = false;
+    scanReadyAtRef.current = Date.now() + 1500;
 
     setScanning(true);
     await new Promise((r) => setTimeout(r, 100));
@@ -729,6 +732,7 @@ async function handleScannedCode(codeRaw: string) {
       await readerRef.current.decodeFromVideoDevice(undefined, videoEl, async (result) => {
         if (!result) return;
         if (scanLockedRef.current) return;
+        if (Date.now() < scanReadyAtRef.current) return;
 
         const text = String(result.getText?.() ?? "").trim();
         if (!text) return;
@@ -2690,6 +2694,22 @@ async function confirmCartPickup() {
           </div>
         </div>
       )}
+      {scanPopupOpen && scanInfo && typeof document !== "undefined" && createPortal(
+  <div style={{ position: "fixed", top: 12, right: 12, zIndex: 1001 }}>
+    <button
+      className="btn"
+      type="button"
+      onClick={() => {
+        setScanPopupOpen(false);
+        setScanInfo(null);
+        startScan();
+      }}
+    >
+      Scanner
+    </button>
+  </div>,
+  document.body
+)}
       {scanPopupOpen && scanInfo && (
   <div
     onMouseDown={() => {

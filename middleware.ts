@@ -31,6 +31,7 @@ export async function middleware(request: NextRequest) {
   const isPublic =
     path === "/login" ||
     path === "/logout" ||
+    path === "/reset-password" ||
     path.startsWith("/auth/") ||
     path.startsWith("/_next") ||
     path.startsWith("/favicon.ico");

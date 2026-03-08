@@ -23,6 +23,7 @@ export default function LoginPage() {
   });
 
   // Se già loggato → mando su / o /pending in base ad approved/admin
+  // Se in flusso reset password → mando a aggiorna-password
   useEffect(() => {
     let alive = true;
 
@@ -121,7 +122,7 @@ export default function LoginPage() {
       setWorking(false);
       return;
     }
-    const redirectTo = `${typeof window !== "undefined" ? window.location.origin : ""}/auth/confirm?next=/login/aggiorna-password`;
+    const redirectTo = `${typeof window !== "undefined" ? window.location.origin : ""}/reset-password`;
     const { error } = await supabase.auth.resetPasswordForEmail(emailVal, { redirectTo });
     if (error) {
       setMsg(error.message);

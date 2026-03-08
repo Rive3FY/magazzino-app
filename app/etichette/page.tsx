@@ -24,10 +24,10 @@ function BarcodeSvg({ value, options }: { value: string; options?: Record<string
       try {
         JsBarcode(svgRef.current, value, {
           format: "CODE128",
-          width: 1.2,
-          height: 32,
+          width: 1,
+          height: 28,
           displayValue: true,
-          fontSize: 9,
+          fontSize: 8,
           margin: 1,
           ...options,
         });
@@ -196,7 +196,7 @@ export default function EtichettePage() {
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       tmp.appendChild(svg);
       try {
-        JsBarcode(svg, l.barcodeValue, { format: "CODE128", width: 1.2, height: 32, displayValue: true, fontSize: 9, margin: 1 });
+        JsBarcode(svg, l.barcodeValue, { format: "CODE128", width: 1, height: 28, displayValue: true, fontSize: 8, margin: 1 });
       } catch {}
       const bcHtml = svg.outerHTML;
       tmp.removeChild(svg);
@@ -209,13 +209,13 @@ export default function EtichettePage() {
 @page{size:A4;margin:8mm}
 *{box-sizing:border-box}
 body{margin:0;padding:0;background:#fff}
-.etichette-print-grid{display:grid;grid-template-columns:repeat(4,50mm);gap:2mm;padding:8mm;width:max-content}
-.etichetta-label{width:50mm;min-height:35mm;border:1px dashed #999;padding:2.5mm;break-inside:avoid}
-.etichetta-content{display:flex;flex-direction:column;align-items:flex-start;min-height:28mm;gap:2px}
-.etichetta-code{font-weight:800;font-size:12px;line-height:1.2;letter-spacing:-0.02em}
-.etichetta-name{font-size:9px;color:#555;line-height:1.2;max-height:16px;overflow:hidden;text-overflow:ellipsis}
-.etichetta-shelf{font-size:9px;color:#444;line-height:1.2}
-.etichetta-barcode{width:100%;max-width:45mm;overflow:hidden;margin-top:auto;flex-shrink:1;min-height:0}
+.etichette-print-grid{display:grid;grid-template-columns:repeat(6,30mm);gap:2mm;padding:8mm;width:max-content}
+.etichetta-label{width:30mm;height:70mm;border:1px dashed #999;padding:2.5mm;break-inside:avoid;box-sizing:border-box}
+.etichetta-content{display:flex;flex-direction:column;align-items:flex-start;height:100%;gap:1.5mm}
+.etichetta-code{font-weight:800;font-size:10px;line-height:1.2;letter-spacing:-0.02em;word-break:break-all;flex-shrink:0}
+.etichetta-name{font-size:8px;color:#555;line-height:1.3;word-wrap:break-word;overflow-wrap:break-word;word-break:break-word;max-height:24mm;overflow:hidden;display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical}
+.etichetta-shelf{font-size:8px;color:#444;line-height:1.2;flex-shrink:0}
+.etichetta-barcode{width:100%;max-width:25mm;overflow:hidden;margin-top:auto;flex-shrink:1;min-height:0}
 .etichetta-barcode svg{max-width:100%;height:auto;display:block}
 </style>
 </head><body><div class="etichette-print-grid">${labelHtml}</div></body></html>`;

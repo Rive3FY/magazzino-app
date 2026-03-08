@@ -1766,16 +1766,16 @@ html, body {
   animation: nfcPulse 1s ease-in-out infinite;
 }
 
-/* Stampa etichette - 50x35mm per scaffale (4 colonne, ~24 per pagina A4) */
+/* Stampa etichette - 30x70mm per porta etichette adesive (6 colonne per A4) */
 .etichette-print-grid {
   display: grid;
-  grid-template-columns: repeat(4, 50mm);
+  grid-template-columns: repeat(6, 30mm);
   gap: 2mm;
   padding: 8mm;
 }
 .etichetta-label {
-  width: 50mm;
-  min-height: 35mm;
+  width: 30mm;
+  height: 70mm;
   border: 1px dashed #999;
   padding: 2.5mm;
   box-sizing: border-box;
@@ -1784,34 +1784,40 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  min-height: 28mm;
-  gap: 2px;
+  height: 100%;
+  gap: 1.5mm;
 }
 .etichetta-code {
   font-weight: 800;
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1.2;
   flex-shrink: 0;
   letter-spacing: -0.02em;
+  word-break: break-all;
 }
 .etichetta-name {
-  font-size: 9px;
+  font-size: 8px;
   color: #555;
-  line-height: 1.2;
-  max-height: 16px;
+  line-height: 1.3;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  max-height: 24mm;
   overflow: hidden;
-  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
   flex-shrink: 0;
 }
 .etichetta-shelf {
-  font-size: 9px;
+  font-size: 8px;
   color: #444;
   line-height: 1.2;
   flex-shrink: 0;
 }
 .etichetta-barcode {
   width: 100%;
-  max-width: 45mm;
+  max-width: 25mm;
   overflow: hidden;
   margin-top: auto;
   flex-shrink: 1;
@@ -1824,7 +1830,7 @@ html, body {
 }
 .etichette-preview-wrap {
   overflow: auto;
-  max-height: 420px;
+  max-height: 520px;
   background: #f8fafc;
   border-radius: 8px;
   border: 1px solid #e2e8f0;

@@ -2748,6 +2748,14 @@ async function confirmCartPickup() {
           Chiudi
         </button>
 
+        <button className="btn" onClick={() => {
+          setScanPopupOpen(false);
+          setScanInfo(null);
+          setTimeout(() => startScan(), 0);
+        }}>
+          Nuova scansione
+        </button>
+
         {scanMode === "CART" && (
           <button className="btn btnPrimary" onClick={addScannedToCart}>
             Aggiungi al carrello

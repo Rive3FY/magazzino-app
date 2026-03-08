@@ -43,12 +43,13 @@ export default function EtichettePage() {
 
   const [items, setItems] = useState<ItemRow[]>([]);
   const [shelves, setShelves] = useState<Record<string, Record<string, { shelf: string; place: string; barcode: string }>>>({});
+  const [qtyByCodeWh, setQtyByCodeWh] = useState<Record<string, Record<string, number>>>({});
   const [loading, setLoading] = useState(true);
   const [warehouseFilter, setWarehouseFilter] = useState<"PRM" | "REALE" | "both">("both");
-  const [onlyWithShelf, setOnlyWithShelf] = useState(true);
+  const [onlyWithShelf, setOnlyWithShelf] = useState(false);
   const [labelType, setLabelType] = useState<"materiale" | "scaffale">("scaffale");
   const [q, setQ] = useState("");
-  const [selected, setSelected] = useState<Set<string> | null>(null);
+  const [selected, setSelected] = useState<Set<string> | null>(new Set());
   const [msg, setMsg] = useState<string | null>(null);
   const headerCheckRef = useRef<HTMLInputElement>(null);
 
@@ -62,6 +63,13 @@ export default function EtichettePage() {
       const { data: shelfData, error: eShelf } = await supabase.from("material_shelves").select("code,warehouse,shelf,place,barcode");
       if (eShelf) throw eShelf;
 
+      const { data: liveData, error: eLive } = await supabase
+        .from("excel_live")
+        .select("code,warehouse,qty_free")
+        .gt("qty_free", 0);
+
+      if (eLive) throw eLive;
+
       const shelfMap: Record<string, Record<string, { shelf: string; place: string; barcode: string }>> = {};
       for (const s of shelfData ?? []) {
         const row = s as ShelfRow;
@@ -73,8 +81,16 @@ export default function EtichettePage() {
         };
       }
 
+      const qtyMap: Record<string, Record<string, number>> = {};
+      for (const r of liveData ?? []) {
+        const row = r as { code: string; warehouse: string; qty_free: number };
+        if (!qtyMap[row.code]) qtyMap[row.code] = {};
+        qtyMap[row.code][row.warehouse] = Number(row.qty_free ?? 0);
+      }
+
       setItems(itemsData ?? []);
       setShelves(shelfMap);
+      setQtyByCodeWh(qtyMap);
     } catch (e: any) {
       setMsg("Errore caricamento: " + (e?.message ?? String(e)));
     } finally {
@@ -92,14 +108,19 @@ export default function EtichettePage() {
     if (warehouseFilter === "both") {
       const prm = shelves[it.code]?.PRM;
       const reale = shelves[it.code]?.REALE;
+      const prmQty = (qtyByCodeWh[it.code]?.PRM ?? 0) > 0;
+      const realeQty = (qtyByCodeWh[it.code]?.REALE ?? 0) > 0;
+      if (!prmQty && !realeQty) return false;
       if (onlyWithShelf) {
-        const hasPrm = prm && (prm.shelf || prm.place);
-        const hasReale = reale && (reale.shelf || reale.place);
+        const hasPrm = prm && (prm.shelf || prm.place) && prmQty;
+        const hasReale = reale && (reale.shelf || reale.place) && realeQty;
         return hasPrm || hasReale;
       }
       return true;
     }
     const entry = shelves[it.code]?.[warehouseFilter];
+    const hasQty = (qtyByCodeWh[it.code]?.[warehouseFilter] ?? 0) > 0;
+    if (!hasQty) return false;
     if (onlyWithShelf && (!entry || (!entry.shelf && !entry.place))) return false;
     return true;
   });
@@ -108,6 +129,7 @@ export default function EtichettePage() {
   const selectableCount = filtered.reduce((acc, it) => {
     let n = 0;
     for (const wh of whs) {
+      if ((qtyByCodeWh[it.code]?.[wh] ?? 0) <= 0) continue;
       const entry = shelves[it.code]?.[wh] ?? { shelf: "", place: "", barcode: "" };
       if (onlyWithShelf && !entry.shelf && !entry.place) continue;
       n++;
@@ -120,6 +142,7 @@ export default function EtichettePage() {
     const prm = shelves[it.code]?.PRM ?? { shelf: "", place: "", barcode: "" };
     const reale = shelves[it.code]?.REALE ?? { shelf: "", place: "", barcode: "" };
     for (const wh of whs) {
+      if ((qtyByCodeWh[it.code]?.[wh] ?? 0) <= 0) continue;
       const entry = wh === "PRM" ? prm : reale;
       if (onlyWithShelf && !entry.shelf && !entry.place) continue;
       if (selected !== null && !selected.has(`${it.code}:${wh}`)) continue;
@@ -140,6 +163,7 @@ export default function EtichettePage() {
       const allKeys = new Set<string>();
       for (const it of filtered) {
         for (const w of whs) {
+          if ((qtyByCodeWh[it.code]?.[w] ?? 0) <= 0) continue;
           const entry = shelves[it.code]?.[w] ?? { shelf: "", place: "", barcode: "" };
           if (onlyWithShelf && !entry.shelf && !entry.place) continue;
           allKeys.add(`${it.code}:${w}`);
@@ -241,7 +265,7 @@ body{margin:0;padding:0;background:#fff}
 
       <div className="card" style={{ padding: 12, margin: 12 }}>
         <div style={{ fontSize: 13, color: "#64748b", marginBottom: 16 }}>
-          Genera etichette con barcode per materiali e scaffali. <b>Scarica anteprima</b> per salvare un file HTML da aprire e stampare (Ctrl+P).
+          Genera etichette con barcode per materiali e scaffali. Vengono mostrati solo i materiali con giacenza disponibile (qty &gt; 0). <b>Scarica anteprima</b> per salvare un file HTML da aprire e stampare (Ctrl+P).
         </div>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 16 }}>
@@ -314,12 +338,14 @@ body{margin:0;padding:0;background:#fff}
                     <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, width: 80 }}>Magazzino</th>
                     <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, width: 80 }}>Scaffale</th>
                     <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600 }}>Luogo</th>
+                    <th style={{ padding: "10px 12px", textAlign: "right", fontWeight: 600, width: 70 }}>Giacenza</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map((it) => {
-                    const whs: Array<"PRM" | "REALE"> = warehouseFilter === "both" ? ["PRM", "REALE"] : [warehouseFilter];
-                    return whs.map((wh) => {
+                    const whsRow: Array<"PRM" | "REALE"> = warehouseFilter === "both" ? ["PRM", "REALE"] : [warehouseFilter];
+                    return whsRow.map((wh) => {
+                      if ((qtyByCodeWh[it.code]?.[wh] ?? 0) <= 0) return null;
                       const entry = shelves[it.code]?.[wh] ?? { shelf: "", place: "", barcode: "" };
                       if (onlyWithShelf && !entry.shelf && !entry.place) return null;
                       const key = `${it.code}:${wh}`;
@@ -348,6 +374,7 @@ body{margin:0;padding:0;background:#fff}
                           </td>
                           <td style={{ padding: "8px 12px" }}>{entry.shelf || "—"}</td>
                           <td style={{ padding: "8px 12px", color: "#64748b" }}>{entry.place || "—"}</td>
+                          <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600 }}>{qtyByCodeWh[it.code]?.[wh] ?? 0}</td>
                         </tr>
                       );
                     });

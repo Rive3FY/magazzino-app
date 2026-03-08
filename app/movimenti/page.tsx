@@ -200,6 +200,7 @@ export default function MovimentiPage() {
   const [scanPopupOpen, setScanPopupOpen] = useState(false);
   const [scanInfo, setScanInfo] = useState<QuickMaterialInfo | null>(null);
   const [scanQty, setScanQty] = useState("1");
+  const [scanSource, setScanSource] = useState<"barcode" | "nfc" | null>(null);
 
   const [type, setType] = useState<"IN" | "OUT">("OUT");
   const [warehouse, setWarehouse] = useState<"PRM" | "REALE" | "MISTO">("PRM");
@@ -388,6 +389,7 @@ async function handleScannedCode(codeRaw: string) {
   setScanInfo(info);
   setScanQty("1");
   setScanPopupOpen(true);
+  setScanSource("barcode");
 }
   async function loadImageAsDataUrl(src: string): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -957,7 +959,13 @@ async function handleScannedCode(codeRaw: string) {
   setScanInfo(null);
   setScanQty("1");
   setMsg(null);
-  setCartOpen(true);
+  if (scanMode === "CART" && scanSource) {
+    if (scanSource === "nfc") startCartNfcScan();
+    else startScan();
+  } else {
+    setCartOpen(true);
+  }
+  setScanSource(null);
 }
   async function startCartNfcScan() {
     if (!isNfcSupported) {
@@ -965,6 +973,9 @@ async function handleScannedCode(codeRaw: string) {
       setMsg(isIOS ? "NFC non disponibile su iPhone/iPad. Usa barcode o manuale." : "NFC richiede Chrome su Android con HTTPS.");
       return;
     }
+    setCartOpen(false);
+    setScanInfo(null);
+    setScanSource("nfc");
     setCartNfcScanning(true);
     setMsg(null);
     try {
@@ -1001,6 +1012,12 @@ async function handleScannedCode(codeRaw: string) {
       setCartNfcScanning(false);
     }
   }
+  function stopNfcScan() {
+    setCartNfcScanning(false);
+    setScanInfo(null);
+    setScanSource(null);
+    if (cart.length > 0) setCartOpen(true);
+  }
   async function addCartManualByCode(code: string) {
     const c = String(code ?? "").trim();
     if (!c) return;
@@ -1021,6 +1038,7 @@ async function handleScannedCode(codeRaw: string) {
     setScanInfo(info);
     setScanQty("1");
     setScanPopupOpen(true);
+    setScanSource(null);
   }
   async function addCartManual() {
     const code = cartManualCode.trim();
@@ -2346,10 +2364,7 @@ async function confirmCartPickup() {
           )}
         </div>
 
-        <div style={{ marginTop: 12, display: scanning ? "block" : "none" }}>
-          <video ref={videoRef} style={{ width: "100%", borderRadius: 12, background: "black" }} muted playsInline />
-          <div style={{ fontSize: 12, opacity: 0.85, marginTop: 6 }}>Inquadra il codice a barre con la fotocamera.</div>
-        </div>
+        {/* Video spostato nel popup scanner */}
 
         <div className="mobileFormRow" style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10, marginTop: 12 }}>
           <div style={{ gridColumn: "span 8" }}>
@@ -3365,93 +3380,83 @@ async function confirmCartPickup() {
           </div>
         </div>
       )}
-      {scanPopupOpen && scanInfo && typeof document !== "undefined" && createPortal(
-  <div style={{ position: "fixed", top: 12, right: 12, zIndex: 1001 }}>
-    <button
-      className="btn"
-      type="button"
-      onClick={() => {
-        setScanPopupOpen(false);
-        setScanInfo(null);
-        startScan();
-      }}
-    >
-      Scanner
-    </button>
-  </div>,
-  document.body
-)}
-      {scanPopupOpen && scanInfo && (
+      {(scanning || cartNfcScanning || (scanInfo && scanMode === "CART")) && (
   <div
-    onMouseDown={() => {
-      setScanPopupOpen(false);
-      setScanInfo(null);
-    }}
     style={{
       position: "fixed",
       inset: 0,
-      background: "rgba(15,23,42,0.35)",
+      background: "rgba(15,23,42,0.5)",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
-      padding: 14,
-      zIndex: 1000,
+      padding: 20,
+      zIndex: 1100,
     }}
   >
     <div
-      onMouseDown={(e) => e.stopPropagation()}
       style={{
-        width: "min(640px, 100%)",
         background: "white",
         borderRadius: 14,
-        border: "1px solid rgba(15,23,42,0.16)",
-        boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
-        padding: 12,
+        padding: 24,
+        maxWidth: scanning ? 420 : cartNfcScanning ? 420 : 640,
+        width: "100%",
+        boxShadow: "0 24px 60px rgba(0,0,0,0.3)",
       }}
     >
-      <div style={{ fontWeight: 900, fontSize: 18 }}>
-        Aggiungi al carrello
-      </div>
-
-      <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-        <div><b>Codice:</b> {scanInfo.code}</div>
-        <div><b>Descrizione:</b> {scanInfo.name}</div>
-        <div><b>UM:</b> {scanInfo.um ?? "-"}</div>
-        <div><b>Magazzino:</b> {scanInfo.warehouse}</div>
-        <div><b>Libero:</b> {scanInfo.qtyFree}</div>
-        <div><b>Bloccato:</b> {scanInfo.qtyBlocked}</div>
-        <div><b>Qualità:</b> {scanInfo.qtyQuality}</div>
-      </div>
-
-      {scanMode === "CART" && (
-        <div style={{ marginTop: 12 }}>
-          <label className="label" htmlFor="scanQty">
-            Quantità da prelevare
-          </label>
-          <input
-            id="scanQty"
-            className="input"
-            value={scanQty}
-            onChange={(e) => setScanQty(e.target.value)}
-            inputMode="decimal"
-          />
-        </div>
-      )}
-
-      <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
-        <button className="btn" onClick={() => {
-          setScanPopupOpen(false);
-          setScanInfo(null);
-        }}>
-          Chiudi
-        </button>
-
-        {scanMode === "CART" && (
-          <button className="btn btnPrimary" onClick={addScannedToCart}>
-            Aggiungi al carrello
+      {scanning ? (
+        <>
+          <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner barcode</div>
+          <div style={{ padding: 12, background: "#0f172a", borderRadius: 12, marginBottom: 12 }}>
+            <video ref={videoRef} style={{ width: "100%", maxWidth: 360, borderRadius: 8 }} muted playsInline />
+            <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il codice a barre</div>
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button type="button" className="btn" onClick={() => { stopScan(); setScanInfo(null); if (cart.length > 0) setCartOpen(true); }}>
+              Fine
+            </button>
+            <button type="button" className="btn" onClick={() => { stopScan(); setScanInfo(null); if (cart.length > 0) setCartOpen(true); }}>
+              Chiudi camera
+            </button>
+          </div>
+        </>
+      ) : cartNfcScanning ? (
+        <>
+          <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner NFC</div>
+          <div style={{ padding: 24, background: "#0f172a", borderRadius: 12, marginBottom: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+            <SpinnerIcon />
+            <div style={{ fontSize: 14, color: "#94a3b8" }}>Avvicina il telefono al tag NFC</div>
+          </div>
+          <button type="button" className="btn" onClick={stopNfcScan}>
+            Fine
           </button>
-        )}
-      </div>
+        </>
+      ) : scanInfo && scanMode === "CART" ? (
+        <>
+          <div style={{ fontWeight: 900, fontSize: 18 }}>Aggiungi al carrello</div>
+          <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+            <div><b>Codice:</b> {scanInfo.code}</div>
+            <div><b>Descrizione:</b> {scanInfo.name}</div>
+            <div><b>UM:</b> {scanInfo.um ?? "-"}</div>
+            <div><b>Magazzino:</b> {scanInfo.warehouse}</div>
+            <div><b>Libero:</b> {scanInfo.qtyFree}</div>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <label className="label" htmlFor="scanQty">Quantità da prelevare</label>
+            <input id="scanQty" className="input" value={scanQty} onChange={(e) => setScanQty(e.target.value)} inputMode="decimal" />
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+            <button className="btn" onClick={() => { setScanInfo(null); scanSource === "nfc" ? startCartNfcScan() : startScan(); }}>
+              Salta (scansiona altro)
+            </button>
+            <button className="btn btnPrimary" onClick={addScannedToCart}>
+              Aggiungi e continua
+            </button>
+            <button className="btn" onClick={() => { stopScan(); setScanInfo(null); setScanSource(null); if (cart.length > 0) setCartOpen(true); }}>
+              Fine
+            </button>
+          </div>
+        </>
+      ) : null}
     </div>
   </div>
 )}

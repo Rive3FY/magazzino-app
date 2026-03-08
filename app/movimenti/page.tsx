@@ -698,6 +698,13 @@ async function handleScannedCode(codeRaw: string) {
   async function startScan() {
     setMsg(null);
     setOpen(false);
+    setScanPopupOpen(false);
+    setScanInfo(null);
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMsg("La fotocamera richiede HTTPS. Accedi al sito con https:// (non http://). Su localhost funziona comunque.");
+      return;
+    }
 
     stopScan();
     scanLockedRef.current = false;

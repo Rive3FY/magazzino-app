@@ -437,6 +437,10 @@ export default function ScaffaliPage() {
   async function startCameraScanFromBarcodeInput() {
     if (!barcodeInput) return;
     setMsg(null);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMsg("La fotocamera richiede HTTPS. Accedi al sito con https:// (non http://). Su localhost funziona comunque.");
+      return;
+    }
     stopCameraScan();
     scanLockedRef.current = false;
     setCameraScanning(true);

@@ -24,17 +24,17 @@ function BarcodeSvg({ value, options }: { value: string; options?: Record<string
       try {
         JsBarcode(svgRef.current, value, {
           format: "CODE128",
-          width: 1,
-          height: 28,
+          width: 1.2,
+          height: 32,
           displayValue: true,
-          fontSize: 8,
+          fontSize: 9,
           margin: 1,
           ...options,
         });
       } catch {}
     }
   }, [value, options]);
-  return <svg ref={svgRef} style={{ maxWidth: "100%", height: "auto" }} />;
+  return <svg ref={svgRef} style={{ maxWidth: "100%", height: "auto", display: "block" }} />;
 }
 
 export default function EtichettePage() {
@@ -163,33 +163,71 @@ export default function EtichettePage() {
   const selectAll = () => setSelected(null);
   const deselectAll = () => setSelected(new Set());
 
-  const printAreaRef = useRef<HTMLDivElement>(null);
-
-  const handlePrint = () => {
-    const el = printAreaRef.current;
-    if (!el || labels.length === 0) return;
-    const printWin = window.open("", "_blank", "noopener,noreferrer");
-    if (!printWin) {
-      setMsg("Consenti i popup per stampare.");
-      return;
-    }
-    printWin.document.write(`
-<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etichette</title>
+  function buildLabelsHtml(): string {
+    const esc = (s: string) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const tmp = document.createElement("div");
+    tmp.style.cssText = "position:absolute;left:-9999px;top:0;visibility:hidden";
+    document.body.appendChild(tmp);
+    const labelHtml = labels.map((l) => {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      tmp.appendChild(svg);
+      try {
+        JsBarcode(svg, l.barcodeValue, { format: "CODE128", width: 1.2, height: 32, displayValue: true, fontSize: 9, margin: 1 });
+      } catch {}
+      const bcHtml = svg.outerHTML;
+      tmp.removeChild(svg);
+      const shelfLine = labelType === "scaffale" ? `<div class="etichetta-shelf"><b>${esc(l.warehouse)}</b> · ${esc(l.shelf)}${l.place ? ` · ${esc(l.place)}` : ""}</div>` : "";
+      return `<div class="etichetta-label"><div class="etichetta-content"><div class="etichetta-code">${esc(l.code)}</div><div class="etichetta-name">${esc(l.name)}</div>${shelfLine}<div class="etichetta-barcode">${bcHtml}</div></div></div>`;
+    }).join("");
+    tmp.remove();
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etichette</title>
 <style>
 @page{size:A4;margin:8mm}
 *{box-sizing:border-box}
 body{margin:0;padding:0;background:#fff}
-.etichette-print-grid{display:grid;grid-template-columns:repeat(5,37mm);gap:1.5mm;padding:8mm;width:max-content}
-.etichetta-label{width:37mm;min-height:25mm;border:1px dashed #999;padding:1.5mm;break-inside:avoid}
-.etichetta-content{display:flex;flex-direction:column;align-items:flex-start;font-size:9px}
+.etichette-print-grid{display:grid;grid-template-columns:repeat(4,50mm);gap:2mm;padding:8mm;width:max-content}
+.etichetta-label{width:50mm;min-height:35mm;border:1px dashed #999;padding:2.5mm;break-inside:avoid}
+.etichetta-content{display:flex;flex-direction:column;align-items:flex-start;min-height:28mm;gap:2px}
+.etichetta-code{font-weight:800;font-size:12px;line-height:1.2;letter-spacing:-0.02em}
+.etichetta-name{font-size:9px;color:#555;line-height:1.2;max-height:16px;overflow:hidden;text-overflow:ellipsis}
+.etichetta-shelf{font-size:9px;color:#444;line-height:1.2}
+.etichetta-barcode{width:100%;max-width:45mm;overflow:hidden;margin-top:auto;flex-shrink:1;min-height:0}
+.etichetta-barcode svg{max-width:100%;height:auto;display:block}
 </style>
-</head><body><div class="etichette-print-grid">${el.innerHTML}</div></body></html>`);
-    printWin.document.close();
-    printWin.focus();
+</head><body><div class="etichette-print-grid">${labelHtml}</div></body></html>`;
+  }
+
+  const handleDownload = () => {
+    if (labels.length === 0) return;
+    const html = buildLabelsHtml();
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `etichette-${new Date().toISOString().slice(0, 10)}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handlePrint = () => {
+    if (labels.length === 0) return;
+    const html = buildLabelsHtml();
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText = "position:absolute;width:0;height:0;border:0;visibility:hidden";
+    document.body.appendChild(iframe);
+    const doc = iframe.contentWindow?.document;
+    if (!doc) {
+      iframe.remove();
+      return;
+    }
+    doc.open();
+    doc.write(html);
+    doc.close();
+    iframe.contentWindow?.focus();
     setTimeout(() => {
-      printWin.print();
-      printWin.close();
-    }, 400);
+      iframe.contentWindow?.print();
+      setTimeout(() => iframe.remove(), 100);
+    }, 300);
   };
 
   if (adminLoading) return <div style={{ padding: 20 }}>Controllo permessi...</div>;
@@ -203,7 +241,7 @@ body{margin:0;padding:0;background:#fff}
 
       <div className="card" style={{ padding: 12, margin: 12 }}>
         <div style={{ fontSize: 13, color: "#64748b", marginBottom: 16 }}>
-          Genera etichette con barcode per materiali e scaffali. Stampa con Ctrl+P (o Cmd+P su Mac).
+          Genera etichette con barcode per materiali e scaffali. <b>Scarica anteprima</b> per salvare un file HTML da aprire e stampare (Ctrl+P).
         </div>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 16 }}>
@@ -240,8 +278,6 @@ body{margin:0;padding:0;background:#fff}
             </select>
           </div>
         </div>
-
-        {msg && <div style={{ marginBottom: 12, color: "#dc2626", fontWeight: 600 }}>{msg}</div>}
 
         {loading ? (
           <div style={{ padding: 24, textAlign: "center", color: "#64748b" }}>Caricamento...</div>
@@ -320,9 +356,23 @@ body{margin:0;padding:0;background:#fff}
               </table>
             </div>
 
-            <button type="button" className="btn btnPrimary no-print" onClick={handlePrint} disabled={labels.length === 0}>
-              🖨️ Stampa {labels.length} etichette
-            </button>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button type="button" className="btn btnPrimary no-print" onClick={handleDownload} disabled={labels.length === 0} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Scarica anteprima ({labels.length} etichette)
+              </button>
+              <button type="button" className="btn no-print" onClick={handlePrint} disabled={labels.length === 0} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <polyline points="6 9 6 2 18 2 18 9" />
+                  <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                </svg>
+                Stampa
+              </button>
+            </div>
 
             {labels.length > 0 && (
               <details className="no-print" style={{ marginTop: 16 }}>
@@ -332,14 +382,14 @@ body{margin:0;padding:0;background:#fff}
                     {labels.map((l, i) => (
                       <div key={i} className="etichetta-label">
                         <div className="etichetta-content">
-                          <div style={{ fontWeight: 800, fontSize: 11, marginBottom: 1 }}>{l.code}</div>
-                          <div style={{ fontSize: 8, color: "#64748b", marginBottom: 2, maxHeight: 16, overflow: "hidden", textOverflow: "ellipsis" }}>{l.name}</div>
+                          <div className="etichetta-code">{l.code}</div>
+                          <div className="etichetta-name">{l.name}</div>
                           {labelType === "scaffale" && (
-                            <div style={{ fontSize: 8, marginBottom: 2 }}>
+                            <div className="etichetta-shelf">
                               <b>{l.warehouse}</b> · {l.shelf}{l.place ? ` · ${l.place}` : ""}
                             </div>
                           )}
-                          <div style={{ width: "100%", maxWidth: 85 }}>
+                          <div className="etichetta-barcode">
                             <BarcodeSvg value={l.barcodeValue} />
                           </div>
                         </div>
@@ -353,19 +403,19 @@ body{margin:0;padding:0;background:#fff}
         )}
       </div>
 
-      {/* Area stampa: etichette in griglia per A4 */}
-      <div ref={printAreaRef} className="print-area etichette-print-grid">
+      {/* Area stampa: usata per anteprima; la stampa genera il contenuto al volo */}
+      <div className="print-area etichette-print-grid">
         {labels.map((l, i) => (
           <div key={i} className="etichetta-label">
             <div className="etichetta-content">
-              <div style={{ fontWeight: 800, fontSize: 11, marginBottom: 1 }}>{l.code}</div>
-              <div style={{ fontSize: 8, color: "#64748b", marginBottom: 2, maxHeight: 16, overflow: "hidden", textOverflow: "ellipsis" }}>{l.name}</div>
+              <div className="etichetta-code">{l.code}</div>
+              <div className="etichetta-name">{l.name}</div>
               {labelType === "scaffale" && (
-                <div style={{ fontSize: 8, marginBottom: 2 }}>
+                <div className="etichetta-shelf">
                   <b>{l.warehouse}</b> · {l.shelf}{l.place ? ` · ${l.place}` : ""}
                 </div>
               )}
-              <div style={{ width: "100%", maxWidth: 85 }}>
+              <div className="etichetta-barcode">
                 <BarcodeSvg value={l.barcodeValue} />
               </div>
             </div>

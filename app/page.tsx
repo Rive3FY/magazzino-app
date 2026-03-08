@@ -215,6 +215,11 @@ export default function Home() {
     setMsg(null);
     setOpen(false);
 
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMsg("La fotocamera richiede HTTPS. Accedi al sito con https:// (non http://). Su localhost funziona comunque.");
+      return;
+    }
+
     stopScan();
     scanLockedRef.current = false;
 

@@ -71,6 +71,11 @@ export default function ScanPage() {
   async function startScan() {
     setMsg(null);
 
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMsg("La fotocamera richiede HTTPS. Accedi al sito con https:// (non http://). Su localhost funziona comunque.");
+      return;
+    }
+
     await new Promise((r) => setTimeout(r, 200));
 
     const video = videoRef.current;

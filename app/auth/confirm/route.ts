@@ -1,6 +1,6 @@
 import { type EmailOtpType } from "@supabase/supabase-js";
+import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { createClient } from "../../_lib/supabase/server";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -18,12 +18,29 @@ export async function GET(request: NextRequest) {
   redirectTo.searchParams.delete("next");
   redirectTo.searchParams.delete("code");
 
-  const supabase = await createClient();
+  const response = NextResponse.redirect(redirectTo);
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options);
+          });
+        },
+      },
+    }
+  );
 
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      return NextResponse.redirect(redirectTo);
+      return response;
     }
   } else if (token_hash && type) {
     const { error } = await supabase.auth.verifyOtp({
@@ -32,7 +49,7 @@ export async function GET(request: NextRequest) {
     });
 
     if (!error) {
-      return NextResponse.redirect(redirectTo);
+      return response;
     }
   }
 

@@ -14,7 +14,7 @@ export default function LoginPage() {
 
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
-  const [mode, setMode] = useState<"login" | "signup" | "forgot">("login");
+  const [mode, setMode] = useState<"login" | "signup">("login");
   const [msg, setMsg] = useState<string | null>(null);
   const [rememberMe, setRememberMe] = useState(() => {
     if (typeof window === "undefined") return true;
@@ -113,26 +113,6 @@ export default function LoginPage() {
     window.location.href = "/";
   }
 
-  async function requestPasswordReset() {
-    setMsg(null);
-    setWorking(true);
-    const emailVal = email.trim();
-    if (!emailVal) {
-      setMsg("Inserisci la tua email.");
-      setWorking(false);
-      return;
-    }
-    const redirectTo = `${typeof window !== "undefined" ? window.location.origin : ""}/reset-password`;
-    const { error } = await supabase.auth.resetPasswordForEmail(emailVal, { redirectTo });
-    if (error) {
-      setMsg(error.message);
-      setWorking(false);
-      return;
-    }
-    setMsg("✅ Controlla la tua email per il link di reset password.");
-    setWorking(false);
-  }
-
   async function signUp() {
     setMsg(null);
     setWorking(true);
@@ -185,7 +165,7 @@ export default function LoginPage() {
     <main className="loginPage">
       <div className="loginCardNew">
         <h1 className="loginTitleNew">
-          {mode === "login" ? "ACCEDI" : mode === "forgot" ? "RECUPERA PASSWORD" : "REGISTRATI"}
+          {mode === "login" ? "ACCEDI" : "REGISTRATI"}
         </h1>
 
         <form
@@ -194,7 +174,6 @@ export default function LoginPage() {
             e.preventDefault();
             if (working) return;
             if (mode === "login") signIn();
-            else if (mode === "forgot") requestPasswordReset();
             else signUp();
           }}
         >
@@ -272,8 +251,7 @@ export default function LoginPage() {
             </>
           )}
 
-          {mode !== "forgot" && (
-            <div className="loginInputWrap">
+          <div className="loginInputWrap">
               <span className="loginInputIcon" aria-hidden>
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
@@ -290,30 +268,18 @@ export default function LoginPage() {
                 disabled={working}
               />
             </div>
-          )}
 
           {mode === "login" && (
             <div className="loginOptions">
               <label className="loginRemember">
                 <input
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="loginCheckbox"
-              />
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="loginCheckbox"
+                />
                 <span>Ricordami</span>
               </label>
-              <a
-                href="#"
-                className="loginForgot"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setMode("forgot");
-                  setMsg(null);
-                }}
-              >
-                Password dimenticata?
-              </a>
             </div>
           )}
 
@@ -324,16 +290,14 @@ export default function LoginPage() {
           >
             {mode === "login"
               ? working ? "Accesso…" : "ACCEDI"
-              : mode === "forgot"
-                ? working ? "Invio…" : "INVIA LINK"
-                : working ? "Creazione…" : "REGISTRATI"}
+              : working ? "Creazione…" : "REGISTRATI"}
           </button>
 
           <button
             type="button"
             className="loginBtnSecondary"
             onClick={() => {
-              setMode(mode === "login" ? "signup" : mode === "forgot" ? "login" : "login");
+              setMode(mode === "login" ? "signup" : "login");
               setMsg(null);
             }}
             disabled={working}

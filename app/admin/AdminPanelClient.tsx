@@ -91,6 +91,9 @@ export default function AdminPanelClient() {
   // RESET MAGAZZINO
   const [resetting, setResetting] = useState(false);
 
+  // DISCONNETTI TUTTI (temporaneo)
+  const [disconnectingAll, setDisconnectingAll] = useState(false);
+
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       setMyUserId(data.user?.id ?? null);
@@ -266,6 +269,26 @@ export default function AdminPanelClient() {
     }
   }
 
+  async function handleDisconnectAll() {
+    const ok = confirm("Disconnettere TUTTI gli utenti (incluso te)?");
+    if (!ok) return;
+
+    setDisconnectingAll(true);
+    try {
+      const res = await fetch("/api/admin/force-logout", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error ?? "Errore");
+        return;
+      }
+      alert("Comando inviato. Tutti verranno disconnessi.");
+      await supabase.auth.signOut();
+      window.location.href = "/login";
+    } finally {
+      setDisconnectingAll(false);
+    }
+  }
+
   async function handleResetMagazzino() {
     const ok1 = window.confirm(
       "ATTENZIONE:\n\nQuesta operazione cancellerà TUTTI i movimenti, TUTTE le giacenze live e TUTTO l'import Excel originale.\n\nL'operazione è irreversibile.\n\nVuoi continuare?"
@@ -379,6 +402,18 @@ export default function AdminPanelClient() {
       <div className="pageBar">
         <div className="pageBarTitle">Admin Panel</div>
         <div className="pageBarRight" style={{ display: "flex", gap: 8 }}>
+          <button
+            className="btn"
+            onClick={handleDisconnectAll}
+            disabled={disconnectingAll}
+            style={{
+              borderColor: "rgba(245,158,11,0.6)",
+              background: "rgba(245,158,11,0.12)",
+              color: "#92400e",
+            }}
+          >
+            {disconnectingAll ? "..." : "Disconnetti tutti"}
+          </button>
           <button
             className="btn"
             onClick={handleResetMagazzino}

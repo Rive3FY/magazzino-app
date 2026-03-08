@@ -155,7 +155,7 @@ export default function ScaffaliPage() {
   function buildConfirmData(code: string, warehouse: "PRM" | "REALE") {
     const item = items.find((i) => i.code === code);
     const entry = shelves[code]?.[warehouse] ?? { shelf: "", place: "", nfcTagId: "", barcode: "" };
-    const otherWh = warehouse === "PRM" ? "REALE" : "PRM";
+    const otherWh: "PRM" | "REALE" = warehouse === "PRM" ? "REALE" : "PRM";
     const otherEntry = shelves[code]?.[otherWh] ?? { shelf: "", place: "", nfcTagId: "", barcode: "" };
     const otherShelf = otherEntry.shelf.trim();
     const otherPlace = otherEntry.place.trim();

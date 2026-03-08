@@ -41,6 +41,7 @@ export type MovementRow = {
   referee_name: string | null;
   closed_at: string | null;
   closed_by: string | null;
+  movement_group_id?: string | null;
 };
 
 export type ReferentRow = {

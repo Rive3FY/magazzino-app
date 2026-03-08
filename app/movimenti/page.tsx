@@ -92,6 +92,87 @@ function PencilIcon({ muted }: { muted?: boolean }) {
   );
 }
 
+function CartIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="9" cy="21" r="1" />
+      <circle cx="20" cy="21" r="1" />
+      <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
+    </svg>
+  );
+}
+
+function BarcodeIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <rect x="2" y="6" width="2" height="12" />
+      <rect x="6" y="6" width="1" height="12" />
+      <rect x="9" y="6" width="2" height="12" />
+      <rect x="13" y="6" width="1" height="12" />
+      <rect x="16" y="6" width="2" height="12" />
+      <rect x="20" y="6" width="2" height="12" />
+    </svg>
+  );
+}
+
+function NfcIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="5" y="2" width="14" height="20" rx="2" />
+      <path d="M9 7h6" />
+      <path d="M9 11h6" />
+      <path d="M9 15h4" />
+      <path d="M12 6v12" />
+    </svg>
+  );
+}
+
+function SpinnerIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 1s linear infinite", transformOrigin: "center" }}>
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
+}
+
+function AddIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M18 6L6 18" />
+      <path d="M6 6l12 12" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 6L9 17l-5-5" />
+    </svg>
+  );
+}
+
 export default function MovimentiPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -106,8 +187,15 @@ export default function MovimentiPage() {
   const [cartOpen, setCartOpen] = useState(false);
   const [cart, setCart] = useState<CartRow[]>([]);
   const [cartBusy, setCartBusy] = useState(false);
+  const [cartManualCode, setCartManualCode] = useState("");
+  const [cartSuggestions, setCartSuggestions] = useState<DbItem[]>([]);
+  const [cartManualOpen, setCartManualOpen] = useState(false);
+  const [cartManualActiveIndex, setCartManualActiveIndex] = useState(0);
+  const cartManualRef = useRef<HTMLDivElement | null>(null);
+  const [cartNfcScanning, setCartNfcScanning] = useState(false);
+  const [isNfcSupported, setIsNfcSupported] = useState(false);
 
-  const [scanMode, setScanMode] = useState<"NORMAL" | "CART" | "QUICK">("NORMAL");
+  const [scanMode, setScanMode] = useState<"NORMAL" | "CART">("NORMAL");
 
   const [scanPopupOpen, setScanPopupOpen] = useState(false);
   const [scanInfo, setScanInfo] = useState<QuickMaterialInfo | null>(null);
@@ -147,7 +235,9 @@ export default function MovimentiPage() {
 
   const [closeOpen, setCloseOpen] = useState(false);
   const [closing, setClosing] = useState<MovementRow | null>(null);
+  const [closingGroup, setClosingGroup] = useState<MovementRow[]>([]);
   const [closingMeta, setClosingMeta] = useState<{ name: string; um: string } | null>(null);
+  const [editingMovementId, setEditingMovementId] = useState<string | null>(null);
 
   const [returnQty, setReturnQty] = useState<string>("0");
   const [returnToPrm, setReturnToPrm] = useState<string>("0");
@@ -484,17 +574,64 @@ async function handleScannedCode(codeRaw: string) {
     }
   }
 
+  async function loadCartSuggestions(text: string) {
+    const s = String(text ?? "").trim();
+    if (s.length < 2) {
+      setCartSuggestions([]);
+      return;
+    }
+    try {
+      const q1 = await supabase.from("items").select("code,name,um").ilike("code", `%${s}%`).order("code", { ascending: true }).limit(20);
+      const q2 = await supabase.from("items").select("code,name,um").ilike("name", `%${s}%`).order("code", { ascending: true }).limit(20);
+      if (q1.error || q2.error) {
+        setCartSuggestions([]);
+        return;
+      }
+      const map = new Map<string, DbItem>();
+      for (const it of (q1.data ?? []) as any[]) map.set(it.code, it as DbItem);
+      for (const it of (q2.data ?? []) as any[]) map.set(it.code, it as DbItem);
+      const items = Array.from(map.values()).slice(0, 20);
+
+      const codes = items.map((x) => x.code).filter(Boolean);
+      if (codes.length === 0) {
+        setCartSuggestions([]);
+        return;
+      }
+
+      const whFilter = warehouse === "MISTO" ? ["PRM", "REALE"] : [warehouse];
+      const { data: stockRows } = await supabase
+        .from("excel_live")
+        .select("code,warehouse,qty_free")
+        .in("code", codes)
+        .in("warehouse", whFilter)
+        .gt("qty_free", 0);
+
+      const codesWithStock = new Set<string>();
+      for (const r of stockRows ?? []) {
+        const c = (r as any).code;
+        if (c) codesWithStock.add(c);
+      }
+
+      const filtered = items.filter((it) => codesWithStock.has(it.code));
+      setCartSuggestions(filtered.slice(0, 12));
+      setCartManualActiveIndex(0);
+    } catch (e: any) {
+      console.error("loadCartSuggestions catch:", e);
+      setCartSuggestions([]);
+    }
+  }
+
   async function loadHistory(silent = false) {
     if (silent) setRefreshing(true);
     else setLoading(true);
 
     setMsg(null);
 
+    const baseColumns = "id,created_at,type,code,qty,note,warehouse,created_by,created_by_name,status,returned_qty,return_note,referent_id,referee_email,referee_name,closed_at,closed_by";
+
     let q = supabase
       .from("movements")
-      .select(
-        "id,created_at,type,code,qty,note,warehouse,created_by,created_by_name,status,returned_qty,return_note,referent_id,referee_email,referee_name,closed_at,closed_by"
-      )
+      .select(`${baseColumns},movement_group_id`)
       .order("created_at", { ascending: false })
       .limit(PAGE_LIMIT);
 
@@ -508,6 +645,7 @@ async function handleScannedCode(codeRaw: string) {
 
     const materialSearch = fMaterial.trim();
     const shouldFilterMaterial = materialSearch.length >= 2;
+    let materialCodes: string[] = [];
 
     if (shouldFilterMaterial) {
       const { data: foundItems, error: itemsErr } = await supabase
@@ -525,9 +663,9 @@ async function handleScannedCode(codeRaw: string) {
         return;
       }
 
-      const codes = Array.from(new Set((foundItems ?? []).map((x: any) => x.code).filter(Boolean)));
+      materialCodes = Array.from(new Set((foundItems ?? []).map((x: any) => x.code).filter(Boolean)));
 
-      if (codes.length === 0) {
+      if (materialCodes.length === 0) {
         setHistory([]);
         setNameMap({});
         if (silent) setRefreshing(false);
@@ -535,13 +673,31 @@ async function handleScannedCode(codeRaw: string) {
         return;
       }
 
-      q = q.in("code", codes);
+      q = q.in("code", materialCodes);
     }
 
-    const { data, error } = await q;
+    let { data, error } = await q;
 
     if (error) {
-      console.error("loadHistory error:", error);
+      const errMsg = String((error as any)?.message ?? (error as any)?.code ?? "");
+      const looksLikeColumnError = errMsg.includes("movement_group_id") || errMsg.includes("column") || errMsg.includes("PGRST") || errMsg === "";
+      if (looksLikeColumnError) {
+        let qFallback = supabase.from("movements").select(baseColumns).order("created_at", { ascending: false }).limit(PAGE_LIMIT);
+        if (isoFrom) qFallback = qFallback.gte("created_at", isoFrom);
+        if (isoTo) qFallback = qFallback.lte("created_at", isoTo);
+        if (fType !== "ALL") qFallback = qFallback.eq("type", fType);
+        if (fWarehouse !== "ALL") qFallback = qFallback.eq("warehouse", fWarehouse);
+        if (shouldFilterMaterial && materialCodes.length > 0) qFallback = qFallback.in("code", materialCodes);
+        const retry = await qFallback;
+        if (!retry.error) {
+          data = (retry.data ?? []).map((r: Record<string, unknown>) => ({ ...r, movement_group_id: null })) as typeof data;
+          error = null;
+        }
+      }
+    }
+
+    if (error) {
+      console.error("loadHistory error:", (error as any)?.message ?? error);
       setHistory([]);
       setNameMap({});
       if (silent) setRefreshing(false);
@@ -740,10 +896,10 @@ async function handleScannedCode(codeRaw: string) {
         scanLockedRef.current = true;
         stopScan();
         if (scanMode === "NORMAL") {
-  await pickItemByCode(text);
-} else {
-  await handleScannedCode(text);
-}
+          await pickItemByCode(text);
+        } else {
+          await handleScannedCode(text);
+        }
       });
     } catch (e: any) {
       console.error(e);
@@ -800,7 +956,79 @@ async function handleScannedCode(codeRaw: string) {
   setScanInfo(null);
   setScanQty("1");
   setMsg(null);
+  setCartOpen(true);
 }
+  async function startCartNfcScan() {
+    if (!isNfcSupported) {
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      setMsg(isIOS ? "NFC non disponibile su iPhone/iPad. Usa barcode o manuale." : "NFC richiede Chrome su Android con HTTPS.");
+      return;
+    }
+    setCartNfcScanning(true);
+    setMsg(null);
+    try {
+      const ndef = new (window as any).NDEFReader();
+      await ndef.scan();
+      const serialNumber = await new Promise<string>((resolve, reject) => {
+        const handler = (event: any) => {
+          ndef.removeEventListener("reading", handler);
+          resolve(event.serialNumber ?? "unknown");
+        };
+        ndef.addEventListener("reading", handler);
+        setTimeout(() => reject(new Error("Timeout: avvicina il telefono al tag entro 30 secondi")), 30000);
+      });
+      if (!serialNumber || serialNumber === "unknown") {
+        setMsg("Impossibile leggere l'ID del tag. Riprova.");
+        return;
+      }
+      const { data: shelf } = await supabase.from("material_shelves").select("code,warehouse").eq("nfc_tag_id", serialNumber).maybeSingle();
+      if (!shelf) {
+        setMsg(`Tag NFC non associato a nessun materiale.`);
+        return;
+      }
+      const info = await loadMaterialForScan((shelf as any).code, (shelf as any).warehouse);
+      if (!info) {
+        setMsg(`Materiale non trovato in magazzino.`);
+        return;
+      }
+      setScanInfo(info);
+      setScanQty("1");
+      setScanPopupOpen(true);
+    } catch (e: any) {
+      setMsg(e?.message ?? "Errore NFC");
+    } finally {
+      setCartNfcScanning(false);
+    }
+  }
+  async function addCartManualByCode(code: string) {
+    const c = String(code ?? "").trim();
+    if (!c) return;
+    setMsg(null);
+    let info: QuickMaterialInfo | null = null;
+    if (warehouse === "MISTO") {
+      info = await loadMaterialForScan(c, "PRM") ?? await loadMaterialForScan(c, "REALE");
+    } else {
+      info = await loadMaterialForScan(c, warehouse);
+    }
+    if (!info) {
+      setMsg(`Materiale ${c} non trovato${warehouse === "MISTO" ? " in PRM né REALE" : ` in ${warehouse}`}.`);
+      return;
+    }
+    setCartManualCode("");
+    setCartSuggestions([]);
+    setCartManualOpen(false);
+    setScanInfo(info);
+    setScanQty("1");
+    setScanPopupOpen(true);
+  }
+  async function addCartManual() {
+    const code = cartManualCode.trim();
+    if (!code) {
+      setMsg("Inserisci il codice materiale.");
+      return;
+    }
+    await addCartManualByCode(code);
+  }
 function removeCartRow(code: string, wh: "PRM" | "REALE") {
   setCart((prev) => prev.filter((r) => !(r.code === code && r.warehouse === wh)));
 }
@@ -834,6 +1062,8 @@ async function confirmCartPickup() {
     const fullName =
       `${String((prof as any)?.first_name ?? "").trim()} ${String((prof as any)?.last_name ?? "").trim()}`.trim() || null;
 
+    const movementGroupId = crypto.randomUUID();
+
     for (const row of cart) {
       const payload: Partial<MovementRow> = {
         type: "OUT",
@@ -850,6 +1080,7 @@ async function confirmCartPickup() {
         closed_by: null,
         referent_id: null,
         referee_email: null,
+        movement_group_id: movementGroupId,
       };
 
       const { error } = await supabase.from("movements").insert(payload as any);
@@ -1305,7 +1536,20 @@ async function confirmCartPickup() {
 
   async function openCloseModal(m: MovementRow) {
     setMsg(null);
+    setEditingMovementId(null);
+
+    let group: MovementRow[] = [m];
+    if ((m as any).movement_group_id) {
+      const { data: groupData } = await supabase
+        .from("movements")
+        .select("id,created_at,type,code,qty,note,warehouse,created_by,created_by_name,status,returned_qty,return_note,referent_id,referee_email,referee_name,closed_at,closed_by,movement_group_id")
+        .eq("movement_group_id", (m as any).movement_group_id)
+        .order("created_at", { ascending: true });
+      if (groupData?.length) group = groupData as MovementRow[];
+    }
+
     setClosing(m);
+    setClosingGroup(group);
     setCloseOpen(true);
 
     const r = n(m.returned_qty);
@@ -1319,6 +1563,20 @@ async function confirmCartPickup() {
 
     const meta = await loadItemMetaWithFallback(m.code, (m.warehouse ?? null) as any);
     setClosingMeta(meta);
+  }
+
+  function startEditGroupItem(mov: MovementRow) {
+    setEditingMovementId(mov.id);
+    const r = n(mov.returned_qty);
+    setReturnQty(String(r));
+    const wh = mov.warehouse ?? "PRM";
+    setReturnToPrm(wh === "PRM" ? String(r) : "0");
+    setReturnToReale(wh === "REALE" ? String(r) : "0");
+    setReturnNote(mov.return_note ?? "");
+    setSelReferentId(mov.referent_id ?? "");
+    setEditRectify(true);
+    setClosing(mov);
+    loadItemMetaWithFallback(mov.code, (mov.warehouse ?? null) as any).then(setClosingMeta);
   }
 
   async function confirmClose() {
@@ -1480,12 +1738,38 @@ async function confirmCartPickup() {
       setMsg("Movimento chiuso ✅ (email non inviata: " + (e?.message ?? "errore di rete") + ")");
     }
     if (!emailFailed) setMsg("Movimento chiuso ✅");
-    setCloseOpen(false);
-    setClosing(null);
-    setClosingMeta(null);
-    setEditRectify(false);
 
     await loadHistory();
+
+    if (closingGroup.length > 1 && (closing as any).movement_group_id) {
+      const { data: groupData } = await supabase
+        .from("movements")
+        .select("id,created_at,type,code,qty,note,warehouse,created_by,created_by_name,status,returned_qty,return_note,referent_id,referee_email,referee_name,closed_at,closed_by,movement_group_id")
+        .eq("movement_group_id", (closing as any).movement_group_id)
+        .order("created_at", { ascending: true });
+      if (groupData?.length) {
+        setClosingGroup(groupData as MovementRow[]);
+        setClosing(groupData[0] as MovementRow);
+        setEditingMovementId(null);
+        setEditRectify(false);
+        const first = groupData[0] as MovementRow;
+        loadItemMetaWithFallback(first.code, (first.warehouse ?? null) as any).then(setClosingMeta);
+      } else {
+        setCloseOpen(false);
+        setClosing(null);
+        setClosingGroup([]);
+        setClosingMeta(null);
+        setEditRectify(false);
+        setEditingMovementId(null);
+      }
+    } else {
+      setCloseOpen(false);
+      setClosing(null);
+      setClosingGroup([]);
+      setClosingMeta(null);
+      setEditRectify(false);
+      setEditingMovementId(null);
+    }
   }
 
   useEffect(() => {
@@ -1508,6 +1792,26 @@ async function confirmCartPickup() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, isAdmin]);
+
+  useEffect(() => {
+    setIsNfcSupported(typeof (window as any).NDEFReader !== "undefined");
+  }, []);
+
+  useEffect(() => {
+    if (!cartOpen) {
+      setCartManualOpen(false);
+      setCartSuggestions([]);
+      return;
+    }
+    if (!cartManualOpen) return;
+    function onDocMouseDown(e: MouseEvent) {
+      if (cartManualRef.current && !cartManualRef.current.contains(e.target as Node)) {
+        setCartManualOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [cartOpen, cartManualOpen]);
 
   // Apri direttamente il movimento da URL (?open=id)
   useEffect(() => {
@@ -1576,6 +1880,18 @@ async function confirmCartPickup() {
   }, [fFrom, fTo, fType, fWarehouse, fMaterial]);
 
   const active = useMemo(() => suggestions[activeIndex], [suggestions, activeIndex]);
+
+  const displayHistory = useMemo(() => {
+    const seen = new Set<string>();
+    return history.filter((row) => {
+      const gid = (row as any).movement_group_id;
+      if (gid) {
+        if (seen.has(gid)) return false;
+        seen.add(gid);
+      }
+      return true;
+    });
+  }, [history]);
 
   return (
     <main className="panel" style={{ overflowX: "hidden" }}>
@@ -1720,6 +2036,24 @@ async function confirmCartPickup() {
           )}
 
           <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            {scanMode === "CART" && (
+              <button
+                className={`btn ${cartOpen ? "btnPrimary" : ""}`}
+                type="button"
+                onClick={() => setCartOpen((o) => !o)}
+                aria-label={cartOpen ? "Chiudi carrello" : "Apri carrello"}
+                title={cartOpen ? "Chiudi carrello" : "Apri carrello"}
+                style={{ display: "flex", alignItems: "center", gap: 6 }}
+              >
+                <CartIcon />
+                <span>Carrello</span>
+                {cart.length > 0 && (
+                  <span style={{ background: "rgba(0,0,0,0.15)", borderRadius: 10, padding: "2px 6px", fontSize: 11, fontWeight: 800 }}>
+                    {cart.length}
+                  </span>
+                )}
+              </button>
+            )}
             <button className="btn" type="button" onClick={() => (scanning ? stopScan() : startScan())} aria-label={scanning ? "Ferma scansione barcode" : "Avvia scansione barcode"}>
               {scanning ? "Chiudi camera" : "Scanner"}
             </button>
@@ -1737,7 +2071,7 @@ async function confirmCartPickup() {
                 className="input mobileInputFull"
                 value={scanMode}
                 onChange={(e) => {
-                  const mode = e.target.value as "NORMAL" | "CART" | "QUICK";
+                  const mode = e.target.value as "NORMAL" | "CART";
                   setScanMode(mode);
 
                   if (mode === "CART") {
@@ -1752,7 +2086,6 @@ async function confirmCartPickup() {
               >
                 <option value="NORMAL">Inserimento singolo</option>
                 <option value="CART">Carrello multiplo</option>
-                <option value="QUICK">Solo lettura (dettaglio)</option>
               </select>
             </div>
           </div>
@@ -2156,7 +2489,9 @@ async function confirmCartPickup() {
                   </td>
                 </tr>
               ) : (
-                history.map((m) => {
+                displayHistory.map((m) => {
+                  const gid = (m as any).movement_group_id;
+                  const groupCount = gid ? history.filter((r) => (r as any).movement_group_id === gid).length : 1;
                   const st = (m.status ?? (m.type === "OUT" ? "OPEN" : "CLOSED")) as "OPEN" | "CLOSED";
                   const isOpenOut = m.type === "OUT" && st === "OPEN";
                   const outAbs = Math.abs(n(m.qty));
@@ -2198,18 +2533,19 @@ async function confirmCartPickup() {
                         <span style={pillStyle(m.type)}>{m.type === "IN" ? "ENTRATA" : "USCITA"}</span>
                       </td>
 
-                      <td style={{ fontWeight: 900 }}>{m.code}</td>
-                      <td>{nameMap[m.code] ?? "-"}</td>
+                      <td style={{ fontWeight: 900 }}>
+                        {groupCount > 1 ? `Prelievo multiplo (${groupCount} articoli)` : m.code}
+                      </td>
+                      <td>{groupCount > 1 ? `${nameMap[m.code] ?? m.code} (+${groupCount - 1} altri)` : (nameMap[m.code] ?? "-")}</td>
 
-                      <td>{m.warehouse ? <span style={pillStyle(m.warehouse)}>{m.warehouse}</span> : "-"}</td>
+                      <td>{groupCount > 1 ? "-" : (m.warehouse ? <span style={pillStyle(m.warehouse)}>{m.warehouse}</span> : "-")}</td>
 
                       <td style={{ fontWeight: 900 }}>
-                        {m.type === "IN" ? "+" : "-"}
-                        {outAbs}
+                        {groupCount > 1 ? "-" : `${m.type === "IN" ? "+" : "-"}${outAbs}`}
                       </td>
 
-                      <td>{m.type === "OUT" ? n(m.returned_qty) : "-"}</td>
-                      <td style={{ fontWeight: 900 }}>{m.type === "OUT" ? net : "-"}</td>
+                      <td>{groupCount > 1 ? "-" : (m.type === "OUT" ? n(m.returned_qty) : "-")}</td>
+                      <td style={{ fontWeight: 900 }}>{groupCount > 1 ? "-" : (m.type === "OUT" ? net : "-")}</td>
 
                       <td>{m.note ?? ""}</td>
                       <td>{m.created_by_name ?? "-"}</td>
@@ -2228,9 +2564,11 @@ async function confirmCartPickup() {
             if (editRectify) return;
             setCloseOpen(false);
             setClosing(null);
+            setClosingGroup([]);
             setClosingMeta(null);
             setMsg(null);
             setEditRectify(false);
+            setEditingMovementId(null);
           }}
           style={{
             position: "fixed",
@@ -2262,9 +2600,11 @@ async function confirmCartPickup() {
               onClick={() => {
                 setCloseOpen(false);
                 setClosing(null);
+                setClosingGroup([]);
                 setClosingMeta(null);
                 setMsg(null);
                 setEditRectify(false);
+                setEditingMovementId(null);
               }}
               style={{
                 position: "absolute",
@@ -2275,9 +2615,64 @@ async function confirmCartPickup() {
               Chiudi
             </button>
 
+            {closingGroup.length > 1 && (
+              <div style={{ marginBottom: 16, padding: 12, background: "#f8fafc", borderRadius: 10, border: "1px solid #e2e8f0" }}>
+                <div style={{ fontWeight: 900, marginBottom: 10 }}>Prelievo multiplo · {closingGroup.length} articoli</div>
+                <div className="tableWrap">
+                  <table className="table" style={{ fontSize: 13 }}>
+                    <thead>
+                      <tr>
+                        <th>Codice</th>
+                        <th>Descrizione</th>
+                        <th>Mag.</th>
+                        <th>Q.tà</th>
+                        <th>Stato</th>
+                        <th>Azioni</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {closingGroup.map((mov) => {
+                        const st = (mov.status ?? "OPEN") as "OPEN" | "CLOSED";
+                        const isEditing = editingMovementId === mov.id;
+                        return (
+                          <tr key={mov.id} style={{ background: isEditing ? "#eef2ff" : undefined }}>
+                            <td style={{ fontWeight: 900 }}>{mov.code}</td>
+                            <td>{nameMap[mov.code] ?? "-"}</td>
+                            <td>{mov.warehouse ? <span style={pillStyle(mov.warehouse)}>{mov.warehouse}</span> : "-"}</td>
+                            <td>{Math.abs(n(mov.qty))}</td>
+                            <td>
+                              <span style={pillStyle(st)}>{st === "OPEN" ? "APERTO" : "CHIUSO"}</span>
+                            </td>
+                            <td>
+                              {st === "OPEN" ? (
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  onClick={() => startEditGroupItem(mov)}
+                                  style={{ padding: "4px 10px", fontSize: 12 }}
+                                >
+                                  {isEditing ? "In modifica" : "Rettifica"}
+                                </button>
+                              ) : (
+                                <span style={{ fontSize: 12, color: "#64748b" }}>Chiuso</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>
+                  Clicca su &quot;Rettifica&quot; per chiudere un articolo alla volta.
+                </div>
+              </div>
+            )}
+
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", paddingRight: 80 }}>
               <div style={{ fontWeight: 900 }}>
-                Dettaglio movimento · <span style={{ opacity: 0.75 }}>{closing.code}</span>{" "}
+                {closingGroup.length > 1 && editingMovementId ? "Rettifica articolo · " : "Dettaglio movimento · "}
+                <span style={{ opacity: 0.75 }}>{closing.code}</span>{" "}
                 {closing.warehouse ? <span style={{ marginLeft: 8, ...pillStyle(closing.warehouse) }}>{closing.warehouse}</span> : null}
               </div>
 
@@ -2297,6 +2692,8 @@ async function confirmCartPickup() {
               </span>
             </div>
 
+            {(closingGroup.length <= 1 || editingMovementId) && (
+            <>
             <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
               <div style={{ gridColumn: "span 12" }}>
                 <label className="label" htmlFor="mvMaterial">
@@ -2593,6 +2990,14 @@ async function confirmCartPickup() {
                 </div>
               </div>
             )}
+            </>
+            )}
+
+            {closingGroup.length > 1 && !editingMovementId && (
+              <div style={{ marginTop: 16, padding: 16, textAlign: "center", color: "#64748b", fontSize: 14 }}>
+                Seleziona un articolo dalla tabella sopra e clicca &quot;Rettifica&quot; per chiuderlo.
+              </div>
+            )}
 
             {msg && <div style={{ marginTop: 10, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
           </div>
@@ -2739,7 +3144,7 @@ async function confirmCartPickup() {
       }}
     >
       <div style={{ fontWeight: 900, fontSize: 18 }}>
-        {scanMode === "QUICK" ? "Dettaglio materiale" : "Aggiungi al carrello"}
+        Aggiungi al carrello
       </div>
 
       <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
@@ -2816,13 +3221,124 @@ async function confirmCartPickup() {
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
         <div style={{ fontWeight: 900 }}>Carrello prelievo</div>
-        <button className="btn" onClick={() => setCartOpen(false)} disabled={cartBusy}>
+        <button className="btn" onClick={() => setCartOpen(false)} disabled={cartBusy} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <CloseIcon />
           Chiudi
         </button>
       </div>
 
-      <div style={{ marginTop: 10, fontSize: 12, opacity: 0.8 }}>
-        Scansiona i materiali in modalità <b>Carrello</b>, imposta la quantità e aggiungili qui.
+      <div style={{ marginTop: 10, marginBottom: 12, padding: 12, background: "#f8fafc", borderRadius: 10, border: "1px solid #e2e8f0" }}>
+        <div style={{ fontWeight: 800, marginBottom: 4, fontSize: 13 }}>Aggiungi materiali</div>
+        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>Puoi aggiungere più materiali usando barcode, NFC o inserimento manuale.</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => { setCartOpen(false); startScan(); }}
+            disabled={cartBusy}
+            style={{ display: "flex", alignItems: "center", gap: 6 }}
+          >
+            <BarcodeIcon />
+            Barcode
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={startCartNfcScan}
+            disabled={cartBusy || cartNfcScanning}
+            style={{ display: "flex", alignItems: "center", gap: 6 }}
+          >
+            {cartNfcScanning ? <SpinnerIcon /> : <NfcIcon />}
+            {cartNfcScanning ? "NFC..." : "NFC"}
+          </button>
+          <div ref={cartManualRef} style={{ display: "flex", gap: 6, alignItems: "flex-start", flex: 1, minWidth: 200, position: "relative" }}>
+            <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
+              <input
+                type="text"
+                className="input"
+                placeholder="Cerca codice o descrizione (min. 2 caratteri)"
+                value={cartManualCode}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setCartManualCode(v);
+                  setCartManualOpen(true);
+                  loadCartSuggestions(v);
+                }}
+                onFocus={() => {
+                  setCartManualOpen(true);
+                  if (cartManualCode.trim().length >= 2) loadCartSuggestions(cartManualCode);
+                }}
+                onKeyDown={(e) => {
+                  if (!cartManualOpen || cartSuggestions.length === 0) {
+                    if (e.key === "Enter") addCartManual();
+                    return;
+                  }
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setCartManualActiveIndex((i) => Math.min(i + 1, cartSuggestions.length - 1));
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setCartManualActiveIndex((i) => Math.max(i - 1, 0));
+                  } else if (e.key === "Enter") {
+                    e.preventDefault();
+                    const sel = cartSuggestions[cartManualActiveIndex];
+                    if (sel) addCartManualByCode(sel.code);
+                  } else if (e.key === "Escape") {
+                    setCartManualOpen(false);
+                  }
+                }}
+                style={{ width: "100%" }}
+              />
+              {cartManualOpen && cartManualCode.trim().length >= 2 && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    top: "100%",
+                    marginTop: 4,
+                    background: "#fff",
+                    border: "1px solid rgba(15,23,42,0.12)",
+                    borderRadius: 10,
+                    boxShadow: "0 12px 32px rgba(0,0,0,0.12)",
+                    overflow: "hidden",
+                    zIndex: 100,
+                    maxHeight: 240,
+                    overflowY: "auto",
+                  }}
+                >
+                  {cartSuggestions.length === 0 ? (
+                    <div style={{ padding: 12, fontSize: 13, color: "#64748b" }}>Nessun materiale con giacenza</div>
+                  ) : (
+                    cartSuggestions.map((it, idx) => (
+                      <div
+                        key={it.code}
+                        onMouseEnter={() => setCartManualActiveIndex(idx)}
+                        onMouseDown={(ev) => {
+                          ev.preventDefault();
+                          addCartManualByCode(it.code);
+                        }}
+                        style={{
+                          padding: "10px 12px",
+                          cursor: "pointer",
+                          background: idx === cartManualActiveIndex ? "#eef2ff" : "white",
+                          borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
+                        }}
+                      >
+                        <div style={{ fontWeight: 900, color: "#0f172a" }}>{it.code}</div>
+                        <div style={{ fontSize: 12, color: "#334155" }}>{it.name}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+            <button type="button" className="btn btnPrimary" onClick={addCartManual} disabled={cartBusy} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <AddIcon />
+              Aggiungi
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="tableWrap" style={{ marginTop: 12 }}>
@@ -2853,7 +3369,8 @@ async function confirmCartPickup() {
                   <td>{r.qtyAvailable}</td>
                   <td style={{ fontWeight: 900 }}>{r.qtyPick}</td>
                   <td>
-                    <button className="btn" onClick={() => removeCartRow(r.code, r.warehouse)} disabled={cartBusy}>
+                    <button className="btn" onClick={() => removeCartRow(r.code, r.warehouse)} disabled={cartBusy} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <TrashIcon />
                       Rimuovi
                     </button>
                   </td>
@@ -2883,7 +3400,8 @@ async function confirmCartPickup() {
           Righe: {cart.length}
         </div>
 
-        <button className="btn btnPrimary" onClick={confirmCartPickup} disabled={cartBusy || cart.length === 0} aria-label="Conferma prelievo carrello">
+        <button className="btn btnPrimary" onClick={confirmCartPickup} disabled={cartBusy || cart.length === 0} aria-label="Conferma prelievo carrello" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {cartBusy ? <SpinnerIcon /> : <CheckIcon />}
           {cartBusy ? "Salvataggio..." : "Conferma prelievo"}
         </button>
       </div>

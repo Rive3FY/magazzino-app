@@ -1753,6 +1753,10 @@ html, body {
   }
 }
 
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 /* NFC scan pulse indicator */
 @keyframes nfcPulse {
   0%, 100% { opacity: 0.3; transform: scale(0.9); }

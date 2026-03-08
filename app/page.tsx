@@ -51,6 +51,48 @@ function n(v: any) {
 
 type StockBoth = { PRM: number; REALE: number };
 
+function SearchIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="8" />
+      <path d="m21 21-4.35-4.35" />
+    </svg>
+  );
+}
+
+function BarcodeIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <rect x="2" y="6" width="2" height="12" />
+      <rect x="6" y="6" width="1" height="12" />
+      <rect x="9" y="6" width="2" height="12" />
+      <rect x="13" y="6" width="1" height="12" />
+      <rect x="16" y="6" width="2" height="12" />
+      <rect x="20" y="6" width="2" height="12" />
+    </svg>
+  );
+}
+
+function NfcIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="5" y="2" width="14" height="20" rx="2" />
+      <path d="M9 7h6" />
+      <path d="M9 11h6" />
+      <path d="M9 15h4" />
+      <path d="M12 6v12" />
+    </svg>
+  );
+}
+
+function SpinnerIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 1s linear infinite", transformOrigin: "center" }}>
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
+}
+
 function whereLabel(st: StockBoth) {
   const a = st.PRM > 0;
   const b = st.REALE > 0;
@@ -87,6 +129,8 @@ export default function Home() {
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const [scanning, setScanning] = useState(false);
   const scanLockedRef = useRef(false);
+  const [nfcScanning, setNfcScanning] = useState(false);
+  const [isNfcSupported, setIsNfcSupported] = useState(false);
 
   async function loadSuggestions(text: string) {
     const s = text.trim();
@@ -305,6 +349,46 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    setIsNfcSupported(typeof (window as any).NDEFReader !== "undefined");
+  }, []);
+
+  async function startNfcScan() {
+    if (!isNfcSupported) {
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      setMsg(isIOS ? "NFC non disponibile su iPhone/iPad. Usa barcode o ricerca manuale." : "NFC richiede Chrome su Android con HTTPS.");
+      return;
+    }
+    setNfcScanning(true);
+    setMsg(null);
+    try {
+      const ndef = new (window as any).NDEFReader();
+      await ndef.scan();
+      const serialNumber = await new Promise<string>((resolve, reject) => {
+        const handler = (event: any) => {
+          ndef.removeEventListener("reading", handler);
+          resolve(event.serialNumber ?? "unknown");
+        };
+        ndef.addEventListener("reading", handler);
+        setTimeout(() => reject(new Error("Timeout: avvicina il telefono al tag entro 30 secondi")), 30000);
+      });
+      if (!serialNumber || serialNumber === "unknown") {
+        setMsg("Impossibile leggere l'ID del tag. Riprova.");
+        return;
+      }
+      const { data: shelf } = await supabase.from("material_shelves").select("code,warehouse").eq("nfc_tag_id", serialNumber).maybeSingle();
+      if (!shelf) {
+        setMsg("Tag NFC non associato a nessun materiale.");
+        return;
+      }
+      await pickItemByCode((shelf as any).code);
+    } catch (e: any) {
+      setMsg(e?.message ?? "Errore NFC");
+    } finally {
+      setNfcScanning(false);
+    }
+  }
+
   // close dropdown when clicking outside
   useEffect(() => {
     function onDocMouseDown(e: MouseEvent) {
@@ -356,8 +440,8 @@ export default function Home() {
   const filterHint = useMemo(() => {
     if (!picked || !stock) return null;
 
-    if (warehouseFilter === "PRM" && stock.PRM <= 0) return "⚠️ In PRM non c’è giacenza.";
-    if (warehouseFilter === "REALE" && stock.REALE <= 0) return "⚠️ In REALE non c’è giacenza.";
+    if (warehouseFilter === "PRM" && stock.PRM <= 0) return "In PRM non c’è giacenza.";
+    if (warehouseFilter === "REALE" && stock.REALE <= 0) return "In REALE non c’è giacenza.";
     return null;
   }, [picked, stock, warehouseFilter]);
 
@@ -392,15 +476,40 @@ export default function Home() {
               <option value="PRM">Solo PRM</option>
               <option value="REALE">Solo REALE</option>
             </select>
-
-            
-
-            
+            <button
+              type="button"
+              className="btn"
+              onClick={() => (scanning ? stopScan() : startScan())}
+              disabled={nfcScanning}
+              style={{ display: "flex", alignItems: "center", gap: 6 }}
+            >
+              <BarcodeIcon />
+              {scanning ? "Chiudi camera" : "Barcode"}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={startNfcScan}
+              disabled={scanning || nfcScanning}
+              style={{ display: "flex", alignItems: "center", gap: 6 }}
+            >
+              {nfcScanning ? <SpinnerIcon /> : <NfcIcon />}
+              {nfcScanning ? "NFC..." : "NFC"}
+            </button>
+            <button type="button" className="btn" onClick={resetSearch} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <SearchIcon />
+              Pulisci
+            </button>
           </div>
         </div>
 
         <div ref={boxRef} style={{ position: "relative", marginTop: 12 }}>
+          <label className="label" htmlFor="searchMaterial" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+            <SearchIcon />
+            Ricerca manuale
+          </label>
           <input
+            id="searchMaterial"
             className="input"
             value={search}
             onChange={(e) => {

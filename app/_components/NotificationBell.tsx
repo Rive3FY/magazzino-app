@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { createClient } from "../_lib/supabase/client";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
@@ -19,7 +20,8 @@ export default function NotificationBell() {
   const [pendingUsers, setPendingUsers] = useState<PendingUser[]>([]);
   const usersCount = useUsersCount();
   const [loading, setLoading] = useState(true);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [dropdownStyle, setDropdownStyle] = useState<{ top: number; left: number } | null>(null);
 
   const total = negativeStocks.length + openMovements.length + (isAdmin ? pendingUsers.length : 0);
 
@@ -81,13 +83,42 @@ export default function NotificationBell() {
   }, [isAdmin, load]);
 
   useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+    if (open && wrapRef.current) {
+      const rect = wrapRef.current.getBoundingClientRect();
+      setDropdownStyle({
+        top: rect.bottom + 8,
+        left: rect.left + rect.width / 2,
+      });
+    } else {
+      setDropdownStyle(null);
     }
-    if (open) document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = prev;
+      };
+    }
+  }, [open]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent | TouchEvent) {
+      const target = (e.target as HTMLElement);
+      const inWrap = wrapRef.current?.contains(target);
+      const inDropdown = target.closest(".notificationBellDropdown");
+      if (!inWrap && !inDropdown) setOpen(false);
+    }
+    if (open) {
+      document.addEventListener("mousedown", handleClickOutside);
+      document.addEventListener("touchstart", handleClickOutside, { passive: true });
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("touchstart", handleClickOutside);
+    };
   }, [open]);
 
   if (!mounted) {
@@ -95,9 +126,9 @@ export default function NotificationBell() {
   }
 
   return (
-    <div className="notificationBellWrap" ref={dropdownRef}>
+    <div className="notificationBellWrap" ref={wrapRef}>
       {usersCount !== null && (
-        <div className="notificationUsersCounter hideOnMobile" title={`${usersCount} persone collegate`}>
+        <div className="notificationUsersCounter hideOnMobile" title={`${usersCount} persone online`}>
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
             <circle cx="9" cy="7" r="4" />
@@ -127,17 +158,32 @@ export default function NotificationBell() {
         )}
       </button>
 
-      {open && (
-        <div className="notificationBellDropdown">
-          {loading ? (
-            <div className="notificationBellItem">Caricamento…</div>
-          ) : total === 0 ? (
-            <div className="notificationBellItem notificationBellEmpty">
-              Nessun avviso
-            </div>
-          ) : (
-            <>
-              {pendingUsers.length > 0 && (
+      {open && dropdownStyle && createPortal(
+        <div
+          className="notificationBellOverlay"
+          onClick={() => setOpen(false)}
+          aria-hidden="true"
+        >
+          <div
+            className="notificationBellDropdown notificationBellDropdownPortal"
+            style={{
+              position: "fixed",
+              top: dropdownStyle.top,
+              left: dropdownStyle.left,
+              transform: "translateX(-50%)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="notificationBellDropdownScroll">
+              {loading ? (
+                <div className="notificationBellItem">Caricamento…</div>
+              ) : total === 0 ? (
+                <div className="notificationBellItem notificationBellEmpty">
+                  Nessun avviso
+                </div>
+              ) : (
+                <>
+                  {pendingUsers.length > 0 && (
                 <div className="notificationBellSection">
                   <div className="notificationBellSectionTitle">
                     👤 Utenti da approvare ({pendingUsers.length})
@@ -192,7 +238,10 @@ export default function NotificationBell() {
               )}
             </>
           )}
-        </div>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );

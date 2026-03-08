@@ -5,6 +5,7 @@ import TopBar from "./_components/TopBar";
 import { ToastProvider } from "./_lib/ToastContext";
 import { SidebarProvider } from "./_lib/SidebarContext";
 import ForceLogoutListener from "./_components/ForceLogoutListener";
+import OnlinePresenceTracker from "./_components/OnlinePresenceTracker";
 import { Inter } from "next/font/google";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -48,6 +49,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className={inter.className}>
         <ToastProvider>
           {hasUser && <ForceLogoutListener />}
+          {hasUser && user && <OnlinePresenceTracker userId={user.id} />}
           <SidebarProvider>
             <div className={hasUser ? "app" : "app appLogin"}>
               {hasUser && <SideNav />}

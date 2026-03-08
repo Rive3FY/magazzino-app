@@ -1,21 +1,17 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "../../_lib/supabase/client";
 import { useIsAdmin } from "./useIsAdmin";
+import { ONLINE_PRESENCE_CHANNEL } from "../realtime";
 
+/**
+ * Restituisce il numero di utenti attualmente online (con l'app aperta).
+ * Solo gli admin vedono questo conteggio.
+ */
 export function useUsersCount(): number | null {
   const { isAdmin } = useIsAdmin();
   const [count, setCount] = useState<number | null>(null);
-
-  const load = useCallback(async () => {
-    const supabase = createClient();
-    const { data } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("approved", true);
-    setCount((data ?? []).length);
-  }, []);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -24,22 +20,29 @@ export function useUsersCount(): number | null {
     }
 
     const supabase = createClient();
-    void load();
 
-    const channel = supabase
-      .channel("profiles-count-live")
-      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => {
-        void load();
-      })
-      .subscribe();
+    const channel = supabase.channel(ONLINE_PRESENCE_CHANNEL);
 
-    const interval = setInterval(load, 120000);
+    const updateCount = () => {
+      const state = channel.presenceState();
+      const keys = Object.keys(state);
+      setCount(keys.length);
+    };
+
+    channel
+      .on("presence", { event: "sync" }, updateCount)
+      .on("presence", { event: "join" }, updateCount)
+      .on("presence", { event: "leave" }, updateCount)
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          updateCount();
+        }
+      });
 
     return () => {
       supabase.removeChannel(channel);
-      clearInterval(interval);
     };
-  }, [isAdmin, load]);
+  }, [isAdmin]);
 
   return count;
 }

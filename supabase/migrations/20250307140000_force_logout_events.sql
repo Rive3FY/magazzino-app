@@ -21,4 +21,11 @@ CREATE POLICY "force_logout_select_auth"
   USING (true);
 
 -- Abilita Realtime sulla tabella
+-- Crea la publication se non esiste (alcuni setup Supabase potrebbero non averla)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    CREATE PUBLICATION supabase_realtime;
+  END IF;
+END $$;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.force_logout_events;

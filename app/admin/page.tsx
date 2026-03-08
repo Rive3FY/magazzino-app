@@ -122,6 +122,7 @@ export default function AdminPage() {
   const [workingId, setWorkingId] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // REFERENTI
   const [refRows, setRefRows] = useState<ReferentRow[]>([]);
@@ -197,6 +198,28 @@ export default function AdminPage() {
       await loadUsers();
     }
     setWorkingId(null);
+  }
+
+  async function deleteUser(userId: string, email: string | null) {
+    if (!window.confirm(`Eliminare definitivamente l'utente ${email ?? userId}?\n\nQuesta azione non può essere annullata.`)) return;
+    setDeletingId(userId);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/delete-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMsg(data.error ?? "Errore eliminazione utente");
+        return;
+      }
+      toast.success("Utente eliminato");
+      await loadUsers();
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   async function handleResetMagazzino() {
@@ -487,6 +510,16 @@ export default function AdminPage() {
                                 <button className="btn" disabled={busy || isMe} title={isMe ? "Non puoi rimuovere admin a te stesso" : ""} onClick={() => setAdminFlag(u.id, false)}>Rimuovi admin</button>
                               ) : (
                                 <button className="btn" disabled={busy} onClick={() => setAdminFlag(u.id, true)}>Rendi admin</button>
+                              )}
+                              {!isMe && (
+                                <button
+                                  className="btn"
+                                  disabled={deletingId === u.id}
+                                  onClick={() => deleteUser(u.id, u.email)}
+                                  style={{ borderColor: "rgba(239,68,68,0.5)", background: "rgba(239,68,68,0.08)", color: "#991b1b" }}
+                                >
+                                  {deletingId === u.id ? "Eliminazione…" : "Elimina"}
+                                </button>
                               )}
                             </div>
                           </td>

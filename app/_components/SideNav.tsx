@@ -85,14 +85,14 @@ export default function SideNav() {
           {isAdmin && <Link className={cls("/import")} href="/import" onClick={handleLinkClick}>Import & Export</Link>}
           {isAdmin && <Link className={cls("/admin")} href="/admin" onClick={handleLinkClick}>Admin</Link>}
           {usersCount !== null && (
-            <div className="sideNavUsersCount" title={`${usersCount} persone collegate`}>
+            <div className="sideNavUsersCount" title={`${usersCount} persone online`}>
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                 <circle cx="9" cy="7" r="4" />
                 <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
                 <path d="M16 3.13a4 4 0 0 1 0 7.75" />
               </svg>
-              <span>{usersCount} persone collegate</span>
+              <span>{usersCount} persone online</span>
             </div>
           )}
           {!checked && (

@@ -1834,6 +1834,7 @@ async function confirmCartPickup() {
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{
+              position: "relative",
               width: "min(1100px, 100%)",
               maxHeight: "85vh",
               overflow: "auto",
@@ -1844,44 +1845,60 @@ async function confirmCartPickup() {
               padding: 12,
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <button
+              className="btn"
+              onClick={() => {
+                setCloseOpen(false);
+                setClosing(null);
+                setClosingMeta(null);
+                setMsg(null);
+                setEditRectify(false);
+              }}
+              style={{
+                position: "absolute",
+                top: 12,
+                right: 12,
+              }}
+            >
+              Chiudi
+            </button>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", paddingRight: 80 }}>
               <div style={{ fontWeight: 900 }}>
                 Dettaglio movimento · <span style={{ opacity: 0.75 }}>{closing.code}</span>{" "}
                 {closing.warehouse ? <span style={{ marginLeft: 8, ...pillStyle(closing.warehouse) }}>{closing.warehouse}</span> : null}
               </div>
 
-              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <span
-                  className={(closing.status ?? (closing.type === "OUT" ? "OPEN" : "CLOSED")) === "OPEN" ? "openStripe" : ""}
-                  style={(() => {
-                    const st = (closing.status ?? (closing.type === "OUT" ? "OPEN" : "CLOSED")) as "OPEN" | "CLOSED";
-                    const s = pillStyle(st);
-                    if (st === "OPEN") {
-                      const { background, ...rest } = s;
-                      return rest;
-                    }
-                    return s;
-                  })()}
-                >
-                  {(closing.status ?? (closing.type === "OUT" ? "OPEN" : "CLOSED")) === "OPEN" ? "APERTO" : "CHIUSO"}
-                </span>
-
-                <button
-                  className="btn"
-                  onClick={() => {
-                    setCloseOpen(false);
-                    setClosing(null);
-                    setClosingMeta(null);
-                    setMsg(null);
-                    setEditRectify(false);
-                  }}
-                >
-                  Chiudi
-                </button>
-              </div>
+              <span
+                className={(closing.status ?? (closing.type === "OUT" ? "OPEN" : "CLOSED")) === "OPEN" ? "openStripe" : ""}
+                style={(() => {
+                  const st = (closing.status ?? (closing.type === "OUT" ? "OPEN" : "CLOSED")) as "OPEN" | "CLOSED";
+                  const s = pillStyle(st);
+                  if (st === "OPEN") {
+                    const { background, ...rest } = s;
+                    return rest;
+                  }
+                  return s;
+                })()}
+              >
+                {(closing.status ?? (closing.type === "OUT" ? "OPEN" : "CLOSED")) === "OPEN" ? "APERTO" : "CHIUSO"}
+              </span>
             </div>
 
             <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
+              <div style={{ gridColumn: "span 12" }}>
+                <label className="label" htmlFor="mvMaterial">
+                  Materiale
+                </label>
+                <input
+                  id="mvMaterial"
+                  name="mvMaterial"
+                  className="input"
+                  value={closingMeta ? `${closingMeta.name}${closingMeta.um ? ` · UM: ${closingMeta.um}` : ""}` : "-"}
+                  disabled
+                />
+              </div>
+
               <div style={{ gridColumn: "span 3" }}>
                 <label className="label" htmlFor="mvType">
                   Tipo
@@ -2099,16 +2116,6 @@ async function confirmCartPickup() {
                 </div>
               </div>
             )}
-
-            <div style={{ marginTop: 12, opacity: 0.85, fontSize: 12 }}>
-              {closingMeta ? (
-                <>
-                  <b>{closingMeta.name}</b> · UM: <b>{closingMeta.um}</b>
-                </>
-              ) : (
-                <span>—</span>
-              )}
-            </div>
 
             {msg && <div style={{ marginTop: 10, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
           </div>

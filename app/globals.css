@@ -600,6 +600,17 @@ body:has(.appLogin) {
   border: 2px solid var(--sidebar-solid);
 }
 
+/* Overlay a schermo intero: blocca scroll pagina, chiude al tap fuori */
+.notificationBellOverlay{
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  overflow: hidden;
+  touch-action: none;
+  background: rgba(0,0,0,0.15);
+  -webkit-tap-highlight-color: transparent;
+}
+
 .notificationBellDropdown{
   position: absolute;
   top: calc(100% + 8px);
@@ -608,14 +619,31 @@ body:has(.appLogin) {
   min-width: 320px;
   max-width: 90vw;
   max-height: 70vh;
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   background: white;
   border-radius: 12px;
   box-shadow: 0 12px 40px rgba(0,0,0,0.2);
   border: 1px solid var(--border);
-  z-index: 100;
-  padding: 8px 0;
+  z-index: 10000;
+  padding: 0;
   animation: notificationDropdownIn 0.2s ease;
+}
+
+/* Contenitore scroll dedicato: scroll affidabile su mobile */
+.notificationBellDropdownScroll{
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  overscroll-behavior-y: contain;
+  padding: 8px 0;
+  min-height: 0;
+  flex: 1;
+}
+.notificationBellDropdownScroll *{
+  touch-action: pan-y;
 }
 @keyframes notificationDropdownIn {
   from { opacity: 0; transform: translateX(-50%) translateY(-4px); }

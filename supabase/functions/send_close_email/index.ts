@@ -46,20 +46,13 @@ serve(async (req: Request) => {
 
     const body = await req.json();
 
-    const {
-      movement_id,
-      code,
-      warehouse,
-      out_qty,
-      returned_qty,
-      net_qty,
-      return_note,
-      referent_name,
-      referent_email,
-      closed_by,
-      closed_at,
-      type,
-    } = body ?? {};
+    const movements = body?.movements;
+    const isMulti = Array.isArray(movements) && movements.length > 0;
+
+    const referent_email = body?.referent_email;
+    const referent_name = body?.referent_name;
+    const closed_by = body?.closed_by;
+    const closed_at = body?.closed_at;
 
     if (!referent_email) {
       return new Response(
@@ -71,9 +64,72 @@ serve(async (req: Request) => {
       );
     }
 
-    const subject = `Rettifica movimento materiale ${code ?? "-"}`;
+    let subject: string;
+    let html: string;
 
-    const html = `
+    if (isMulti) {
+      subject = `Rettifica prelievo multiplo · ${movements.length} articoli`;
+      const tablesHtml = movements.map((m: Record<string, unknown>, idx: number) => {
+        const code = m.code ?? "-";
+        const movement_id = m.movement_id ?? "-";
+        const warehouse = m.warehouse ?? "-";
+        const out_qty = m.out_qty ?? "-";
+        const returned_qty = m.returned_qty ?? 0;
+        const net_qty = m.net_qty ?? "-";
+        const return_note = m.return_note ?? "-";
+        const type = m.type ?? "-";
+        return `
+        <div style="margin-bottom: 24px;">
+          <h3 style="margin-bottom: 8px; color: #1e40af;">Articolo ${idx + 1} · ${code}</h3>
+          <table style="border-collapse: collapse; width: 100%; max-width: 720px;">
+            <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>ID movimento</b></td><td style="padding: 6px; border: 1px solid #ddd;">${movement_id}</td></tr>
+            <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Materiale</b></td><td style="padding: 6px; border: 1px solid #ddd;">${code}</td></tr>
+            <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Tipo</b></td><td style="padding: 6px; border: 1px solid #ddd;">${type}</td></tr>
+            <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Magazzino</b></td><td style="padding: 6px; border: 1px solid #ddd;">${warehouse}</td></tr>
+            <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Quantità uscita</b></td><td style="padding: 6px; border: 1px solid #ddd;">${out_qty}</td></tr>
+            <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Quantità rientrata</b></td><td style="padding: 6px; border: 1px solid #ddd;">${returned_qty}</td></tr>
+            <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Quantità netta</b></td><td style="padding: 6px; border: 1px solid #ddd;">${net_qty}</td></tr>
+            <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Nota rientro</b></td><td style="padding: 6px; border: 1px solid #ddd;">${return_note}</td></tr>
+          </table>
+        </div>`;
+      }).join("");
+
+      html = `
+      <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.5; color: #111;">
+        <h2 style="margin-bottom: 12px;">Rettifica / chiusura prelievo multiplo</h2>
+        <p>È stata confermata la rettifica di un prelievo multiplo (${movements.length} articoli).</p>
+
+        ${tablesHtml}
+
+        <table style="border-collapse: collapse; width: 100%; max-width: 720px; margin-top: 16px; background: #f8fafc;">
+          <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Referente</b></td><td style="padding: 6px; border: 1px solid #ddd;">${referent_name ?? "-"}</td></tr>
+          <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Chiuso da</b></td><td style="padding: 6px; border: 1px solid #ddd;">${closed_by ?? "-"}</td></tr>
+          <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Data chiusura</b></td><td style="padding: 6px; border: 1px solid #ddd;">${closed_at ?? "-"}</td></tr>
+        </table>
+
+        <p style="margin-top: 16px; color: #555;">
+          Email automatica generata dal gestionale magazzino.
+        </p>
+      </div>
+    `;
+    } else {
+      const {
+        movement_id,
+        code,
+        warehouse,
+        out_qty,
+        returned_qty,
+        net_qty,
+        return_note,
+        referent_name: rn,
+        closed_by: cb,
+        closed_at: ca,
+        type,
+      } = body ?? {};
+
+      subject = `Rettifica movimento materiale ${code ?? "-"}`;
+
+      html = `
       <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.5; color: #111;">
         <h2 style="margin-bottom: 12px;">Rettifica / chiusura movimento</h2>
         <p>È stata confermata una rettifica di movimento materiale.</p>
@@ -113,15 +169,15 @@ serve(async (req: Request) => {
           </tr>
           <tr>
             <td style="padding: 6px; border: 1px solid #ddd;"><b>Referente</b></td>
-            <td style="padding: 6px; border: 1px solid #ddd;">${referent_name ?? "-"}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${rn ?? "-"}</td>
           </tr>
           <tr>
             <td style="padding: 6px; border: 1px solid #ddd;"><b>Chiuso da</b></td>
-            <td style="padding: 6px; border: 1px solid #ddd;">${closed_by ?? "-"}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${cb ?? "-"}</td>
           </tr>
           <tr>
             <td style="padding: 6px; border: 1px solid #ddd;"><b>Data chiusura</b></td>
-            <td style="padding: 6px; border: 1px solid #ddd;">${closed_at ?? "-"}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${ca ?? "-"}</td>
           </tr>
         </table>
 
@@ -130,6 +186,7 @@ serve(async (req: Request) => {
         </p>
       </div>
     `;
+    }
 
     const resendRes = await fetch("https://api.resend.com/emails", {
       method: "POST",

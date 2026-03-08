@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams, useRouter } from "next/navigation";
 import { createClient } from "../_lib/supabase/client";
 import { BrowserMultiFormatReader } from "@zxing/browser";
@@ -2683,6 +2684,41 @@ async function confirmCartPickup() {
           </div>
         </div>
       )}
+      {scanPopupOpen && scanInfo && typeof document !== "undefined" && createPortal(
+  <div
+    style={{
+      position: "fixed",
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      zIndex: 1001,
+      pointerEvents: "none",
+    }}
+  >
+    <div
+      style={{
+        position: "absolute",
+        top: 12,
+        right: 12,
+        pointerEvents: "auto",
+      }}
+    >
+      <button
+        className="btn"
+        type="button"
+        onClick={() => {
+          setScanPopupOpen(false);
+          setScanInfo(null);
+          startScan();
+        }}
+      >
+        Scanner
+      </button>
+    </div>
+  </div>,
+  document.body
+)}
       {scanPopupOpen && scanInfo && (
   <div
     onMouseDown={() => {
@@ -2746,14 +2782,6 @@ async function confirmCartPickup() {
           setScanInfo(null);
         }}>
           Chiudi
-        </button>
-
-        <button className="btn" onClick={() => {
-          setScanPopupOpen(false);
-          setScanInfo(null);
-          setTimeout(() => startScan(), 0);
-        }}>
-          Nuova scansione
         </button>
 
         {scanMode === "CART" && (

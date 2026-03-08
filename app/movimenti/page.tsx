@@ -233,6 +233,7 @@ export default function MovimentiPage() {
   const [scanning, setScanning] = useState(false);
   const scanLockedRef = useRef(false);
   const scanReadyAtRef = useRef<number>(0);
+  const lastAddedCodeRef = useRef<string | null>(null);
 
   const [closeOpen, setCloseOpen] = useState(false);
   const [closing, setClosing] = useState<MovementRow | null>(null);
@@ -869,7 +870,7 @@ async function handleScannedCode(codeRaw: string) {
 
     stopScan();
     scanLockedRef.current = false;
-    scanReadyAtRef.current = Date.now() + 1500;
+    scanReadyAtRef.current = Date.now() + 3000;
 
     setScanning(true);
     await new Promise((r) => setTimeout(r, 100));
@@ -895,6 +896,7 @@ async function handleScannedCode(codeRaw: string) {
 
         const text = String(result.getText?.() ?? "").trim();
         if (!text) return;
+        if (text === lastAddedCodeRef.current) return;
 
         scanLockedRef.current = true;
         stopScan();
@@ -955,6 +957,7 @@ async function handleScannedCode(codeRaw: string) {
     return copy;
   });
 
+  lastAddedCodeRef.current = scanInfo.code;
   setScanPopupOpen(false);
   setScanInfo(null);
   setScanQty("1");
@@ -3410,14 +3413,9 @@ async function confirmCartPickup() {
             <video ref={videoRef} style={{ width: "100%", maxWidth: 360, borderRadius: 8 }} muted playsInline />
             <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il codice a barre</div>
           </div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button type="button" className="btn" onClick={() => { stopScan(); setScanInfo(null); if (cart.length > 0) setCartOpen(true); }}>
-              Fine
-            </button>
-            <button type="button" className="btn" onClick={() => { stopScan(); setScanInfo(null); if (cart.length > 0) setCartOpen(true); }}>
-              Chiudi camera
-            </button>
-          </div>
+          <button type="button" className="btn" onClick={() => { lastAddedCodeRef.current = null; stopScan(); setScanInfo(null); if (cart.length > 0) setCartOpen(true); }}>
+            Fine
+          </button>
         </>
       ) : cartNfcScanning ? (
         <>
@@ -3426,7 +3424,7 @@ async function confirmCartPickup() {
             <SpinnerIcon />
             <div style={{ fontSize: 14, color: "#94a3b8" }}>Avvicina il telefono al tag NFC</div>
           </div>
-          <button type="button" className="btn" onClick={stopNfcScan}>
+          <button type="button" className="btn" onClick={() => { lastAddedCodeRef.current = null; stopNfcScan(); }}>
             Fine
           </button>
         </>
@@ -3451,7 +3449,7 @@ async function confirmCartPickup() {
             <button className="btn btnPrimary" onClick={addScannedToCart}>
               Aggiungi e continua
             </button>
-            <button className="btn" onClick={() => { stopScan(); setScanInfo(null); setScanSource(null); if (cart.length > 0) setCartOpen(true); }}>
+            <button className="btn" onClick={() => { lastAddedCodeRef.current = null; stopScan(); setScanInfo(null); setScanSource(null); if (cart.length > 0) setCartOpen(true); }}>
               Fine
             </button>
           </div>

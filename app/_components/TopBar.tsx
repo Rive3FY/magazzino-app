@@ -29,7 +29,10 @@ export default function TopBar({ email, displayName, displayBadge }: Props) {
           <span className="hamburgerLine" />
           <span className="hamburgerLine" />
         </button>
-        <div className="topbarTitle">Magazzino</div>
+        <Link href="/" className="topbarTitle" style={{ display: "flex", alignItems: "center", gap: 8, textDecoration: "none", color: "inherit" }}>
+          <img src="/logo.svg" alt="" width={64} height={23} style={{ objectFit: "contain" }} />
+          <span>Magazzino</span>
+        </Link>
       </div>
 
       <div className="userArea">

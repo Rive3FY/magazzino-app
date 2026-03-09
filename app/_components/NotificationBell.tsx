@@ -10,6 +10,7 @@ import { useUsersCount } from "../_lib/hooks/useUsersCount";
 type NegativeStock = { code: string; warehouse: string; qty_free: number };
 type OpenMovement = { id: string; code: string; qty: number; note: string | null; created_at: string };
 type PendingUser = { id: string; first_name: string | null; last_name: string | null; badge_number: string | null };
+type ExcelLiveRequest = { id: string; movement_id: string; code: string; warehouse: string; delta_free: number; requested_at: string; details_json: Record<string, unknown> | null };
 
 export default function NotificationBell() {
   const [mounted, setMounted] = useState(false);
@@ -18,12 +19,13 @@ export default function NotificationBell() {
   const [negativeStocks, setNegativeStocks] = useState<NegativeStock[]>([]);
   const [openMovements, setOpenMovements] = useState<OpenMovement[]>([]);
   const [pendingUsers, setPendingUsers] = useState<PendingUser[]>([]);
+  const [excelLiveRequests, setExcelLiveRequests] = useState<ExcelLiveRequest[]>([]);
   const usersCount = useUsersCount();
   const [loading, setLoading] = useState(true);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [dropdownStyle, setDropdownStyle] = useState<{ top: number; left: number } | null>(null);
 
-  const total = negativeStocks.length + openMovements.length + (isAdmin ? pendingUsers.length : 0);
+  const total = negativeStocks.length + openMovements.length + (isAdmin ? pendingUsers.length : 0) + (isAdmin ? excelLiveRequests.length : 0);
 
   useEffect(() => {
     setMounted(true);
@@ -33,19 +35,22 @@ export default function NotificationBell() {
     const supabase = createClient();
     setLoading(true);
     try {
-      const [stocksRes, movementsRes, pendingRes] = await Promise.all([
+      const [stocksRes, movementsRes, pendingRes, requestsRes] = await Promise.all([
         supabase.from("excel_live").select("code,warehouse,qty_free").lt("qty_free", 0).order("qty_free", { ascending: true }).limit(20),
         supabase.from("movements").select("id,code,qty,note,created_at").eq("type", "OUT").eq("status", "OPEN").order("created_at", { ascending: false }).limit(20),
         isAdmin ? supabase.from("profiles").select("id,first_name,last_name,badge_number").eq("approved", false) : Promise.resolve({ data: [] }),
+        isAdmin ? supabase.from("excel_live_requests").select("id,movement_id,code,warehouse,delta_free,requested_at,details_json").eq("status", "pending").order("requested_at", { ascending: false }).limit(20) : Promise.resolve({ data: [] }),
       ]);
 
       setNegativeStocks((stocksRes.data ?? []) as NegativeStock[]);
       setOpenMovements((movementsRes.data ?? []) as OpenMovement[]);
       setPendingUsers((pendingRes.data ?? []) as PendingUser[]);
+      setExcelLiveRequests((requestsRes.data ?? []) as ExcelLiveRequest[]);
     } catch {
       setNegativeStocks([]);
       setOpenMovements([]);
       setPendingUsers([]);
+      setExcelLiveRequests([]);
     } finally {
       setLoading(false);
     }
@@ -72,12 +77,20 @@ export default function NotificationBell() {
           .subscribe()
       : null;
 
+    const chRequests = isAdmin
+      ? supabase
+          .channel("notif-excel-live-requests")
+          .on("postgres_changes", { event: "*", schema: "public", table: "excel_live_requests" }, () => void load())
+          .subscribe()
+      : null;
+
     const interval = setInterval(load, 120000);
 
     return () => {
       supabase.removeChannel(chExcel);
       supabase.removeChannel(chMov);
       if (chProf) supabase.removeChannel(chProf);
+      if (chRequests) supabase.removeChannel(chRequests);
       clearInterval(interval);
     };
   }, [isAdmin, load]);
@@ -183,6 +196,23 @@ export default function NotificationBell() {
                 </div>
               ) : (
                 <>
+                  {excelLiveRequests.length > 0 && (
+                    <div className="notificationBellSection">
+                      <div className="notificationBellSectionTitle">
+                        📥 Richieste riga excel ({excelLiveRequests.length})
+                      </div>
+                      {excelLiveRequests.map((req) => (
+                        <Link
+                          key={req.id}
+                          href={`/admin?tab=richieste-excel`}
+                          className="notificationBellItem notificationBellLink"
+                          onClick={() => setOpen(false)}
+                        >
+                          <b>{req.code}</b> · {req.warehouse} · +{req.delta_free}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
                   {pendingUsers.length > 0 && (
                 <div className="notificationBellSection">
                   <div className="notificationBellSectionTitle">

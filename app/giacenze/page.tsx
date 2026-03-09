@@ -228,7 +228,7 @@ async function openHistory(code: string) {
     if (!historyCode || historyRows.length === 0) return;
     try {
       const pdf = new jsPDF("p", "mm", "a4");
-      const bannerDataUrl = await loadImageAsDataUrl("/banner_terna.png");
+      const bannerDataUrl = await loadImageAsDataUrl("/logo.svg");
       const img = new Image();
       img.src = bannerDataUrl;
       await new Promise<void>((resolve, reject) => {
@@ -843,11 +843,16 @@ await writeAuditLog({
           if (c === "Descrizione Materiale") v = r.name ?? v;
           if (c === "Unità di Misura") v = r.um ?? v;
 
-          // ✅ quantità reale: preferisci qty_free
+          // ✅ quantità reale: preferisci qty_free e qty_blocked
           if (c === "Qnt. a Mag. libero") {
             v = Number.isFinite(Number(r.qty_free))
               ? Number(r.qty_free)
               : Number(r.row_json?.["Qnt. a Mag. libero"] ?? 0);
+          }
+          if (c === "Qnt. a Mag. bloccato") {
+            v = Number.isFinite(Number(r.qty_blocked))
+              ? Number(r.qty_blocked)
+              : Number(r.row_json?.["Qnt. a Mag. bloccato"] ?? 0);
           }
 
           return <td key={c}>{String(v ?? "")}</td>;

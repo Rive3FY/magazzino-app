@@ -69,8 +69,9 @@ serve(async (req: Request) => {
 
     if (isMulti) {
       subject = `Rettifica prelievo multiplo · ${movements.length} articoli`;
-      const tablesHtml = movements.map((m: Record<string, unknown>, idx: number) => {
+      const rowsHtml = movements.map((m: Record<string, unknown>, idx: number) => {
         const code = m.code ?? "-";
+        const name = m.name ?? code;
         const movement_id = m.movement_id ?? "-";
         const warehouse = m.warehouse ?? "-";
         const out_qty = m.out_qty ?? "-";
@@ -79,19 +80,16 @@ serve(async (req: Request) => {
         const return_note = m.return_note ?? "-";
         const type = m.type ?? "-";
         return `
-        <div style="margin-bottom: 24px;">
-          <h3 style="margin-bottom: 8px; color: #1e40af;">Articolo ${idx + 1} · ${code}</h3>
-          <table style="border-collapse: collapse; width: 100%; max-width: 720px;">
-            <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>ID movimento</b></td><td style="padding: 6px; border: 1px solid #ddd;">${movement_id}</td></tr>
-            <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Materiale</b></td><td style="padding: 6px; border: 1px solid #ddd;">${code}</td></tr>
-            <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Tipo</b></td><td style="padding: 6px; border: 1px solid #ddd;">${type}</td></tr>
-            <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Magazzino</b></td><td style="padding: 6px; border: 1px solid #ddd;">${warehouse}</td></tr>
-            <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Quantità uscita</b></td><td style="padding: 6px; border: 1px solid #ddd;">${out_qty}</td></tr>
-            <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Quantità rientrata</b></td><td style="padding: 6px; border: 1px solid #ddd;">${returned_qty}</td></tr>
-            <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Quantità netta</b></td><td style="padding: 6px; border: 1px solid #ddd;">${net_qty}</td></tr>
-            <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Nota rientro</b></td><td style="padding: 6px; border: 1px solid #ddd;">${return_note}</td></tr>
-          </table>
-        </div>`;
+          <tr>
+            <td style="padding: 6px; border: 1px solid #ddd;">${idx + 1}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${code}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${name}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${warehouse}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${out_qty}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${returned_qty}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${net_qty}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${return_note}</td>
+          </tr>`;
       }).join("");
 
       html = `
@@ -99,7 +97,23 @@ serve(async (req: Request) => {
         <h2 style="margin-bottom: 12px;">Rettifica / chiusura prelievo multiplo</h2>
         <p>È stata confermata la rettifica di un prelievo multiplo (${movements.length} articoli).</p>
 
-        ${tablesHtml}
+        <table style="border-collapse: collapse; width: 100%; max-width: 720px; margin-top: 16px;">
+          <thead>
+            <tr style="background: #f1f5f9;">
+              <th style="padding: 6px; border: 1px solid #ddd;"><b>#</b></th>
+              <th style="padding: 6px; border: 1px solid #ddd;"><b>Codice</b></th>
+              <th style="padding: 6px; border: 1px solid #ddd;"><b>Materiale</b></th>
+              <th style="padding: 6px; border: 1px solid #ddd;"><b>Mag.</b></th>
+              <th style="padding: 6px; border: 1px solid #ddd;"><b>Uscita</b></th>
+              <th style="padding: 6px; border: 1px solid #ddd;"><b>Rientro</b></th>
+              <th style="padding: 6px; border: 1px solid #ddd;"><b>Netto</b></th>
+              <th style="padding: 6px; border: 1px solid #ddd;"><b>Nota</b></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
 
         <table style="border-collapse: collapse; width: 100%; max-width: 720px; margin-top: 16px; background: #f8fafc;">
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Referente</b></td><td style="padding: 6px; border: 1px solid #ddd;">${referent_name ?? "-"}</td></tr>
@@ -113,6 +127,8 @@ serve(async (req: Request) => {
       </div>
     `;
     } else {
+      // Fallback: se abbiamo movements[0] ma siamo nel branch singolo, usalo per i dati mancanti
+      const firstMov = Array.isArray(movements) && movements.length > 0 ? (movements[0] as Record<string, unknown>) : null;
       const {
         movement_id,
         code,
@@ -126,8 +142,17 @@ serve(async (req: Request) => {
         closed_at: ca,
         type,
       } = body ?? {};
+      const movement_id_val = movement_id ?? firstMov?.movement_id ?? "-";
+      const code_val = code ?? firstMov?.code ?? "-";
+      const name_val = (body as any)?.name ?? firstMov?.name ?? code_val;
+      const warehouse_val = warehouse ?? firstMov?.warehouse ?? "-";
+      const out_qty_val = out_qty ?? firstMov?.out_qty ?? "-";
+      const returned_qty_val = returned_qty ?? firstMov?.returned_qty ?? 0;
+      const net_qty_val = net_qty ?? firstMov?.net_qty ?? "-";
+      const return_note_val = return_note ?? firstMov?.return_note ?? "-";
+      const type_val = type ?? firstMov?.type ?? "-";
 
-      subject = `Rettifica movimento materiale ${code ?? "-"}`;
+      subject = `Rettifica movimento materiale ${code_val}`;
 
       html = `
       <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.5; color: #111;">
@@ -137,35 +162,39 @@ serve(async (req: Request) => {
         <table style="border-collapse: collapse; width: 100%; max-width: 720px;">
           <tr>
             <td style="padding: 6px; border: 1px solid #ddd;"><b>ID movimento</b></td>
-            <td style="padding: 6px; border: 1px solid #ddd;">${movement_id ?? "-"}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${movement_id_val}</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px; border: 1px solid #ddd;"><b>Codice</b></td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${code_val}</td>
           </tr>
           <tr>
             <td style="padding: 6px; border: 1px solid #ddd;"><b>Materiale</b></td>
-            <td style="padding: 6px; border: 1px solid #ddd;">${code ?? "-"}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${name_val}</td>
           </tr>
           <tr>
             <td style="padding: 6px; border: 1px solid #ddd;"><b>Tipo</b></td>
-            <td style="padding: 6px; border: 1px solid #ddd;">${type ?? "-"}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${type_val}</td>
           </tr>
           <tr>
             <td style="padding: 6px; border: 1px solid #ddd;"><b>Magazzino</b></td>
-            <td style="padding: 6px; border: 1px solid #ddd;">${warehouse ?? "-"}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${warehouse_val}</td>
           </tr>
           <tr>
             <td style="padding: 6px; border: 1px solid #ddd;"><b>Quantità uscita</b></td>
-            <td style="padding: 6px; border: 1px solid #ddd;">${out_qty ?? "-"}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${out_qty_val}</td>
           </tr>
           <tr>
             <td style="padding: 6px; border: 1px solid #ddd;"><b>Quantità rientrata</b></td>
-            <td style="padding: 6px; border: 1px solid #ddd;">${returned_qty ?? 0}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${returned_qty_val}</td>
           </tr>
           <tr>
             <td style="padding: 6px; border: 1px solid #ddd;"><b>Quantità netta</b></td>
-            <td style="padding: 6px; border: 1px solid #ddd;">${net_qty ?? "-"}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${net_qty_val}</td>
           </tr>
           <tr>
             <td style="padding: 6px; border: 1px solid #ddd;"><b>Nota rientro</b></td>
-            <td style="padding: 6px; border: 1px solid #ddd;">${return_note ?? "-"}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${return_note_val}</td>
           </tr>
           <tr>
             <td style="padding: 6px; border: 1px solid #ddd;"><b>Referente</b></td>

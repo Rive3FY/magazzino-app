@@ -101,24 +101,10 @@ export default function ScaffaliPage() {
     existingCode: string;
     existingWarehouse: string;
   } | null>(null);
-  const [barcodeConfirm, setBarcodeConfirm] = useState<{
-    code: string;
-    name: string;
-    warehouse: "PRM" | "REALE";
-    currentShelf: string;
-    currentPlace: string;
-    otherWarehouse?: { wh: "PRM" | "REALE"; shelf: string; place: string };
-  } | null>(null);
-  const [barcodeInput, setBarcodeInput] = useState<{ code: string; warehouse: "PRM" | "REALE" } | null>(null);
-  const [barcodeInputVal, setBarcodeInputVal] = useState("");
-  const barcodeInputRef = useRef<HTMLInputElement>(null);
-  const [barcodeReassign, setBarcodeReassign] = useState<{
-    barcode: string;
-    code: string;
-    warehouse: "PRM" | "REALE";
-    existingCode: string;
-    existingWarehouse: string;
-  } | null>(null);
+  const [searchByBarcodeOpen, setSearchByBarcodeOpen] = useState(false);
+  const [searchBarcodeVal, setSearchBarcodeVal] = useState("");
+  const [searchByNfcScanning, setSearchByNfcScanning] = useState(false);
+  const searchBarcodeInputRef = useRef<HTMLInputElement>(null);
   const [editCell, setEditCell] = useState<{
     code: string;
     warehouse: "PRM" | "REALE";
@@ -237,10 +223,6 @@ export default function ScaffaliPage() {
     setNfcConfirm(buildConfirmData(code, warehouse));
   }
 
-  function openBarcodeConfirm(code: string, warehouse: "PRM" | "REALE") {
-    setBarcodeConfirm(buildConfirmData(code, warehouse));
-  }
-
   async function startNfcScan() {
     if (!nfcConfirm) return;
     const { code, warehouse } = nfcConfirm;
@@ -252,7 +234,7 @@ export default function ScaffaliPage() {
     if (!isNfcSupported) {
       setMsg(
         isIOS
-          ? "NFC non disponibile su iPhone/iPad. Safari non supporta la scansione NFC. Usa Associa barcode con la fotocamera."
+          ? "NFC non disponibile su iPhone/iPad. Safari non supporta la scansione NFC. Usa la ricerca per barcode."
           : "NFC richiede Chrome su Android con HTTPS. Da mobile via IP usa npm run dev:https, poi accedi da https://TUO_IP:3000"
       );
       return;
@@ -348,72 +330,74 @@ export default function ScaffaliPage() {
     }
   }
 
-  function startBarcodeScan() {
-    if (!barcodeConfirm) return;
-    const { code, warehouse } = barcodeConfirm;
-    setBarcodeConfirm(null);
-    setBarcodeInput({ code, warehouse });
-    setBarcodeInputVal("");
-    setTimeout(() => barcodeInputRef.current?.focus(), 50);
-  }
-
-  async function submitBarcode(value: string, forceReassign = false) {
-    if (!barcodeInput) return;
-    const { code, warehouse } = barcodeInput;
+  async function searchByBarcode(value: string) {
     const barcodeVal = value.trim();
-    if (!barcodeVal) {
-      setMsg("Inserisci o scansiona un codice a barre.");
+    if (!barcodeVal) return;
+    setQ(barcodeVal);
+    setSearchBarcodeVal("");
+    setSearchByBarcodeOpen(false);
+  }
+
+  async function startCameraScanForSearch() {
+    setMsg(null);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMsg("La fotocamera richiede HTTPS. Usa npm run dev:https e accedi da https://TUO_IP:3000");
       return;
     }
+    stopCameraScan();
+    setCameraScanning(true);
+    await new Promise((r) => setTimeout(r, 100));
+    let videoEl = videoRef.current;
+    for (let i = 0; i < 30 && !videoEl; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      videoEl = videoRef.current;
+    }
+    if (!videoEl) {
+      setCameraScanning(false);
+      setMsg("Video non disponibile. Riprova.");
+      return;
+    }
+    try {
+      readerRef.current = new BrowserMultiFormatReader();
+      const result = await readerRef.current.decodeOnceFromVideoDevice(undefined, videoEl);
+      stopCameraScan();
+      const text = String(result?.getText?.() ?? "").trim();
+      if (text) searchByBarcode(text);
+    } catch (e: any) {
+      setMsg("Errore camera: " + (e?.message ?? "sconosciuto"));
+      stopCameraScan();
+    }
+  }
 
-    const { data: existing } = await supabase
-      .from("material_shelves")
-      .select("code,warehouse")
-      .eq("barcode", barcodeVal)
-      .maybeSingle();
-
-    if (existing && !forceReassign && (existing.code !== code || existing.warehouse !== warehouse)) {
-      setBarcodeInput(null);
-      setBarcodeReassign({
-        barcode: barcodeVal,
-        code,
-        warehouse,
-        existingCode: (existing as any).code,
-        existingWarehouse: (existing as any).warehouse,
+  async function searchByNfc() {
+    if (!isNfcSupported) {
+      setMsg(isIOS ? "NFC non disponibile su iPhone/iPad." : "NFC richiede Chrome su Android con HTTPS.");
+      return;
+    }
+    setSearchByNfcScanning(true);
+    setMsg(null);
+    try {
+      const ndef = new NDEFReader();
+      await ndef.scan();
+      const serialNumber = await new Promise<string>((resolve, reject) => {
+        const handler = (event: NDEFReadingEvent) => {
+          ndef.removeEventListener("reading", handler);
+          resolve(event.serialNumber ?? "");
+        };
+        ndef.addEventListener("reading", handler);
+        setTimeout(() => reject(new Error("Timeout: avvicina il telefono al tag entro 30 secondi")), 30000);
       });
-      return;
-    }
-
-    setBarcodeInput(null);
-    try {
-      await saveBarcodeAssociation(code, warehouse, barcodeVal);
+      const { data: row } = await supabase.from("material_shelves").select("code").eq("nfc_tag_id", serialNumber).maybeSingle();
+      if (row) {
+        setQ((row as any).code ?? "");
+        setMsg("Materiale trovato: " + (row as any).code);
+      } else {
+        setMsg("Nessun materiale associato a questo tag NFC.");
+      }
     } catch (e: any) {
-      setMsg(e?.message ?? "Errore associazione barcode");
-    }
-  }
-
-  async function saveBarcodeAssociation(code: string, warehouse: "PRM" | "REALE", barcodeVal: string) {
-    const entry = shelves[code]?.[warehouse] ?? { shelf: "", place: "", nfcTagId: "", barcode: "" };
-    const shelfVal = entry.shelf.trim() || "—";
-    const placeVal = entry.place.trim() || null;
-    await supabase.from("material_shelves").update({ barcode: null }).eq("barcode", barcodeVal);
-    const { error } = await supabase.from("material_shelves").upsert(
-      { code, warehouse, shelf: shelfVal, place: placeVal, barcode: barcodeVal },
-      { onConflict: "code,warehouse" }
-    );
-    if (error) throw error;
-    setMsg("Barcode associato ✅");
-    await load();
-  }
-
-  async function confirmBarcodeReassign() {
-    if (!barcodeReassign) return;
-    const { code, warehouse, barcode } = barcodeReassign;
-    setBarcodeReassign(null);
-    try {
-      await saveBarcodeAssociation(code, warehouse, barcode);
-    } catch (e: any) {
-      setMsg(e?.message ?? "Errore associazione barcode");
+      setMsg(e?.message ?? "Errore lettura NFC");
+    } finally {
+      setSearchByNfcScanning(false);
     }
   }
 
@@ -488,42 +472,6 @@ export default function ScaffaliPage() {
     setCameraScanning(false);
   }
 
-  async function startCameraScanFromBarcodeInput() {
-    if (!barcodeInput) return;
-    setMsg(null);
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setMsg(
-        "La fotocamera richiede HTTPS. Da mobile, se accedi via IP (es. 192.168.x.x) non funziona con http://. " +
-        "Usa npm run dev:https sul PC, poi accedi da https://TUO_IP:3000 (accetta il certificato)."
-      );
-      return;
-    }
-    stopCameraScan();
-    setCameraScanning(true);
-    await new Promise((r) => setTimeout(r, 100));
-
-    let videoEl = videoRef.current;
-    for (let i = 0; i < 30 && !videoEl; i++) {
-      await new Promise((r) => setTimeout(r, 50));
-      videoEl = videoRef.current;
-    }
-    if (!videoEl) {
-      setCameraScanning(false);
-      setMsg("Video non disponibile. Riprova.");
-      return;
-    }
-    try {
-      readerRef.current = new BrowserMultiFormatReader();
-      const result = await readerRef.current.decodeOnceFromVideoDevice(undefined, videoEl);
-      stopCameraScan();
-      const text = String(result?.getText?.() ?? "").trim();
-      if (text) setBarcodeInputVal(text);
-    } catch (e: any) {
-      setMsg("Errore camera: " + (e?.message ?? "sconosciuto"));
-      stopCameraScan();
-    }
-  }
-
   const filtered = items.filter((it) => {
     const s = shelves[it.code];
     const prm = s?.PRM ?? { shelf: "", place: "", nfcTagId: "", barcode: "" };
@@ -539,7 +487,8 @@ export default function ScaffaliPage() {
       reale.shelf.toLowerCase().includes(q.toLowerCase()) ||
       reale.place.toLowerCase().includes(q.toLowerCase());
     const barcodeMatch = !q.trim() || prm.barcode.toLowerCase().includes(q.toLowerCase()) || reale.barcode.toLowerCase().includes(q.toLowerCase());
-    return match || shelfMatch || barcodeMatch;
+    const nfcMatch = !q.trim() || (prm.nfcTagId && prm.nfcTagId.toLowerCase().includes(q.toLowerCase())) || (reale.nfcTagId && reale.nfcTagId.toLowerCase().includes(q.toLowerCase()));
+    return match || shelfMatch || barcodeMatch || nfcMatch;
   });
 
   if (adminLoading) {
@@ -557,23 +506,46 @@ export default function ScaffaliPage() {
       </div>
 
       <div className="card" style={{ padding: 12, margin: 12 }}>
-        <div style={{ marginBottom: 12 }}>
-          <label className="label" htmlFor="qScaffali">
-            Cerca materiale (codice o descrizione)
-          </label>
-          <input
-            id="qScaffali"
-            type="text"
-            className="input"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Filtra..."
-            style={{ maxWidth: 320 }}
-          />
+        <div style={{ marginBottom: 12, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+          <div>
+            <label className="label" htmlFor="qScaffali">
+              Cerca materiale (codice, descrizione, scaffale, barcode)
+            </label>
+            <input
+              id="qScaffali"
+              type="text"
+              className="input"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Filtra..."
+              style={{ maxWidth: 320 }}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => { setSearchBarcodeVal(""); setSearchByBarcodeOpen(true); setTimeout(() => searchBarcodeInputRef.current?.focus(), 50); }}
+              style={{ display: "flex", alignItems: "center", gap: 6 }}
+            >
+              <BarcodeIcon />
+              Cerca con barcode
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={searchByNfc}
+              disabled={!isNfcSupported || searchByNfcScanning}
+              style={{ display: "flex", alignItems: "center", gap: 6, opacity: isNfcSupported ? 1 : 0.7 }}
+            >
+              <NfcIcon size={18} />
+              {searchByNfcScanning ? "Scansione..." : "Cerca con NFC"}
+            </button>
+          </div>
         </div>
 
         <div style={{ fontSize: 13, color: "#64748b", marginBottom: 12 }}>
-          Assegna scaffale e luogo per ogni materiale e magazzino. Usa <b>Associa barcode</b> dalla tabella per scansionare con fotocamera o digitare/scansionare con scanner.
+          Assegna scaffale e luogo per ogni materiale e magazzino. Cerca con barcode o NFC per trovare rapidamente un materiale.
         </div>
         {isMobile && (
           <div style={{ fontSize: 12, padding: 10, background: "#e0f2fe", borderRadius: 8, marginBottom: 12, border: "1px solid #0ea5e9" }}>
@@ -583,9 +555,9 @@ export default function ScaffaliPage() {
         {!isNfcSupported && (
           <div style={{ fontSize: 12, padding: 10, background: "#fef3c7", borderRadius: 8, marginBottom: 12, border: "1px solid #f59e0b" }}>
             {isIOS ? (
-              <>ℹ️ <b>NFC non disponibile su iPhone/iPad.</b> Safari non supporta l&apos;API Web NFC. Usa <b>Associa barcode</b> (fotocamera o scanner) per associare i materiali.</>
+              <>ℹ️ <b>NFC non disponibile su iPhone/iPad.</b> Safari non supporta l&apos;API Web NFC. Usa <b>Cerca con barcode</b> per trovare i materiali.</>
             ) : (
-              <>ℹ️ NFC: disponibile solo su <b>Chrome Android</b> con <b>HTTPS</b>. Su iOS non è supportato. Usa <b>Associa barcode</b> come alternativa.</>
+              <>ℹ️ NFC: disponibile solo su <b>Chrome Android</b> con <b>HTTPS</b>. Su iOS non è supportato. Usa <b>Cerca con barcode</b> come alternativa.</>
             )}
           </div>
         )}
@@ -636,8 +608,8 @@ export default function ScaffaliPage() {
           </div>
         )}
 
-        {(nfcConfirm || barcodeConfirm) && (() => {
-          const c = nfcConfirm || barcodeConfirm!;
+        {nfcConfirm && (() => {
+          const c = nfcConfirm;
           return (
             <div
               style={{
@@ -661,7 +633,7 @@ export default function ScaffaliPage() {
                 }}
               >
                 <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>
-                  {nfcConfirm ? "Associazione NFC" : "Associazione Barcode"}
+                  Associazione NFC
                 </div>
                 <div style={{ fontSize: 14, marginBottom: 8 }}>
                   <b>{c.code}</b> · {c.name}
@@ -687,14 +659,10 @@ export default function ScaffaliPage() {
                   </div>
                 )}
                 <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-                  <button type="button" className="btn" onClick={() => { setNfcConfirm(null); setBarcodeConfirm(null); }}>
+                  <button type="button" className="btn" onClick={() => setNfcConfirm(null)}>
                     Annulla
                   </button>
-                  <button
-                    type="button"
-                    className="btn btnPrimary"
-                    onClick={() => (nfcConfirm ? startNfcScan() : startBarcodeScan())}
-                  >
+                  <button type="button" className="btn btnPrimary" onClick={() => startNfcScan()}>
                     Sì, avvia scansione
                   </button>
                 </div>
@@ -703,7 +671,7 @@ export default function ScaffaliPage() {
           );
         })()}
 
-        {barcodeInput && (
+        {searchByBarcodeOpen && (
           <div
             style={{
               position: "fixed",
@@ -725,9 +693,9 @@ export default function ScaffaliPage() {
                 boxShadow: "0 24px 60px rgba(0,0,0,0.3)",
               }}
             >
-              <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scansiona o digita il barcode</div>
+              <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Cerca materiale per barcode</div>
               <div style={{ fontSize: 14, color: "#64748b", marginBottom: 12 }}>
-                {barcodeInput.code} · {barcodeInput.warehouse}
+                Scansiona o digita il barcode per cercare il materiale associato.
               </div>
               <div style={{ marginBottom: 16, display: cameraScanning ? "block" : "none" }}>
                 <div style={{ padding: 12, background: "#0f172a", borderRadius: 12, marginBottom: 8 }}>
@@ -744,7 +712,7 @@ export default function ScaffaliPage() {
                     <button
                       type="button"
                       className="btn btnPrimary"
-                      onClick={startCameraScanFromBarcodeInput}
+                      onClick={startCameraScanForSearch}
                       style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
                     >
                       <BarcodeIcon />
@@ -752,14 +720,14 @@ export default function ScaffaliPage() {
                     </button>
                   </div>
                   <input
-                    ref={barcodeInputRef}
+                    ref={searchBarcodeInputRef}
                     type="text"
                     className="input"
-                    value={barcodeInputVal}
-                    onChange={(e) => setBarcodeInputVal(e.target.value)}
+                    value={searchBarcodeVal}
+                    onChange={(e) => setSearchBarcodeVal(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") submitBarcode(barcodeInputVal);
-                      if (e.key === "Escape") { stopCameraScan(); setBarcodeInput(null); }
+                      if (e.key === "Enter") searchByBarcode(searchBarcodeVal);
+                      if (e.key === "Escape") { stopCameraScan(); setSearchByBarcodeOpen(false); }
                     }}
                     placeholder="Oppure digita o usa scanner hardware..."
                     style={{ width: "100%", marginBottom: 16 }}
@@ -771,58 +739,17 @@ export default function ScaffaliPage() {
                 <button
                   type="button"
                   className="btn"
-                  onClick={() => { stopCameraScan(); setBarcodeInput(null); }}
+                  onClick={() => { stopCameraScan(); setSearchByBarcodeOpen(false); }}
                 >
                   Annulla
                 </button>
                 <button
                   type="button"
                   className="btn btnPrimary"
-                  onClick={() => submitBarcode(barcodeInputVal)}
-                  disabled={cameraScanning || !barcodeInputVal.trim()}
+                  onClick={() => searchByBarcode(searchBarcodeVal)}
+                  disabled={cameraScanning || !searchBarcodeVal.trim()}
                 >
-                  Associa
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {barcodeReassign && (
-          <div
-            style={{
-              position: "fixed",
-              inset: 0,
-              background: "rgba(15,23,42,0.5)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: 1100,
-              padding: 20,
-            }}
-          >
-            <div
-              style={{
-                background: "white",
-                borderRadius: 14,
-                padding: 24,
-                maxWidth: 400,
-                boxShadow: "0 24px 60px rgba(0,0,0,0.3)",
-              }}
-            >
-              <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Barcode già associato</div>
-              <div style={{ fontSize: 14, padding: 12, background: "#fee2e2", borderRadius: 8, marginBottom: 16, border: "1px solid #ef4444" }}>
-                Questo barcode è già associato a <b>{barcodeReassign.existingCode}</b> · <b>{barcodeReassign.existingWarehouse}</b>.
-              </div>
-              <div style={{ fontSize: 13, marginBottom: 16 }}>
-                Vuoi spostarlo a <b>{barcodeReassign.code}</b> · <b>{barcodeReassign.warehouse}</b>?
-              </div>
-              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-                <button type="button" className="btn" onClick={() => setBarcodeReassign(null)}>
-                  No, annulla
-                </button>
-                <button type="button" className="btn btnPrimary" onClick={confirmBarcodeReassign}>
-                  Sì, sposta qui
+                  Cerca
                 </button>
               </div>
             </div>
@@ -995,10 +922,6 @@ export default function ScaffaliPage() {
                       />
                     </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button type="button" className="btn" onClick={() => openBarcodeConfirm(materialPopup.code, "PRM")} disabled={!!barcodeInput}
-                        style={{ padding: "8px 12px", fontSize: 12, background: shelves[materialPopup.code]?.PRM?.barcode ? "#dbeafe" : "#f1f5f9" }}>
-                        {shelves[materialPopup.code]?.PRM?.barcode ? "Barcode ✓" : "Associa barcode"}
-                      </button>
                       <button type="button" className="btn" onClick={() => openNfcConfirm(materialPopup.code, "PRM")} disabled={!!nfcAssociating}
                         style={{ padding: "8px 12px", fontSize: 12, background: shelves[materialPopup.code]?.PRM?.nfcTagId ? "#dcfce7" : "#f1f5f9" }}>
                         {shelves[materialPopup.code]?.PRM?.nfcTagId ? "NFC ✓" : "Associa NFC"}
@@ -1033,10 +956,6 @@ export default function ScaffaliPage() {
                       />
                     </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button type="button" className="btn" onClick={() => openBarcodeConfirm(materialPopup.code, "REALE")} disabled={!!barcodeInput}
-                        style={{ padding: "8px 12px", fontSize: 12, background: shelves[materialPopup.code]?.REALE?.barcode ? "#dbeafe" : "#f1f5f9" }}>
-                        {shelves[materialPopup.code]?.REALE?.barcode ? "Barcode ✓" : "Associa barcode"}
-                      </button>
                       <button type="button" className="btn" onClick={() => openNfcConfirm(materialPopup.code, "REALE")} disabled={!!nfcAssociating}
                         style={{ padding: "8px 12px", fontSize: 12, background: shelves[materialPopup.code]?.REALE?.nfcTagId ? "#dcfce7" : "#f1f5f9" }}>
                         {shelves[materialPopup.code]?.REALE?.nfcTagId ? "NFC ✓" : "Associa NFC"}
@@ -1156,21 +1075,6 @@ export default function ScaffaliPage() {
                             <button
                               type="button"
                               className="btn"
-                              onClick={() => openBarcodeConfirm(it.code, "PRM")}
-                              disabled={!!barcodeInput}
-                              title={shelves[it.code]?.PRM?.barcode ? "Barcode già associato. Clicca per ri-associare." : "Associa barcode (scelta principale)"}
-                              style={{
-                                padding: "6px 10px",
-                                fontSize: 12,
-                                background: shelves[it.code]?.PRM?.barcode ? "#dbeafe" : "#f1f5f9",
-                                borderColor: shelves[it.code]?.PRM?.barcode ? "#2563eb" : "#e2e8f0",
-                              }}
-                            >
-                              {shelves[it.code]?.PRM?.barcode ? "Barcode ✓" : "Associa barcode"}
-                            </button>
-                            <button
-                              type="button"
-                              className="btn"
                               onClick={() => openNfcConfirm(it.code, "PRM")}
                               disabled={!!nfcAssociating}
                               title={shelves[it.code]?.PRM?.nfcTagId ? "NFC già associato. Clicca per ri-associare." : "Associa tag NFC (Chrome Android)"}
@@ -1255,21 +1159,6 @@ export default function ScaffaliPage() {
                               }}
                             >
                               {getShelfDisplay(shelves[it.code]?.REALE)}
-                            </button>
-                            <button
-                              type="button"
-                              className="btn"
-                              onClick={() => openBarcodeConfirm(it.code, "REALE")}
-                              disabled={!!barcodeInput}
-                              title={shelves[it.code]?.REALE?.barcode ? "Barcode già associato. Clicca per ri-associare." : "Associa barcode (scelta principale)"}
-                              style={{
-                                padding: "6px 10px",
-                                fontSize: 12,
-                                background: shelves[it.code]?.REALE?.barcode ? "#dbeafe" : "#f1f5f9",
-                                borderColor: shelves[it.code]?.REALE?.barcode ? "#2563eb" : "#e2e8f0",
-                              }}
-                            >
-                              {shelves[it.code]?.REALE?.barcode ? "Barcode ✓" : "Associa barcode"}
                             </button>
                             <button
                               type="button"

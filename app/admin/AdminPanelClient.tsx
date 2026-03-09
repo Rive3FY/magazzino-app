@@ -307,11 +307,11 @@ export default function AdminPanelClient() {
     try {
       setResetting(true);
 
-      const { error } = await supabase.rpc("reset_magazzino");
+      const res = await fetch("/api/admin/reset-magazzino", { method: "POST", credentials: "include" });
+      const json = await res.json().catch(() => ({}));
 
-      if (error) {
-        console.error("reset_magazzino error:", error);
-        alert("Errore reset magazzino: " + error.message);
+      if (!res.ok) {
+        alert("Errore reset magazzino: " + (json.error || res.statusText));
         return;
       }
 

@@ -74,7 +74,10 @@ export default function SideNav() {
           >
             ✕
           </button>
-          <div className="sidebarBrand">GESTIONALE</div>
+          <Link href="/" className="sidebarBrand" style={{ display: "flex", alignItems: "center", gap: 8, textDecoration: "none", color: "inherit" }}>
+            <img src="/logo.svg" alt="" width={48} height={17} style={{ objectFit: "contain", filter: "brightness(0) invert(1)" }} />
+            <span>GESTIONALE</span>
+          </Link>
           <div className="sidebarVersion">Versione: 2.06.09</div>
         </div>
 

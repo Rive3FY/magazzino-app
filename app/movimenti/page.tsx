@@ -284,6 +284,7 @@ export default function MovimentiPage() {
   const [selReferentId, setSelReferentId] = useState<string>("");
 
   const [editRectify, setEditRectify] = useState(false);
+  const [groupEditState, setGroupEditState] = useState<Record<string, { returnQty: string; returnNote: string }>>({});
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deletingBulk, setDeletingBulk] = useState(false);
@@ -436,7 +437,7 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
     try {
       const pdf = new jsPDF("p", "mm", "a4");
 
-      const bannerDataUrl = await loadImageAsDataUrl("/banner_terna.png");
+      const bannerDataUrl = await loadImageAsDataUrl("/logo.svg");
 
       const img = new Image();
       img.src = bannerDataUrl;
@@ -631,7 +632,8 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
         if (c) codesWithStock.add(c);
       }
 
-      const filtered = items.filter((it) => codesWithStock.has(it.code));
+      const codesInCart = new Set(cart.map((r) => r.code));
+      const filtered = items.filter((it) => codesWithStock.has(it.code) && !codesInCart.has(it.code));
       setCartSuggestions(filtered.slice(0, 12));
       setCartManualActiveIndex(0);
     } catch (e: any) {
@@ -789,6 +791,20 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
           return;
         }
         if (hasPrm && !hasReale) {
+          if (forCart) {
+            const info = await loadMaterialForScan(it.code, "PRM");
+            if (info) {
+              setScanInfo(info);
+              setScanQty("1");
+              setScanSource(null);
+              setCartOpen(true);
+            } else {
+              setMsg("Materiale non disponibile in PRM.");
+            }
+            setOpen(false);
+            setMsg(null);
+            return;
+          }
           setWarehouseChoicePopup({ mode: "PRM_ONLY", ...popupData });
           setSearch(`${it.code} — ${it.name}`);
           setOpen(false);
@@ -796,6 +812,20 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
           return;
         }
         if (!hasPrm && hasReale) {
+          if (forCart) {
+            const info = await loadMaterialForScan(it.code, "REALE");
+            if (info) {
+              setScanInfo(info);
+              setScanQty("1");
+              setScanSource(null);
+              setCartOpen(true);
+            } else {
+              setMsg("Materiale non disponibile in REALE.");
+            }
+            setOpen(false);
+            setMsg(null);
+            return;
+          }
           setWarehouseChoicePopup({ mode: "REALE_ONLY", ...popupData });
           setSearch(`${it.code} — ${it.name}`);
           setOpen(false);
@@ -1105,7 +1135,7 @@ async function confirmCartPickup() {
         created_by_name: fullName,
         warehouse: row.warehouse,
         status: "OPEN",
-        returned_qty: 0,
+        returned_qty: null,
         return_note: null,
         closed_at: null,
         closed_by: null,
@@ -1196,10 +1226,44 @@ async function confirmCartPickup() {
     return (created ?? null) as ExcelLiveRow | null;
   }
 
-  async function applyDeltaToExcelLive(code: string, wh: "PRM" | "REALE", deltaFree: number) {
-    const live = await getOrCreateExcelLiveRow(code, wh);
+  type ApplyDeltaResult = true | false | { needsRequest: true; code: string; warehouse: "PRM" | "REALE"; deltaFree: number };
+
+  async function applyDeltaToExcelLive(code: string, wh: "PRM" | "REALE", deltaFree: number): Promise<ApplyDeltaResult> {
+    let live = await getOrCreateExcelLiveRow(code, wh);
+    let targetWh = wh;
+
     if (!live) {
-      throw new Error(`Riga non trovata in excel_live (né in excel_original) per ${code} ${wh}. Importa l'Excel prima.`);
+      const otherWh: "PRM" | "REALE" = wh === "PRM" ? "REALE" : "PRM";
+      live = await getOrCreateExcelLiveRow(code, otherWh);
+      if (live) {
+        targetWh = otherWh;
+        console.warn(`Riga ${code} non trovata in ${wh}, applicato delta a ${otherWh} invece.`);
+      }
+    }
+
+    if (!live) {
+      const { data: created, error: eIns } = await supabase
+        .from("excel_live")
+        .insert({
+          code,
+          warehouse: wh,
+          qty_free: 0,
+          qty_blocked: 0,
+          qty_quality: 0,
+          row_json: { "Qnt. a Mag. libero": 0 },
+        })
+        .select("code,warehouse,qty_free,qty_blocked,qty_quality,row_json")
+        .maybeSingle();
+
+      if (eIns) {
+        if (eIns.code === "42501" || eIns.message?.toLowerCase().includes("policy") || eIns.message?.toLowerCase().includes("permission")) {
+          return { needsRequest: true, code, warehouse: wh, deltaFree };
+        }
+        console.warn(`Impossibile creare riga excel_live per ${code} ${wh}:`, eIns.message);
+        return false;
+      }
+      live = created as ExcelLiveRow;
+      targetWh = wh;
     }
 
     const rowJson = { ...(live.row_json ?? {}) };
@@ -1217,9 +1281,10 @@ async function confirmCartPickup() {
         row_json: rowJson,
       })
       .eq("code", code)
-      .eq("warehouse", wh);
+      .eq("warehouse", targetWh);
 
     if (eUp) throw eUp;
+    return true;
   }
 
   async function saveMovement() {
@@ -1263,7 +1328,7 @@ async function confirmCartPickup() {
             created_by_name: fullName,
             warehouse: "PRM",
             status: "OPEN",
-            returned_qty: 0,
+            returned_qty: null,
             return_note: null,
             closed_at: null,
             closed_by: null,
@@ -1285,7 +1350,7 @@ async function confirmCartPickup() {
             created_by_name: fullName,
             warehouse: "REALE",
             status: "OPEN",
-            returned_qty: 0,
+            returned_qty: null,
             return_note: null,
             closed_at: null,
             closed_by: null,
@@ -1353,7 +1418,7 @@ async function confirmCartPickup() {
       created_by_name: fullName,
       warehouse: wh,
       status: type === "OUT" ? "OPEN" : "CLOSED",
-      returned_qty: 0,
+      returned_qty: type === "OUT" ? null : 0,
       return_note: null,
       closed_at: type === "OUT" ? null : new Date().toISOString(),
       closed_by: type === "OUT" ? null : userId,
@@ -1377,25 +1442,23 @@ async function confirmCartPickup() {
       },
     });
 
+    let excelLiveOk = true;
     try {
       const delta = type === "IN" ? qn : -qn;
-      await applyDeltaToExcelLive(picked.code, wh, delta);
+      const res = await applyDeltaToExcelLive(picked.code, wh, delta);
+      excelLiveOk = res === true;
     } catch (e: any) {
       console.error("excel_live update error:", e);
-      setMsg(
-        "Movimento salvato ✅\n\n⚠️ Attenzione: non sono riuscito ad aggiornare excel_live (giacenze). " +
-          (e?.message ?? "Errore sconosciuto")
-      );
-      setQty("");
-      setNote("");
-      await loadHistory();
-      setTimeout(() => qtyRef.current?.focus(), 80);
-      return;
+      excelLiveOk = false;
     }
 
     setQty("");
     setNote("");
-    setMsg("Movimento salvato ✅");
+    setMsg(
+      excelLiveOk
+        ? "Movimento salvato ✅"
+        : "Movimento salvato ✅\n\n⚠️ Giacenze (excel_live) non aggiornate: materiale non presente. Importa l'Excel o verifica il codice."
+    );
 
     if (type === "OUT") {
       const { data: shelfRow } = await supabase.from("material_shelves").select("warehouse,shelf,place").eq("code", picked.code).eq("warehouse", wh).maybeSingle();
@@ -1480,11 +1543,18 @@ async function confirmCartPickup() {
         ? -qty
         : +(qty - returnedQty);
 
+    let excelOk = false;
     try {
-      await applyDeltaToExcelLive(code, warehouse as "PRM" | "REALE", delta);
+      const res = await applyDeltaToExcelLive(code, warehouse as "PRM" | "REALE", delta);
+      excelOk = res === true;
     } catch (e: any) {
       console.error("Errore ripristino giacenza:", e);
       return alert("Errore ripristino giacenza: " + (e?.message ?? "sconosciuto"));
+    }
+    if (!excelOk) {
+      return alert(
+        `Riga non trovata in excel_live per ${code} ${warehouse}. Importa l'Excel prima di ripristinare.`
+      );
     }
 
     const { error: deleteError } = await supabase.from("movements").delete().eq("id", id);
@@ -1592,6 +1662,15 @@ async function confirmCartPickup() {
     setCloseOpen(true);
     setSelectedClosedRowId(null);
 
+    const initEdit: Record<string, { returnQty: string; returnNote: string }> = {};
+    for (const mov of group) {
+      initEdit[mov.id] = {
+        returnQty: String(n(mov.returned_qty)),
+        returnNote: mov.return_note ?? "",
+      };
+    }
+    setGroupEditState(initEdit);
+
     const r = n(m.returned_qty);
     setReturnQty(String(r));
     const wh = m.warehouse ?? "PRM";
@@ -1642,11 +1721,12 @@ async function confirmCartPickup() {
       return;
     }
 
+    const noteVal = (returnNote ?? "").trim();
     const { error } = await supabase
       .from("movements")
       .update({
         returned_qty: r,
-        return_note: (returnNote ?? "").trim() || null,
+        return_note: noteVal || "",
       } as any)
       .eq("id", mov.id);
 
@@ -1659,14 +1739,14 @@ async function confirmCartPickup() {
     setClosingGroup((prev) =>
       prev.map((row) =>
         row.id === mov.id
-          ? { ...row, returned_qty: r, return_note: (returnNote ?? "").trim() || null }
+          ? { ...row, returned_qty: r, return_note: noteVal || "" }
           : row
       )
     );
     setHistory((prev) =>
       prev.map((row) =>
         row.id === mov.id
-          ? { ...row, returned_qty: r, return_note: (returnNote ?? "").trim() || null }
+          ? { ...row, returned_qty: r, return_note: noteVal || "" }
           : row
       )
     );
@@ -1683,10 +1763,19 @@ async function confirmCartPickup() {
     const openInGroup = closingGroup.filter((m) => (m.status ?? "OPEN") === "OPEN");
 
     if (isGroup && openInGroup.length > 0) {
-      const needsRettifica = openInGroup.filter((m) => m.returned_qty === null || m.returned_qty === undefined);
-      if (needsRettifica.length > 0) {
-        setMsg("Non puoi chiudere finché non hai confermato la rettifica di tutti gli articoli. Clicca \"Rettifica\" su ogni articolo aperto e salva le quantità.");
-        return;
+      for (const mov of openInGroup) {
+        const edit = groupEditState[mov.id];
+        if (!edit) continue;
+        const r = toNumber(edit.returnQty);
+        const outQty = Math.abs(n(mov.qty));
+        if (!Number.isFinite(r) || r < 0) {
+          setMsg(`Quantità rientro non valida per ${mov.code}.`);
+          return;
+        }
+        if (r > outQty) {
+          setMsg(`Il rientro per ${mov.code} non può superare l'uscita (${outQty}).`);
+          return;
+        }
       }
     }
 
@@ -1709,14 +1798,18 @@ async function confirmCartPickup() {
 
     if (isGroup) {
       for (const mov of closingGroup) {
+        const edit = groupEditState[mov.id];
+        const r = edit ? toNumber(edit.returnQty) : n(mov.returned_qty) ?? 0;
+        const noteVal = (edit?.returnNote ?? mov.return_note ?? "").trim();
         const outQty = Math.abs(n(mov.qty));
-        const r = n(mov.returned_qty) ?? 0;
         const rPrm = mov.warehouse === "PRM" ? r : 0;
         const rReale = mov.warehouse === "REALE" ? r : 0;
 
         const { error } = await supabase
           .from("movements")
           .update({
+            returned_qty: r,
+            return_note: noteVal || "",
             status: "CLOSED",
             closed_at: closedAtIso,
             closed_by: userId ?? null,
@@ -1738,14 +1831,6 @@ async function confirmCartPickup() {
           }
         } catch (e: any) {
           console.error("excel_live return update error:", e);
-          setMsg("Chiusura salvata ✅\n\n⚠️ Errore aggiornamento excel_live per " + mov.code);
-          setCloseOpen(false);
-          setClosing(null);
-          setClosingGroup([]);
-          setClosingMeta(null);
-          setEditRectify(false);
-          await loadHistory();
-          return;
         }
 
         await writeAuditLog({
@@ -1759,7 +1844,7 @@ async function confirmCartPickup() {
             out_qty: outQty,
             returned_qty: r,
             net_qty: Math.max(0, outQty - r),
-            return_note: mov.return_note,
+            return_note: noteVal || null,
             referent_id: ref?.id ?? null,
             referent_name: ref?.name ?? null,
             referent_email: ref?.email ?? null,
@@ -1769,39 +1854,58 @@ async function confirmCartPickup() {
       }
 
       try {
-        const { data: { session } } = await supabase.auth.getSession();
         const { data: { user } } = await supabase.auth.getUser();
-        const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send_close_email`;
-        await fetch(url, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session?.access_token ?? ""}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            movements: closingGroup.map((mov) => {
-              const outQty = Math.abs(n(mov.qty));
-              const r = n(mov.returned_qty) ?? 0;
-              return {
-                movement_id: mov.id,
-                code: mov.code,
-                warehouse: mov.warehouse,
-                out_qty: outQty,
-                returned_qty: r,
-                net_qty: Math.max(0, outQty - r),
-                return_note: mov.return_note ?? null,
-                type: mov.type,
-              };
-            }),
-            referent_name: ref?.name ?? null,
-            referent_email: ref?.email ?? null,
-            closed_by: user?.email ?? null,
-            closed_at: closedAtIso,
-          }),
+        const movementsPayload = closingGroup.map((mov) => {
+          const edit = groupEditState[mov.id];
+          const r = edit ? toNumber(edit.returnQty) : n(mov.returned_qty) ?? 0;
+          const noteVal = (edit?.returnNote ?? mov.return_note ?? "").trim();
+          const outQty = Math.abs(n(mov.qty));
+          return {
+            movement_id: mov.id,
+            code: mov.code,
+            name: nameMap[mov.code] ?? mov.code,
+            warehouse: mov.warehouse,
+            out_qty: outQty,
+            returned_qty: r,
+            net_qty: Math.max(0, outQty - r),
+            return_note: noteVal || null,
+            type: mov.type,
+          };
         });
-      } catch (_e) {}
-
-      setMsg("Prelievo multiplo chiuso ✅");
+        const first = movementsPayload[0];
+        const body = {
+          movements: movementsPayload,
+          movement_id: first?.movement_id,
+          code: first?.code,
+          name: first?.name,
+          warehouse: first?.warehouse,
+          out_qty: first?.out_qty,
+          returned_qty: first?.returned_qty,
+          net_qty: first?.net_qty,
+          return_note: first?.return_note,
+          type: first?.type,
+          referent_name: ref?.name ?? null,
+          referent_email: ref?.email ?? null,
+          closed_by: user?.email ?? null,
+          closed_at: closedAtIso,
+        };
+        const emailRes = await fetch("/api/send-close-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const emailData = await emailRes.json().catch(() => ({}));
+        if (!emailRes.ok) {
+          const errMsg = emailData?.error ?? emailRes.statusText;
+          console.warn("Email non inviata:", errMsg);
+          setMsg("Prelievo multiplo chiuso ✅ (email non inviata: " + errMsg + ")");
+        } else {
+          setMsg("Prelievo multiplo chiuso ✅");
+        }
+      } catch (e: any) {
+        console.warn("Email non inviata:", e?.message ?? e);
+        setMsg("Prelievo multiplo chiuso ✅ (email non inviata: " + (e?.message ?? "errore di rete") + ")");
+      }
       setCloseOpen(false);
       setClosing(null);
       setClosingGroup([]);
@@ -1832,6 +1936,64 @@ async function confirmCartPickup() {
       return;
     }
 
+    let excelLiveOk = true;
+    let needsRequest: { code: string; warehouse: "PRM" | "REALE"; deltaFree: number } | null = null;
+    try {
+      if (r > 0) {
+        if (rPrm > 0) {
+          const res = await applyDeltaToExcelLive(closing.code, "PRM", rPrm);
+          if (res === true) excelLiveOk = true;
+          else if (res && typeof res === "object" && res.needsRequest) needsRequest = res;
+          else excelLiveOk = false;
+        }
+        if (rReale > 0 && !needsRequest) {
+          const res = await applyDeltaToExcelLive(closing.code, "REALE", rReale);
+          if (res === true) excelLiveOk = excelLiveOk && true;
+          else if (res && typeof res === "object" && res.needsRequest) needsRequest = res;
+          else excelLiveOk = false;
+        }
+      }
+    } catch (e: any) {
+      console.error("excel_live return update error:", e);
+      excelLiveOk = false;
+    }
+
+    if (needsRequest) {
+      const { error: reqErr } = await supabase.from("excel_live_requests").insert({
+        movement_id: closing.id,
+        code: needsRequest.code,
+        warehouse: needsRequest.warehouse,
+        delta_free: needsRequest.deltaFree,
+        requested_by: userId,
+        details_json: {
+          material_name: closingMeta?.name ?? nameMap[closing.code] ?? closing.code,
+          out_qty: outQty,
+          returned_qty: r,
+          return_note: (returnNote ?? "").trim() || null,
+          referent_id: ref?.id ?? null,
+          referent_name: ref?.name ?? null,
+          referent_email: ref?.email ?? null,
+          closed_at: closedAtIso,
+          closed_by: userId ?? null,
+        },
+      });
+      if (reqErr) {
+        setMsg("Errore creazione richiesta: " + (reqErr as any)?.message);
+        return;
+      }
+      setMsg(
+        "Richiesta inviata all'admin. Il movimento resterà aperto finché l'admin non approverà l'aggiunta della riga in excel_live (" +
+          needsRequest.warehouse +
+          ")."
+      );
+      setCloseOpen(false);
+      setClosing(null);
+      setClosingMeta(null);
+      setEditRectify(false);
+      await loadHistory();
+      return;
+    }
+
     const { error } = await supabase
       .from("movements")
       .update({
@@ -1850,26 +2012,6 @@ async function confirmCartPickup() {
       setMsg("Errore chiusura: " + (error as any)?.message);
       return;
     }
-
-    try {
-      if (r > 0) {
-        if (rPrm > 0) await applyDeltaToExcelLive(closing.code, "PRM", rPrm);
-        if (rReale > 0) await applyDeltaToExcelLive(closing.code, "REALE", rReale);
-      }
-    } catch (e: any) {
-      console.error("excel_live return update error:", e);
-      setMsg(
-        "Chiusura salvata ✅\n\n⚠️ Attenzione: non sono riuscito ad aggiornare excel_live (rientro). " +
-          (e?.message ?? "Errore sconosciuto")
-      );
-      setCloseOpen(false);
-      setClosing(null);
-      setClosingMeta(null);
-      setEditRectify(false);
-      await loadHistory();
-      return;
-    }
-
     setHistory((prev) =>
       prev.map((row) =>
         row.id === closing.id
@@ -1909,48 +2051,41 @@ async function confirmCartPickup() {
       },
     });
 
-    let emailFailed = false;
+    let emailErr: string | null = null;
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send_close_email`;
-      const body = {
-        movement_id: closing.id,
-        code: closing.code,
-        warehouse: closing.warehouse,
-        out_qty: outQty,
-        returned_qty: r,
-        net_qty: Math.max(0, outQty - r),
-        return_note: (returnNote ?? "").trim() || null,
-        referent_name: ref.name,
-        referent_email: ref.email,
-        closed_by: userEmail ?? null,
-        closed_at: closedAtIso,
-        type: closing.type,
-      };
-      const resp = await fetch(url, {
+      const res = await fetch("/api/send-close-email", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${session?.access_token ?? ""}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          movement_id: closing.id,
+          code: closing.code,
+          name: closingMeta?.name ?? nameMap[closing.code] ?? closing.code,
+          warehouse: closing.warehouse,
+          out_qty: outQty,
+          returned_qty: r,
+          net_qty: Math.max(0, outQty - r),
+          return_note: (returnNote ?? "").trim() || null,
+          referent_name: ref?.name ?? null,
+          referent_email: ref?.email ?? null,
+          closed_by: userEmail ?? null,
+          closed_at: closedAtIso,
+          type: closing.type,
+        }),
       });
-      const respData = await resp.json().catch(() => ({}));
-      if (!resp.ok) {
-        emailFailed = true;
-        const errMsg =
-          typeof respData?.error === "string"
-            ? respData.error
-            : respData?.error?.message ?? (respData?.error ? JSON.stringify(respData.error) : resp.statusText || "Errore sconosciuto");
-        console.warn("Email non inviata:", errMsg);
-        setMsg(`Movimento chiuso ✅ (email non inviata: ${errMsg})`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        emailErr = data?.error ?? res.statusText;
+        console.warn("Email non inviata:", emailErr);
       }
     } catch (e: any) {
-      emailFailed = true;
-      console.warn("Email non inviata:", e?.message ?? e);
-      setMsg("Movimento chiuso ✅ (email non inviata: " + (e?.message ?? "errore di rete") + ")");
+      emailErr = e?.message ?? "errore di rete";
+      console.warn("Email non inviata:", emailErr);
     }
-    if (!emailFailed) setMsg("Movimento chiuso ✅");
+    let successMsg = emailErr ? `Movimento chiuso ✅ (email non inviata: ${emailErr})` : "Movimento chiuso ✅";
+    if (!excelLiveOk && r > 0) {
+      successMsg += "\n\n⚠️ Giacenze (excel_live) non aggiornate: materiale non presente. Importa l'Excel o verifica il codice.";
+    }
+    setMsg(successMsg);
 
     await loadHistory();
 
@@ -2537,6 +2672,9 @@ async function confirmCartPickup() {
                   style={{ width: "100%" }}
                 >
                   Preleva da PRM ({warehouseChoicePopup.prmFree} disponibili)
+                  {warehouseChoicePopup.forCart && cart.some((r) => r.code === warehouseChoicePopup.code && r.warehouse === "PRM") && (
+                    <span style={{ marginLeft: 8, fontSize: 11, opacity: 0.9 }}>· già nel carrello</span>
+                  )}
                 </button>
               )}
               {warehouseChoicePopup.mode === "REALE_ONLY" && (
@@ -2547,6 +2685,9 @@ async function confirmCartPickup() {
                   style={{ width: "100%" }}
                 >
                   Preleva da REALE ({warehouseChoicePopup.realeFree} disponibili)
+                  {warehouseChoicePopup.forCart && cart.some((r) => r.code === warehouseChoicePopup.code && r.warehouse === "REALE") && (
+                    <span style={{ marginLeft: 8, fontSize: 11, opacity: 0.9 }}>· già nel carrello</span>
+                  )}
                 </button>
               )}
               {warehouseChoicePopup.mode === "BOTH" && (
@@ -2568,6 +2709,9 @@ async function confirmCartPickup() {
                     style={{ width: "100%" }}
                   >
                     Solo da PRM ({warehouseChoicePopup.prmFree} disponibili)
+                    {warehouseChoicePopup.forCart && cart.some((r) => r.code === warehouseChoicePopup.code && r.warehouse === "PRM") && (
+                      <span style={{ marginLeft: 8, fontSize: 11, opacity: 0.9 }}>· già nel carrello</span>
+                    )}
                   </button>
                   <button
                     type="button"
@@ -2576,6 +2720,9 @@ async function confirmCartPickup() {
                     style={{ width: "100%" }}
                   >
                     Solo da REALE ({warehouseChoicePopup.realeFree} disponibili)
+                    {warehouseChoicePopup.forCart && cart.some((r) => r.code === warehouseChoicePopup.code && r.warehouse === "REALE") && (
+                      <span style={{ marginLeft: 8, fontSize: 11, opacity: 0.9 }}>· già nel carrello</span>
+                    )}
                   </button>
                 </>
               )}
@@ -2777,7 +2924,6 @@ async function confirmCartPickup() {
       {closeOpen && closing && (
         <div
           onMouseDown={() => {
-            if (editRectify) return;
             setCloseOpen(false);
             setClosing(null);
             setClosingGroup([]);
@@ -2786,6 +2932,7 @@ async function confirmCartPickup() {
             setEditRectify(false);
             setEditingMovementId(null);
             setSelectedClosedRowId(null);
+            setGroupEditState({});
           }}
           style={{
             position: "fixed",
@@ -2823,6 +2970,7 @@ async function confirmCartPickup() {
                 setEditRectify(false);
                 setEditingMovementId(null);
                 setSelectedClosedRowId(null);
+                setGroupEditState({});
               }}
               style={{
                 position: "absolute",
@@ -2843,24 +2991,24 @@ async function confirmCartPickup() {
                         <th>Codice</th>
                         <th>Descrizione</th>
                         <th>Mag.</th>
-                        <th>Q.tà</th>
-                        <th>Q.tà rett.</th>
+                        <th>Q.tà uscita</th>
+                        <th>Q.tà rientro</th>
+                        <th>Nota (opz.)</th>
                         <th>Stato</th>
-                        <th>Azioni</th>
                       </tr>
                     </thead>
                     <tbody>
                       {closingGroup.map((mov) => {
                         const st = (mov.status ?? "OPEN") as "OPEN" | "CLOSED";
-                        const isEditing = editingMovementId === mov.id;
                         const isSelected = selectedClosedRowId === mov.id;
-                        const rettified = mov.returned_qty !== null && mov.returned_qty !== undefined;
                         const isClosed = st === "CLOSED";
+                        const edit = groupEditState[mov.id] ?? { returnQty: String(n(mov.returned_qty)), returnNote: mov.return_note ?? "" };
+                        const outQty = Math.abs(n(mov.qty));
                         return (
                           <tr
                             key={mov.id}
                             style={{
-                              background: isEditing ? "#eef2ff" : isSelected ? "#e0f2fe" : undefined,
+                              background: isSelected ? "#e0f2fe" : undefined,
                               cursor: isClosed ? "pointer" : undefined,
                             }}
                             onClick={isClosed ? () => setSelectedClosedRowId((prev) => (prev === mov.id ? null : mov.id)) : undefined}
@@ -2868,26 +3016,48 @@ async function confirmCartPickup() {
                             <td style={{ fontWeight: 900 }}>{mov.code}</td>
                             <td>{nameMap[mov.code] ?? "-"}</td>
                             <td>{mov.warehouse ? <span style={pillStyle(mov.warehouse)}>{mov.warehouse}</span> : "-"}</td>
-                            <td>{Math.abs(n(mov.qty))}</td>
-                            <td>{rettified ? n(mov.returned_qty) : "—"}</td>
-                            <td>
-                              <span style={pillStyle(st)}>{st === "OPEN" ? "APERTO" : "CHIUSO"}</span>
+                            <td>{outQty}</td>
+                            <td onClick={(e) => !isClosed && e.stopPropagation()}>
+                              {isClosed ? (
+                                n(mov.returned_qty)
+                              ) : (
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  className="input"
+                                  value={edit.returnQty}
+                                  onChange={(e) =>
+                                    setGroupEditState((prev) => ({
+                                      ...prev,
+                                      [mov.id]: { ...prev[mov.id], returnQty: e.target.value },
+                                    }))
+                                  }
+                                  placeholder="0"
+                                  style={{ width: 70, padding: "4px 8px", fontSize: 13 }}
+                                />
+                              )}
                             </td>
                             <td onClick={(e) => !isClosed && e.stopPropagation()}>
-                              {st === "OPEN" ? (
-                                <button
-                                  type="button"
-                                  className="btn"
-                                  onClick={() => startEditGroupItem(mov)}
-                                  style={{ padding: "4px 10px", fontSize: 12 }}
-                                >
-                                  {isEditing ? "In modifica" : "Rettifica"}
-                                </button>
+                              {isClosed ? (
+                                mov.return_note ?? "—"
                               ) : (
-                                <span style={{ fontSize: 12, color: "#64748b" }}>
-                                  {isSelected ? "Clicca per chiudere dettaglio" : "Clicca per dettaglio"}
-                                </span>
+                                <input
+                                  type="text"
+                                  className="input"
+                                  value={edit.returnNote}
+                                  onChange={(e) =>
+                                    setGroupEditState((prev) => ({
+                                      ...prev,
+                                      [mov.id]: { ...prev[mov.id], returnNote: e.target.value },
+                                    }))
+                                  }
+                                  placeholder="Opzionale"
+                                  style={{ width: "100%", minWidth: 100, padding: "4px 8px", fontSize: 13 }}
+                                />
                               )}
+                            </td>
+                            <td>
+                              <span style={pillStyle(st)}>{st === "OPEN" ? "APERTO" : "CHIUSO"}</span>
                             </td>
                           </tr>
                         );
@@ -2898,7 +3068,7 @@ async function confirmCartPickup() {
                 <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>
                   {closingGroup.some((m) => (m.status ?? "OPEN") === "CLOSED")
                     ? "Clicca su una riga chiusa per vedere il dettaglio completo."
-                    : "Conferma la rettifica di ogni articolo (quantità rientro). Poi seleziona il referente e chiudi tutto in un unico invio."}
+                    : "Compila quantità rientro per ogni articolo aperto, seleziona il referente e conferma la chiusura."}
                 </div>
                 {selectedClosedRowId && (() => {
                   const mov = closingGroup.find((m) => m.id === selectedClosedRowId);
@@ -2945,7 +3115,7 @@ async function confirmCartPickup() {
 
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", paddingRight: 80 }}>
               <div style={{ fontWeight: 900 }}>
-                {closingGroup.length > 1 && editingMovementId ? "Rettifica articolo · " : "Dettaglio movimento · "}
+                {closingGroup.length <= 1 && "Dettaglio movimento · "}
                 <span style={{ opacity: 0.75 }}>{closing.code}</span>{" "}
                 {closing.warehouse ? <span style={{ marginLeft: 8, ...pillStyle(closing.warehouse) }}>{closing.warehouse}</span> : null}
               </div>
@@ -2966,7 +3136,7 @@ async function confirmCartPickup() {
               </span>
             </div>
 
-            {(closingGroup.length <= 1 || editingMovementId) && (
+            {closingGroup.length <= 1 && (
             <>
             <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
               <div style={{ gridColumn: "span 12" }}>
@@ -3083,32 +3253,15 @@ async function confirmCartPickup() {
                   <div style={{ fontWeight: 900 }}>Rettifica / Chiusura uscita</div>
 
                   <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => setEditRectify((v) => !v)}
-                      title={editRectify ? "Blocca campi" : "Sblocca campi"}
-                      style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
-                    >
-                      <PencilIcon />
-                      {editRectify ? "Blocca" : "Modifica"}
+                    <button className="btn btnPrimary" type="button" onClick={confirmClose}>
+                      Conferma chiusura
                     </button>
-
-                    {closingGroup.length > 1 && editingMovementId ? (
-                      <button className="btn btnPrimary" type="button" onClick={confirmRectify} disabled={!editRectify}>
-                        Conferma rettifica
-                      </button>
-                    ) : (
-                      <button className="btn btnPrimary" type="button" onClick={confirmClose} disabled={!editRectify}>
-                        Conferma chiusura
-                      </button>
-                    )}
                   </div>
                 </div>
 
                 <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>
                   Solo il creatore del movimento o l’admin può chiudere questa uscita.{" "}
-                  {editRectify ? "Compila i campi e poi conferma." : "Premi la matita per sbloccare i campi."}
+                  Compila i campi e conferma.
                 </div>
 
                 <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
@@ -3139,8 +3292,6 @@ async function confirmCartPickup() {
                         }
                       }}
                       inputMode="decimal"
-                      disabled={!editRectify}
-                      style={!editRectify ? { background: "#f8fafc", color: "#64748b" } : undefined}
                       placeholder="0"
                     />
                   </div>
@@ -3155,8 +3306,6 @@ async function confirmCartPickup() {
                       className="input"
                       value={returnNote}
                       onChange={(e) => setReturnNote(e.target.value)}
-                      disabled={!editRectify}
-                      style={!editRectify ? { background: "#f8fafc", color: "#64748b" } : undefined}
                       placeholder="Esempio: rientrati 2 pezzi"
                     />
                   </div>
@@ -3185,8 +3334,6 @@ async function confirmCartPickup() {
                             }
                           }}
                           inputMode="decimal"
-                          disabled={!editRectify}
-                          style={!editRectify ? { background: "#f8fafc", color: "#64748b" } : undefined}
                           placeholder="0"
                         />
                       </div>
@@ -3209,40 +3356,38 @@ async function confirmCartPickup() {
                             }
                           }}
                           inputMode="decimal"
-                          disabled={!editRectify}
-                          style={!editRectify ? { background: "#f8fafc", color: "#64748b" } : undefined}
                           placeholder="0"
                         />
                       </div>
                     </>
                   )}
 
-                  <div style={{ gridColumn: "span 6" }}>
-                    <label className="label" htmlFor="refSel">
-                      Referente
-                    </label>
-                    <select
-                      id="refSel"
-                      name="refSel"
-                      className="input"
-                      value={selReferentId}
-                      onChange={(e) => setSelReferentId(e.target.value)}
-                      disabled={!editRectify}
-                      style={!editRectify ? { background: "#f8fafc", color: "#64748b" } : undefined}
-                    >
-                      <option value="">— Seleziona referente —</option>
-                      {referents.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.name}
-                        </option>
-                      ))}
-                    </select>
-                    <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
-                      {selReferentId
-                        ? `Email: ${referents.find((x) => x.id === selReferentId)?.email ?? "-"}`
-                        : "Seleziona il referente per associarlo alla chiusura."}
+                  {closingGroup.length <= 1 && (
+                    <div style={{ gridColumn: "span 6" }}>
+                      <label className="label" htmlFor="refSel">
+                        Referente
+                      </label>
+                      <select
+                        id="refSel"
+                        name="refSel"
+                        className="input"
+                        value={selReferentId}
+                        onChange={(e) => setSelReferentId(e.target.value)}
+                      >
+                        <option value="">— Seleziona referente —</option>
+                        {referents.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.name}
+                          </option>
+                        ))}
+                      </select>
+                      <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
+                        {selReferentId
+                          ? `Email: ${referents.find((x) => x.id === selReferentId)?.email ?? "-"}`
+                          : "Seleziona il referente per associarlo alla chiusura."}
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   <div style={{ gridColumn: "span 6" }}>
                     <label className="label" htmlFor="netInfo">
@@ -3266,46 +3411,35 @@ async function confirmCartPickup() {
             </>
             )}
 
-            {closingGroup.length > 1 && !editingMovementId && (() => {
-              const openInGroup = closingGroup.filter((m) => (m.status ?? "OPEN") === "OPEN");
-              const allRettified = openInGroup.length > 0 && openInGroup.every((m) => m.returned_qty !== null && m.returned_qty !== undefined);
-              if (allRettified) {
-                return (
-                  <div style={{ marginTop: 16, padding: 16, border: "1px solid #e2e8f0", borderRadius: 12, background: "#f8fafc" }}>
-                    <div style={{ fontWeight: 900, marginBottom: 10 }}>Chiusura gruppo</div>
-                    <div style={{ fontSize: 13, marginBottom: 12, color: "#64748b" }}>
-                      Tutti gli articoli sono stati rettificati. Seleziona il referente e conferma per chiudere il prelievo multiplo.
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                      <div style={{ minWidth: 200 }}>
-                        <label className="label" htmlFor="refSelGroup">Referente</label>
-                        <select
-                          id="refSelGroup"
-                          className="input"
-                          value={selReferentId}
-                          onChange={(e) => setSelReferentId(e.target.value)}
-                        >
-                          <option value="">— Seleziona referente —</option>
-                          {referents.map((r) => (
-                            <option key={r.id} value={r.id}>{r.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div style={{ alignSelf: "flex-end" }}>
-                        <button className="btn btnPrimary" type="button" onClick={confirmClose}>
-                          Conferma chiusura gruppo
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              }
-              return (
-                <div style={{ marginTop: 16, padding: 16, textAlign: "center", color: "#64748b", fontSize: 14 }}>
-                  Seleziona un articolo dalla tabella sopra e clicca &quot;Rettifica&quot; per confermare le quantità. Poi potrai chiudere tutto in un unico invio.
+            {closingGroup.length > 1 && (
+              <div style={{ marginTop: 16, padding: 16, border: "1px solid #e2e8f0", borderRadius: 12, background: "#f8fafc" }}>
+                <div style={{ fontWeight: 900, marginBottom: 10 }}>Chiusura gruppo</div>
+                <div style={{ fontSize: 13, marginBottom: 12, color: "#64748b" }}>
+                  Compila le quantità rientro nella tabella sopra, seleziona il referente e conferma.
                 </div>
-              );
-            })()}
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ minWidth: 200 }}>
+                    <label className="label" htmlFor="refSelGroup">Referente</label>
+                    <select
+                      id="refSelGroup"
+                      className="input"
+                      value={selReferentId}
+                      onChange={(e) => setSelReferentId(e.target.value)}
+                    >
+                      <option value="">— Seleziona referente —</option>
+                      {referents.map((r) => (
+                        <option key={r.id} value={r.id}>{r.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ alignSelf: "flex-end" }}>
+                    <button className="btn btnPrimary" type="button" onClick={confirmClose}>
+                      Conferma chiusura gruppo
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {msg && <div style={{ marginTop: 10, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
           </div>
@@ -3524,7 +3658,7 @@ async function confirmCartPickup() {
           <button
             type="button"
             className="btn"
-            onClick={() => { setCartOpen(false); startScan(); }}
+            onClick={() => startScan()}
             disabled={cartBusy}
             style={{ display: "flex", alignItems: "center", gap: 6 }}
           >
@@ -3598,7 +3732,9 @@ async function confirmCartPickup() {
                   }}
                 >
                   {cartSuggestions.length === 0 ? (
-                    <div style={{ padding: 12, fontSize: 13, color: "#64748b" }}>Nessun materiale con giacenza</div>
+                    <div style={{ padding: 12, fontSize: 13, color: "#64748b" }}>
+                      {cartManualCode.trim().length >= 2 ? "Nessun materiale disponibile o già nel carrello" : "Nessun materiale con giacenza"}
+                    </div>
                   ) : (
                     cartSuggestions.map((it, idx) => (
                       <div

@@ -9,6 +9,22 @@ import { toNumberLoose } from "../_lib/utils";
 type WarehouseKind = "PRM" | "REALE";
 
 type LoadedCounts = { PRM: number; REALE: number } | null;
+type BackupFileRow = {
+  id: string;
+  created_at: string;
+  warehouse: WarehouseKind;
+  original_filename: string;
+  content_type?: string | null;
+  file_size?: number | null;
+  row_count?: number | null;
+  uploaded_by_email?: string | null;
+};
+type BackupFilesResponse = {
+  error?: string;
+  files?: BackupFileRow[];
+  setupRequired?: boolean;
+  message?: string;
+};
 
 function cleanCell(v: any) {
   if (v === null || v === undefined) return "";
@@ -22,12 +38,23 @@ function chunkArray<T>(arr: T[], size: number) {
   return out;
 }
 
+function formatBytes(value: number | null | undefined) {
+  const bytes = Number(value ?? 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "-";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export default function ImportPage() {
   const supabase = createClient();
 
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loadedCounts, setLoadedCounts] = useState<LoadedCounts>(null);
+  const [backupFiles, setBackupFiles] = useState<BackupFileRow[]>([]);
+  const [backupsLoading, setBackupsLoading] = useState(false);
+  const [backupSetupMsg, setBackupSetupMsg] = useState<string | null>(null);
   const [prmUnlocked, setPrmUnlocked] = useState(false);
   const [realeUnlocked, setRealeUnlocked] = useState(false);
 
@@ -44,8 +71,54 @@ export default function ImportPage() {
   }
 
   useEffect(() => {
-    if (isAdmin) void loadCounts();
+    if (isAdmin) {
+      void loadCounts();
+      void loadBackupFiles();
+    }
   }, [isAdmin]);
+
+  async function loadBackupFiles() {
+    setBackupsLoading(true);
+    try {
+      const response = await fetch("/api/import-backups", { cache: "no-store" });
+      const payload = (await response.json()) as BackupFilesResponse;
+      if (payload.setupRequired) {
+        setBackupFiles([]);
+        setBackupSetupMsg(payload.message || "Archivio backup non ancora attivato su Supabase.");
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(payload.error || "Errore caricamento archivio backup");
+      }
+      setBackupSetupMsg(null);
+      setBackupFiles(Array.isArray(payload.files) ? payload.files : []);
+    } catch (error: unknown) {
+      console.error("load backup files error:", error);
+      setBackupFiles([]);
+      setBackupSetupMsg("Impossibile leggere l'archivio backup.");
+    } finally {
+      setBackupsLoading(false);
+    }
+  }
+
+  async function backupImportedFile(file: File, warehouseKind: WarehouseKind, rowCount: number) {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("warehouse", warehouseKind);
+    formData.append("rowCount", String(rowCount));
+
+    const response = await fetch("/api/import-backups", {
+      method: "POST",
+      body: formData,
+    });
+
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      throw new Error(payload.error || "Errore salvataggio backup file");
+    }
+
+    await loadBackupFiles();
+  }
 
   async function importExcel(file: File, warehouseKind: WarehouseKind) {
     setMsg(null);
@@ -186,7 +259,15 @@ export default function ImportPage() {
         }
       }
 
-      setMsg(`Import ${warehouseKind} completato ✅ (${payload.length} materiali)`);
+      let backupMsg = "\n\nBackup file salvato ✅";
+      try {
+        await backupImportedFile(file, warehouseKind, payload.length);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : "errore sconosciuto";
+        backupMsg = `\n\nImport completato ma backup file non salvato: ${message}`;
+      }
+
+      setMsg(`Import ${warehouseKind} completato ✅ (${payload.length} materiali)${backupMsg}`);
       await loadCounts();
     } catch (e: any) {
       setMsg("Errore import: " + (e?.message ?? String(e)));
@@ -317,6 +398,68 @@ export default function ImportPage() {
         >
           Download Excel LIVE
         </button>
+      </div>
+
+      <div className="card" style={{ padding: 12, margin: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontWeight: 900 }}>Archivio file importati</div>
+            <div style={{ fontSize: 13, opacity: 0.9, marginTop: 4 }}>
+              Conserva i file Excel originali caricati per PRM e REALE, pronti da riscaricare come backup.
+            </div>
+          </div>
+
+          <button type="button" className="btn" onClick={() => void loadBackupFiles()} disabled={backupsLoading}>
+            {backupsLoading ? "Aggiornamento..." : "Aggiorna archivio"}
+          </button>
+        </div>
+
+        {backupsLoading ? (
+          <div style={{ marginTop: 12 }}>Caricamento archivio backup...</div>
+        ) : backupSetupMsg ? (
+          <div style={{ marginTop: 12, fontWeight: 700 }}>{backupSetupMsg}</div>
+        ) : backupFiles.length === 0 ? (
+          <div style={{ marginTop: 12, opacity: 0.75 }}>Nessun file importato archiviato al momento.</div>
+        ) : (
+          <div className="tableWrap" style={{ marginTop: 12 }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Magazzino</th>
+                  <th>File</th>
+                  <th>Righe</th>
+                  <th>Dimensione</th>
+                  <th>Caricato da</th>
+                  <th>Download</th>
+                </tr>
+              </thead>
+              <tbody>
+                {backupFiles.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.created_at ? new Date(row.created_at).toLocaleString("it-IT") : "-"}</td>
+                    <td>{row.warehouse}</td>
+                    <td>{row.original_filename}</td>
+                    <td>{row.row_count ?? "-"}</td>
+                    <td>{formatBytes(row.file_size)}</td>
+                    <td>{row.uploaded_by_email ?? "-"}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => {
+                          window.location.href = `/api/import-backups/download?id=${encodeURIComponent(row.id)}`;
+                        }}
+                      >
+                        Scarica
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {busy && <div style={{ padding: 12 }}>Import in corso...</div>}

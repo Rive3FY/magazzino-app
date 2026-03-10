@@ -463,6 +463,44 @@ END;
 $$;
 GRANT EXECUTE ON FUNCTION public.giacenze_list(text, text, text, text, int, int) TO authenticated;
 
+-- -----------------------------------------------------------------------------
+-- 24. Backup file importati
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.import_file_backups (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  warehouse text NOT NULL CHECK (warehouse IN ('PRM', 'REALE')),
+  original_filename text NOT NULL,
+  storage_path text NOT NULL UNIQUE,
+  content_type text,
+  file_size bigint,
+  row_count integer,
+  uploaded_by uuid REFERENCES auth.users(id),
+  uploaded_by_email text
+);
+
+CREATE INDEX IF NOT EXISTS idx_import_file_backups_created_at ON public.import_file_backups(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_import_file_backups_warehouse ON public.import_file_backups(warehouse);
+
+ALTER TABLE public.import_file_backups ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "import_file_backups_select_admin" ON public.import_file_backups;
+DROP POLICY IF EXISTS "import_file_backups_insert_admin" ON public.import_file_backups;
+CREATE POLICY "import_file_backups_select_admin" ON public.import_file_backups FOR SELECT TO authenticated USING (public.is_admin());
+CREATE POLICY "import_file_backups_insert_admin" ON public.import_file_backups FOR INSERT TO authenticated WITH CHECK (public.is_admin());
+
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'import-backups',
+  'import-backups',
+  false,
+  52428800,
+  ARRAY[
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel'
+  ]::text[]
+)
+ON CONFLICT (id) DO NOTHING;
+
 -- =============================================================================
 -- FINE DB_MASTER
 -- =============================================================================

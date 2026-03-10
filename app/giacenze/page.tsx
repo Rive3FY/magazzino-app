@@ -7,7 +7,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import { createClient } from "../_lib/supabase/client";
-import { EXCEL_COLS } from "../_lib/excel-cols";
+import { DEFAULT_VISIBLE_EXCEL_COLS, EXCEL_COLS, type ExcelCol } from "../_lib/excel-cols";
 import { n, toNumberLoose, sanitizeId, fmtDate } from "../_lib/utils";
 import { useAuth } from "../_lib/hooks/useAuth";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
@@ -29,6 +29,80 @@ type DbRow = {
   um?: string | null;
   total_count?: number | null;
 };
+
+type ColumnViewMode = "filtered" | "full";
+type ColumnPreferences = {
+  visibleCols: ExcelCol[];
+  mode: ColumnViewMode;
+};
+
+function getColumnPrefsStorageKey(userId: string) {
+  return `giacenze-visible-cols:${userId}`;
+}
+
+function normalizeVisibleExcelCols(raw: unknown): ExcelCol[] {
+  if (!Array.isArray(raw)) return DEFAULT_VISIBLE_EXCEL_COLS;
+
+  const allowed = new Set<string>(EXCEL_COLS);
+  const seen = new Set<string>();
+  const normalized = raw
+    .map((value) => String(value ?? "").trim())
+    .filter((value): value is ExcelCol => {
+      if (!value || !allowed.has(value) || seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    });
+
+  return normalized.length > 0 ? normalized : DEFAULT_VISIBLE_EXCEL_COLS;
+}
+
+function buildEditExcelState(row: DbRow) {
+  const base: Record<string, any> = {};
+  const source = row.row_json ?? {};
+
+  for (const col of EXCEL_COLS) {
+    base[col] = source[col] ?? "";
+  }
+
+  base["Materiale"] = row.code;
+  base["Descrizione Materiale"] = row.name ?? base["Descrizione Materiale"] ?? "";
+  base["Unità di Misura"] = row.um ?? base["Unità di Misura"] ?? "";
+  base["Magazzino"] = row.warehouse ?? base["Magazzino"] ?? "";
+  base["Qnt. a Mag. libero"] = row.qty_free ?? base["Qnt. a Mag. libero"] ?? 0;
+  base["Qnt. a Mag. bloccato"] = row.qty_blocked ?? base["Qnt. a Mag. bloccato"] ?? 0;
+  base["Controllo Qualità Magazzino"] = row.qty_quality ?? base["Controllo Qualità Magazzino"] ?? 0;
+
+  return base;
+}
+
+function getExcelCellValue(row: DbRow, col: string) {
+  let value: unknown = row.row_json?.[col] ?? "";
+
+  if (col === "Materiale") value = row.code;
+  if (col === "Descrizione Materiale") value = row.name ?? value;
+  if (col === "Unità di Misura") value = row.um ?? value;
+  if (col === "Magazzino") value = row.warehouse ?? value;
+
+  if (col === "Qnt. a Mag. libero") {
+    value = Number.isFinite(Number(row.qty_free))
+      ? Number(row.qty_free)
+      : Number(row.row_json?.["Qnt. a Mag. libero"] ?? 0);
+  }
+
+  if (col === "Qnt. a Mag. bloccato") {
+    value = Number.isFinite(Number(row.qty_blocked))
+      ? Number(row.qty_blocked)
+      : Number(row.row_json?.["Qnt. a Mag. bloccato"] ?? 0);
+  }
+
+  if (col === "Controllo Qualità Magazzino") {
+    value = Number.isFinite(Number(row.qty_quality))
+      ? Number(row.qty_quality)
+      : Number(row.row_json?.["Controllo Qualità Magazzino"] ?? 0);
+  }
+
+  return value;
+}
 
 export default function GiacenzePage() {
   const router = useRouter();
@@ -63,8 +137,19 @@ export default function GiacenzePage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [columnViewMode, setColumnViewMode] = useState<ColumnViewMode>("full");
+  const [configuredVisibleCols, setConfiguredVisibleCols] = useState<ExcelCol[]>(DEFAULT_VISIBLE_EXCEL_COLS);
+  const [columnSettingsMsg, setColumnSettingsMsg] = useState<string | null>(null);
+  const [columnsPanelOpen, setColumnsPanelOpen] = useState(false);
+  const [columnPrefsReady, setColumnPrefsReady] = useState(false);
 
   const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE));
+  const filteredCols = useMemo(() => normalizeVisibleExcelCols(configuredVisibleCols), [configuredVisibleCols]);
+  const activeTableCols = useMemo<ExcelCol[]>(
+    () => (columnViewMode === "full" ? [...EXCEL_COLS] : filteredCols),
+    [columnViewMode, filteredCols]
+  );
+  const tableMinWidth = Math.max(1180, 240 + activeTableCols.length * 180);
 
   // Popup
   const [editing, setEditing] = useState<DbRow | null>(null);
@@ -132,7 +217,7 @@ const [historyLoading, setHistoryLoading] = useState(false);
       topEl.removeEventListener("scroll", syncFromTop);
       tableEl.removeEventListener("scroll", syncFromTable);
     };
-  }, [loading, rows.length, view, sortKey, sortDir, page]);
+  }, [loading, rows.length, view, sortKey, sortDir, page, tableMinWidth]);
 
   function cycleSort(clickedKey: string) {
     setPage(1);
@@ -364,6 +449,42 @@ async function openHistory(code: string) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, []);
 
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user || !approved) {
+      setColumnPrefsReady(false);
+      return;
+    }
+
+    const storageKey = getColumnPrefsStorageKey(user.id);
+    let loadedPrefs: ColumnPreferences | null = null;
+
+    try {
+      const rawPrefs = window.localStorage.getItem(storageKey);
+      if (rawPrefs) {
+        loadedPrefs = JSON.parse(rawPrefs) as ColumnPreferences;
+      }
+    } catch {
+      loadedPrefs = null;
+    }
+
+    setConfiguredVisibleCols(normalizeVisibleExcelCols(loadedPrefs?.visibleCols ?? EXCEL_COLS));
+    setColumnViewMode(loadedPrefs?.mode === "filtered" || loadedPrefs?.mode === "full" ? loadedPrefs.mode : "full");
+    setColumnPrefsReady(true);
+  }, [authLoading, user, approved]);
+
+  useEffect(() => {
+    if (!columnPrefsReady || !user?.id) return;
+
+    const storageKey = getColumnPrefsStorageKey(user.id);
+    const prefs: ColumnPreferences = {
+      visibleCols: normalizeVisibleExcelCols(configuredVisibleCols),
+      mode: columnViewMode,
+    };
+
+    window.localStorage.setItem(storageKey, JSON.stringify(prefs));
+  }, [columnPrefsReady, configuredVisibleCols, columnViewMode, user?.id]);
+
   // Apri direttamente il materiale da URL (?code=X&warehouse=Y)
   useEffect(() => {
     if (!urlCode || !urlWarehouse || urlWarehouse !== "PRM" && urlWarehouse !== "REALE") return;
@@ -424,18 +545,7 @@ useEffect(() => {
   function openEdit(r: DbRow) {
     setCreating(false);
     setEditing(r);
-
-    const base = { ...(r.row_json ?? {}) };
-
-    base["Materiale"] = r.code;
-    if (r.name != null) base["Descrizione Materiale"] = r.name ?? "";
-    if (r.um != null) base["Unità di Misura"] = r.um ?? "";
-
-    if (base["Qnt. a Mag. libero"] == null) base["Qnt. a Mag. libero"] = r.qty_free ?? 0;
-    if (base["Qnt. a Mag. bloccato"] == null) base["Qnt. a Mag. bloccato"] = r.qty_blocked ?? 0;
-    if (base["Controllo Qualità Magazzino"] == null) base["Controllo Qualità Magazzino"] = r.qty_quality ?? 0;
-
-    setEditExcel(base);
+    setEditExcel(buildEditExcelState(r));
     setUnlocked({});
     setMsg(null);
   }
@@ -467,6 +577,36 @@ useEffect(() => {
     setUnlocked({});
     setCreating(true);
     setMsg(null);
+  }
+
+  function setColumnVisible(col: ExcelCol, visible: boolean) {
+    let blocked = false;
+    setConfiguredVisibleCols((prev) => {
+      if (visible) {
+        return normalizeVisibleExcelCols([...prev, col]);
+      }
+      const next = prev.filter((currentCol) => currentCol !== col);
+      if (next.length === 0) {
+        blocked = true;
+        setColumnSettingsMsg("Mantieni almeno una colonna visibile.");
+        return prev;
+      }
+      return next;
+    });
+    if (!blocked) {
+      setColumnViewMode("filtered");
+      setColumnSettingsMsg(null);
+    }
+  }
+
+  function showAllColumns() {
+    setConfiguredVisibleCols([...EXCEL_COLS]);
+    setColumnSettingsMsg(null);
+  }
+
+  function restoreDefaultColumns() {
+    setConfiguredVisibleCols([...DEFAULT_VISIBLE_EXCEL_COLS]);
+    setColumnSettingsMsg(null);
   }
 
   async function saveEdit() {
@@ -674,12 +814,8 @@ await writeAuditLog({
   function exportXlsx() {
     const data = viewRows.map((r) => {
       const obj: Record<string, any> = {};
-      for (const c of EXCEL_COLS) {
-        if (c === "Materiale") obj[c] = r.code;
-        else if (c === "Descrizione Materiale") obj[c] = r.name ?? r.row_json?.[c] ?? "";
-        else if (c === "Unità di Misura") obj[c] = r.um ?? r.row_json?.[c] ?? "";
-        else if (c === "Qnt. a Mag. libero") obj[c] = Number.isFinite(Number(r.qty_free)) ? r.qty_free : r.row_json?.[c] ?? "";
-        else obj[c] = r.row_json?.[c] ?? "";
+      for (const c of activeTableCols) {
+        obj[c] = getExcelCellValue(r, c);
       }
       obj["_warehouse"] = r.warehouse;
       return obj;
@@ -730,7 +866,7 @@ await writeAuditLog({
               className="input"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Codice, descrizione, qualunque colonna excel…"
+              placeholder="Codice, descrizione, qualunque colonna…"
               style={{ width: "100%", maxWidth: 520 }}
             />
           </div>
@@ -742,18 +878,184 @@ await writeAuditLog({
           )}
 
           <button className="btn" onClick={() => load()}>
-  Aggiorna
-</button>
+            Aggiorna
+          </button>
 
           <button className="btn" onClick={exportXlsx}>
             Export pagina
           </button>
         </div>
 
-        <div style={{ marginTop: 10, fontSize: 12, opacity: 0.8 }}>
-          Ordinamento: clicca su una colonna → <b>↑</b> (ASC) → <b>↓</b> (DESC) → <b>↕</b> (default).
+        <div
+          style={{
+            marginTop: 12,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setColumnsPanelOpen((prev) => !prev)}
+              aria-expanded={columnsPanelOpen}
+              aria-label={columnsPanelOpen ? "Nascondi filtri colonne" : "Mostra filtri colonne"}
+              title={columnsPanelOpen ? "Nascondi filtri colonne" : "Mostra filtri colonne"}
+              style={{ width: 40, minWidth: 40, padding: "6px 0", justifyContent: "center" }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M4 7h16" />
+                <path d="M4 12h16" />
+                <path d="M4 17h16" />
+              </svg>
+            </button>
+
+            <div>
+              <div style={{ fontWeight: 900 }}>Filtri colonne</div>
+              <div style={{ fontSize: 12, opacity: 0.75 }}>
+              {columnViewMode === "filtered"
+                ? `Vista filtrata attiva: ${filteredCols.length} colonne configurate.`
+                : `Vista completa attiva: ${EXCEL_COLS.length} colonne visibili.`}
+              </div>
+            </div>
+          </div>
         </div>
-        
+
+        {columnsPanelOpen && (
+          <>
+            <div
+              style={{
+                marginTop: 12,
+                display: "flex",
+                gap: 10,
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+              }}
+            >
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, fontWeight: 700, opacity: 0.8 }}>Colonne visibili</span>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setColumnViewMode("filtered")}
+                  aria-pressed={columnViewMode === "filtered"}
+                  style={{
+                    background: columnViewMode === "filtered" ? "rgba(15,23,42,0.10)" : "transparent",
+                    borderColor: columnViewMode === "filtered" ? "rgba(15,23,42,0.24)" : "#e2e8f0",
+                    fontWeight: columnViewMode === "filtered" ? 900 : 500,
+                  }}
+                >
+                  Vista filtrata
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setColumnViewMode("full")}
+                  aria-pressed={columnViewMode === "full"}
+                  style={{
+                    background: columnViewMode === "full" ? "rgba(15,23,42,0.10)" : "transparent",
+                    borderColor: columnViewMode === "full" ? "rgba(15,23,42,0.24)" : "#e2e8f0",
+                    fontWeight: columnViewMode === "full" ? 900 : 500,
+                  }}
+                >
+                  Vista completa
+                </button>
+              </div>
+
+              <div style={{ fontSize: 12, opacity: 0.75 }}>
+                {columnViewMode === "filtered"
+                  ? `Usa ${filteredCols.length} colonne configurate.`
+                  : `Mostra tutte le ${EXCEL_COLS.length} colonne.`}
+              </div>
+            </div>
+
+            <div
+              style={{
+                marginTop: 12,
+                border: "1px solid #e2e8f0",
+                borderRadius: 12,
+                padding: 12,
+                background: "rgba(248,250,252,0.9)",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 900 }}>Colonne personali</div>
+                  <div style={{ fontSize: 12, opacity: 0.75 }}>
+                    Ogni utente puo scegliere liberamente le colonne della vista filtrata. Default: tutte visibili. La scelta viene ricordata per il tuo account su questo dispositivo.
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button type="button" className="btn" onClick={showAllColumns}>
+                    Mostra tutte
+                  </button>
+                  <button type="button" className="btn" onClick={restoreDefaultColumns}>
+                    Default: tutte visibili
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
+                Colonne selezionate: <b>{filteredCols.length}</b> su <b>{EXCEL_COLS.length}</b>
+              </div>
+
+              <div
+                style={{
+                  marginTop: 12,
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                  gap: 8,
+                }}
+              >
+                {EXCEL_COLS.map((col) => {
+                  const checked = configuredVisibleCols.includes(col);
+                  return (
+                    <label
+                      key={col}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "8px 10px",
+                        border: "1px solid #dbe3ee",
+                        borderRadius: 10,
+                        background: checked ? "white" : "rgba(255,255,255,0.65)",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => setColumnVisible(col, e.target.checked)}
+                      />
+                      <span style={{ fontSize: 13 }}>{col}</span>
+                    </label>
+                  );
+                })}
+              </div>
+
+              {columnSettingsMsg && (
+                <div style={{ marginTop: 10, fontWeight: 700 }}>{columnSettingsMsg}</div>
+              )}
+            </div>
+
+            <div style={{ marginTop: 10, fontSize: 12, opacity: 0.8 }}>
+              Ordinamento: clicca su una colonna → <b>↑</b> (ASC) → <b>↓</b> (DESC) → <b>↕</b> (default).
+            </div>
+          </>
+        )}
       </div>
 
       {msg && <div style={{ padding: 12, fontWeight: 800 }}>{msg}</div>}
@@ -780,7 +1082,7 @@ await writeAuditLog({
               marginTop: 12,
             }}
           >
-            <div style={{ width: 2600, height: 1 }} />
+            <div style={{ width: tableMinWidth, height: 1 }} />
           </div>
 
           {/* ✅ TABELLA - scroll interno su mobile */}
@@ -796,7 +1098,7 @@ await writeAuditLog({
               WebkitOverflowScrolling: "touch",
             }}
           >
-            <table className="table" style={{ minWidth: 2600 }}>
+            <table className="table" style={{ minWidth: tableMinWidth }}>
              <thead>
   <tr>
     <th
@@ -807,7 +1109,7 @@ await writeAuditLog({
       Warehouse <span style={{ opacity: 0.7 }}>{sortIcon("_warehouse")}</span>
     </th>
 
-    {EXCEL_COLS.map((c) => (
+    {activeTableCols.map((c) => (
       <th
         key={c}
         onClick={() => cycleSort(c)}
@@ -836,27 +1138,9 @@ await writeAuditLog({
       >
         <td style={{ fontWeight: 900 }}>{r.warehouse}</td>
 
-        {EXCEL_COLS.map((c) => {
-          let v: any = r.row_json?.[c] ?? "";
-
-          if (c === "Materiale") v = r.code;
-          if (c === "Descrizione Materiale") v = r.name ?? v;
-          if (c === "Unità di Misura") v = r.um ?? v;
-
-          // ✅ quantità reale: preferisci qty_free e qty_blocked
-          if (c === "Qnt. a Mag. libero") {
-            v = Number.isFinite(Number(r.qty_free))
-              ? Number(r.qty_free)
-              : Number(r.row_json?.["Qnt. a Mag. libero"] ?? 0);
-          }
-          if (c === "Qnt. a Mag. bloccato") {
-            v = Number.isFinite(Number(r.qty_blocked))
-              ? Number(r.qty_blocked)
-              : Number(r.row_json?.["Qnt. a Mag. bloccato"] ?? 0);
-          }
-
-          return <td key={c}>{String(v ?? "")}</td>;
-        })}
+        {activeTableCols.map((c) => (
+          <td key={c}>{String(getExcelCellValue(r, c) ?? "")}</td>
+        ))}
 
         <td>
           <button
@@ -876,7 +1160,7 @@ await writeAuditLog({
   {viewRows.length === 0 && (
     <tr>
       <td
-        colSpan={2 + EXCEL_COLS.length}
+        colSpan={2 + activeTableCols.length}
         style={{ padding: 12, color: "#0f172a" }}
       >
         Nessun risultato.

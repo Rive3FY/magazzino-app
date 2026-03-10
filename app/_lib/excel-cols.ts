@@ -31,3 +31,7 @@ export const EXCEL_COLS = [
   "Data Ultima EM",
   "Materiale Pianif.",
 ] as const;
+
+export type ExcelCol = (typeof EXCEL_COLS)[number];
+
+export const DEFAULT_VISIBLE_EXCEL_COLS: ExcelCol[] = [...EXCEL_COLS];

@@ -62,5 +62,59 @@ export type ExcelLiveRow = {
   row_json: Record<string, unknown> | null;
 };
 
+export type EquipmentArea = "LINEE" | "STAZIONI";
+export type EquipmentStatus = "AVAILABLE" | "ASSIGNED" | "MAINTENANCE" | "DISMISSED";
+
+export type EquipmentMovementType = "OUT";
+export type EquipmentMovementStatus = "OPEN" | "CLOSED";
+export type EquipmentResolutionType = "RETURN" | "MAINTENANCE" | "DISMISS";
+
+export type EquipmentAssetRow = {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  asset_code: string;
+  serial_number: string | null;
+  name: string;
+  category: string | null;
+  brand: string | null;
+  model: string | null;
+  equipment_area: EquipmentArea;
+  status: EquipmentStatus;
+  shelf: string | null;
+  place: string | null;
+  barcode: string | null;
+  nfc_tag_id: string | null;
+  notes: string | null;
+  assigned_to_name: string | null;
+  assigned_to_email: string | null;
+  assigned_to_badge: string | null;
+  assigned_at: string | null;
+  maintenance_note: string | null;
+  dismissed_at: string | null;
+};
+
+export type EquipmentMovementRow = {
+  id: string;
+  created_at: string;
+  equipment_id: string;
+  equipment_area: EquipmentArea;
+  type: EquipmentMovementType;
+  status: EquipmentMovementStatus | null;
+  note: string | null;
+  created_by: string | null;
+  created_by_name: string | null;
+  created_by_email: string | null;
+  assigned_to_name: string | null;
+  assigned_to_email: string | null;
+  assigned_to_badge: string | null;
+  resolution_type: EquipmentResolutionType | null;
+  close_note: string | null;
+  closed_at: string | null;
+  closed_by: string | null;
+  movement_group_id: string | null;
+  details_json: Record<string, unknown> | null;
+};
+
 export type WarehouseView = "REALE" | "PRM" | "TUTTI";
 export type SortDir = "none" | "asc" | "desc";

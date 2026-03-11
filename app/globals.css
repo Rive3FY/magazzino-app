@@ -80,6 +80,10 @@ a.btn, a.btnPrimary{ border: none !important; box-shadow: none; }
   padding: 0;
 }
 
+.appNoSidebar{
+  grid-template-columns: 1fr;
+}
+
 /* Pagina login: nessuna sidebar/topbar, no scroll, sfondo gradient teal-blu */
 .appLogin {
   grid-template-columns: 1fr;
@@ -1236,6 +1240,280 @@ select.input{
 /* Input type date coerente */
 input[type="date"].input{
   padding-right:12px;
+}
+
+/* =========================
+   ATTREZZATURE
+========================= */
+
+.equipmentStatsGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+  gap:12px;
+}
+
+.equipmentStatCard{
+  border:1px solid rgba(15,23,42,0.08);
+  border-radius:14px;
+  padding:14px;
+  background:linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(248,250,252,0.92) 100%);
+  box-shadow:var(--shadow-sm);
+}
+
+.equipmentStatLabel{
+  color:var(--muted);
+  font-size:12px;
+  font-weight:700;
+  letter-spacing:0.2px;
+}
+
+.equipmentStatValue{
+  margin-top:8px;
+  font-size:28px;
+  line-height:1;
+  font-weight:900;
+  color:var(--text);
+}
+
+.equipmentFilterGrid{
+  display:grid;
+  grid-template-columns:minmax(280px, 2fr) minmax(180px, 1fr);
+  gap:12px;
+  align-items:end;
+}
+
+.equipmentSectionHeader{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+  flex-wrap:wrap;
+  margin-bottom:14px;
+}
+
+.equipmentSectionTitle{
+  font-size:16px;
+  font-weight:900;
+  color:var(--text);
+}
+
+.equipmentSectionHint{
+  font-size:12px;
+  color:var(--muted);
+  font-weight:700;
+}
+
+.equipmentFormGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:12px;
+  align-items:end;
+}
+
+.equipmentInfoGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:12px;
+  border:1px solid rgba(15,23,42,0.08);
+  border-radius:14px;
+  padding:14px;
+  background:rgba(248,250,252,0.78);
+}
+
+.equipmentInfoLabel{
+  color:var(--muted);
+  font-size:12px;
+  font-weight:700;
+  margin-bottom:4px;
+}
+
+.equipmentInfoValue{
+  font-weight:800;
+  color:var(--text);
+}
+
+.equipmentInlineMessage{
+  color:#b91c1c;
+  font-weight:700;
+  align-self:center;
+}
+
+.equipmentActionGroup{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.equipmentActionGroup .btn{
+  min-width:unset;
+}
+
+.equipmentAreaPill{
+  display:inline-flex;
+  align-items:center;
+  border-radius:999px;
+  padding:6px 10px;
+  font-size:12px;
+  font-weight:800;
+  color:#0f172a;
+  background:rgba(15,23,42,0.06);
+  border:1px solid rgba(15,23,42,0.10);
+}
+
+.equipmentMuted{
+  color:var(--muted);
+  font-size:12px;
+  font-weight:700;
+}
+
+.equipmentIntroGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:12px;
+}
+
+.equipmentIntroCard{
+  display:grid;
+  gap:10px;
+  padding:18px;
+  border-radius:16px;
+  border:1px solid rgba(15,23,42,0.08);
+  background:linear-gradient(180deg, rgba(248,250,252,0.98) 0%, rgba(255,255,255,1) 100%);
+  box-shadow:var(--shadow-sm);
+}
+
+.equipmentIntroTitle{
+  font-size:18px;
+  font-weight:900;
+  color:var(--text);
+}
+
+.equipmentIntroText{
+  color:var(--muted);
+  font-size:13px;
+  line-height:1.45;
+}
+
+.launcherHero{
+  display:grid;
+  gap:10px;
+  margin-bottom:18px;
+}
+
+.launcherTitle{
+  font-size:28px;
+  line-height:1.1;
+  font-weight:900;
+  color:var(--text);
+}
+
+.launcherText{
+  color:var(--muted);
+  font-size:14px;
+  line-height:1.55;
+  max-width:760px;
+}
+
+.launcherGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+  gap:16px;
+}
+
+.launcherCard{
+  position:relative;
+  overflow:hidden;
+  min-height:200px;
+  border-radius:18px;
+  padding:22px;
+  color:#ffffff;
+  box-shadow:var(--shadow-md);
+  display:grid;
+  align-content:space-between;
+  gap:18px;
+  text-decoration:none !important;
+  border:1px solid rgba(255,255,255,0.18);
+}
+
+.launcherCard:hover{
+  transform:translateY(-1px);
+  box-shadow:var(--shadow-lg);
+  color:#ffffff;
+}
+
+.launcherCard::before{
+  content:"";
+  position:absolute;
+  inset:auto -20px -35px auto;
+  width:120px;
+  height:120px;
+  border-radius:999px;
+  background:rgba(255,255,255,0.10);
+}
+
+.launcherCard::after{
+  content:"";
+  position:absolute;
+  inset:18px auto auto -24px;
+  width:90px;
+  height:90px;
+  border-radius:999px;
+  background:rgba(255,255,255,0.08);
+}
+
+.launcherCardContent{
+  position:relative;
+  z-index:1;
+  display:grid;
+  gap:10px;
+}
+
+.launcherCardBadge{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  width:max-content;
+  padding:6px 10px;
+  border-radius:999px;
+  background:rgba(255,255,255,0.14);
+  font-size:12px;
+  font-weight:800;
+  letter-spacing:0.2px;
+}
+
+.launcherCardTitle{
+  font-size:26px;
+  line-height:1.1;
+  font-weight:900;
+}
+
+.launcherCardText{
+  font-size:14px;
+  line-height:1.5;
+  color:rgba(255,255,255,0.92);
+  max-width:34ch;
+}
+
+.launcherCardFooter{
+  position:relative;
+  z-index:1;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  font-weight:800;
+  font-size:13px;
+}
+
+.launcherArrow{
+  width:38px;
+  height:38px;
+  border-radius:999px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  background:rgba(255,255,255,0.16);
+  border:1px solid rgba(255,255,255,0.18);
 }
 /* =========================
    GIACENZE: layout con tabella scrollabile

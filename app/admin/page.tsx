@@ -113,6 +113,40 @@ function renderAuditDetails(row: { action: string; details_json: Record<string, 
       </div>
     );
   }
+  if (row.action === "EQUIPMENT_CREATED" || row.action === "EQUIPMENT_UPDATED") {
+    return (
+      <div style={{ display: "grid", gap: 4 }}>
+        <div><b>Codice:</b> {String(d.asset_code ?? "-")}</div>
+        <div><b>Nome:</b> {String(d.name ?? "-")}</div>
+        <div><b>Seriale:</b> {String(d.serial_number ?? "-")}</div>
+        <div><b>Categoria:</b> {String(d.category ?? "-")}</div>
+        <div><b>Area:</b> {String(d.equipment_area ?? "-")}</div>
+      </div>
+    );
+  }
+  if (row.action === "EQUIPMENT_DELETED") {
+    return (
+      <div style={{ display: "grid", gap: 4 }}>
+        <div><b>Codice:</b> {String(d.asset_code ?? "-")}</div>
+        <div><b>Nome:</b> {String(d.name ?? "-")}</div>
+        <div><b>Area:</b> {String(d.equipment_area ?? "-")}</div>
+        <div><b>Stato:</b> {String(d.status ?? "-")}</div>
+      </div>
+    );
+  }
+  if (row.action === "EQUIPMENT_MOVEMENT") {
+    return (
+      <div style={{ display: "grid", gap: 4 }}>
+        <div><b>Operazione:</b> {String(d.movement_type ?? "-")}</div>
+        <div><b>Stato:</b> {String(d.status ?? "-")}</div>
+        <div><b>Esito finale:</b> {String(d.resolution_type ?? "-")}</div>
+        <div><b>Area:</b> {String(d.equipment_area ?? "-")}</div>
+        <div><b>Assegnatario:</b> {String(d.assigned_to_name ?? "-")}</div>
+        <div><b>Nota:</b> {String(d.note ?? "-")}</div>
+        <div><b>Nota chiusura:</b> {String(d.close_note ?? "-")}</div>
+      </div>
+    );
+  }
   return (
     <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.35, fontFamily: "monospace" }}>
       {JSON.stringify(d ?? {}, null, 2)}

@@ -1,0 +1,1343 @@
+"use client";
+
+import { BrowserMultiFormatReader } from "@zxing/browser";
+import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createClient } from "../../_lib/supabase/client";
+import { useAuth } from "../../_lib/hooks/useAuth";
+import { useIsAdmin } from "../../_lib/hooks/useIsAdmin";
+import { useToast } from "../../_lib/ToastContext";
+import { fmtDateTime } from "../../_lib/utils";
+import {
+  EQUIPMENT_AREA_LABELS,
+  EQUIPMENT_MOVEMENT_LABELS,
+  EQUIPMENT_MOVEMENT_STATUS_LABELS,
+  EQUIPMENT_RESOLUTION_LABELS,
+  EQUIPMENT_RESOLUTION_TYPE_OPTIONS,
+  EQUIPMENT_STATUS_LABELS,
+  equipmentMovementPillStyle,
+  equipmentStatusStyle,
+} from "../../_lib/equipment";
+import { equipmentMovementSchema } from "../../_lib/validations";
+import type {
+  EquipmentArea,
+  EquipmentAssetRow,
+  EquipmentMovementRow,
+  EquipmentResolutionType,
+} from "../../_lib/types";
+
+type Props = {
+  area: EquipmentArea;
+  basePath: string;
+};
+
+type MovementFormState = {
+  equipment_id: string;
+  type: "OUT";
+  note: string;
+  assigned_to_name: string;
+  assigned_to_email: string;
+  assigned_to_badge: string;
+};
+
+type GroupEditState = Record<
+  string,
+  {
+    resolutionType: EquipmentResolutionType;
+    closeNote: string;
+  }
+>;
+
+type UserProfileInfo = {
+  fullName: string;
+  badge: string;
+  email: string;
+};
+
+type ProfileRow = {
+  first_name: string | null;
+  last_name: string | null;
+  badge_number: string | null;
+};
+
+const supabase = createClient();
+
+const emptyForm: MovementFormState = {
+  equipment_id: "",
+  type: "OUT",
+  note: "",
+  assigned_to_name: "",
+  assigned_to_email: "",
+  assigned_to_badge: "",
+};
+
+function normalizeNullable(value: string) {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function describeError(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const maybe = error as {
+      message?: unknown;
+      details?: unknown;
+      hint?: unknown;
+      code?: unknown;
+      error_description?: unknown;
+    };
+    const parts = [
+      maybe.message,
+      maybe.details,
+      maybe.hint,
+      maybe.code,
+      maybe.error_description,
+    ]
+      .filter((value) => typeof value === "string" && value.trim())
+      .map((value) => String(value).trim());
+
+    if (parts.length > 0) return parts.join(" | ");
+
+    try {
+      const raw = JSON.stringify(error);
+      if (raw && raw !== "{}") return raw;
+    } catch {}
+  }
+  return "errore sconosciuto";
+}
+
+function sameUser(a: string | null | undefined, b: string | null | undefined) {
+  return !!a && !!b && a === b;
+}
+
+function BarcodeIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <rect x="2" y="6" width="2" height="12" />
+      <rect x="6" y="6" width="1" height="12" />
+      <rect x="9" y="6" width="2" height="12" />
+      <rect x="13" y="6" width="1" height="12" />
+      <rect x="16" y="6" width="2" height="12" />
+      <rect x="20" y="6" width="2" height="12" />
+    </svg>
+  );
+}
+
+function NfcIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="5" y="2" width="14" height="20" rx="2" />
+      <path d="M9 7h6" />
+      <path d="M9 11h6" />
+      <path d="M9 15h4" />
+      <path d="M12 6v12" />
+    </svg>
+  );
+}
+
+function getMovementStatus(row: EquipmentMovementRow) {
+  return row.status ?? "OPEN";
+}
+
+function getMovementResolution(row: EquipmentMovementRow) {
+  return row.resolution_type ?? "RETURN";
+}
+
+export default function EquipmentMovementsClient({ area, basePath }: Props) {
+  const searchParams = useSearchParams();
+  const { user, loading: authLoading, approved } = useAuth();
+  const { isAdmin } = useIsAdmin();
+  const toast = useToast();
+  const initialAssetId = searchParams.get("asset") ?? "";
+
+  const [assets, setAssets] = useState<EquipmentAssetRow[]>([]);
+  const [history, setHistory] = useState<EquipmentMovementRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [cartBusy, setCartBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [scanMode, setScanMode] = useState<"NORMAL" | "CART">("NORMAL");
+  const [assetSearch, setAssetSearch] = useState("");
+  const [assetOpen, setAssetOpen] = useState(false);
+  const [assetActiveIndex, setAssetActiveIndex] = useState(0);
+  const [cartOpen, setCartOpen] = useState(false);
+  const [cart, setCart] = useState<string[]>([]);
+  const [cartNote, setCartNote] = useState("");
+  const [profileInfo, setProfileInfo] = useState<UserProfileInfo | null>(null);
+  const [cameraScanning, setCameraScanning] = useState(false);
+  const [searchByNfcScanning, setSearchByNfcScanning] = useState(false);
+  const [isNfcSupported, setIsNfcSupported] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
+  const [form, setForm] = useState<MovementFormState>(() => ({
+    ...emptyForm,
+    equipment_id: initialAssetId,
+  }));
+  const [closeOpen, setCloseOpen] = useState(false);
+  const [closing, setClosing] = useState<EquipmentMovementRow | null>(null);
+  const [closingGroup, setClosingGroup] = useState<EquipmentMovementRow[]>([]);
+  const [closeResolutionType, setCloseResolutionType] = useState<EquipmentResolutionType>("RETURN");
+  const [closeNote, setCloseNote] = useState("");
+  const [groupEditState, setGroupEditState] = useState<GroupEditState>({});
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const assetBoxRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      window.location.href = "/login";
+      return;
+    }
+    if (!approved) {
+      supabase.auth.signOut();
+      window.location.href = "/pending";
+    }
+  }, [user, approved, authLoading]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const cached = localStorage.getItem(`equipment_cart_${area}`);
+      if (!cached) return;
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed)) {
+        const normalized = parsed.filter((value) => typeof value === "string");
+        setCart(normalized);
+        if (normalized.length > 0) {
+          setCartOpen(true);
+          setScanMode("CART");
+        }
+      }
+    } catch {}
+  }, [area]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (cart.length === 0) localStorage.removeItem(`equipment_cart_${area}`);
+    else localStorage.setItem(`equipment_cart_${area}`, JSON.stringify(cart));
+  }, [area, cart]);
+
+  useEffect(() => {
+    setIsNfcSupported(typeof NDEFReader !== "undefined");
+    const ua = navigator.userAgent;
+    setIsIOS(/iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+  }, []);
+
+  const loadCurrentProfile = useCallback(async () => {
+    if (!user?.id) return;
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("badge_number, first_name, last_name")
+      .eq("id", user.id)
+      .maybeSingle<ProfileRow>();
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    const fullName = `${String(data?.first_name ?? "").trim()} ${String(data?.last_name ?? "").trim()}`.trim();
+    const badge = String(data?.badge_number ?? "").trim();
+    setProfileInfo({
+      fullName,
+      badge,
+      email: user.email ?? "",
+    });
+  }, [user]);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setMsg(null);
+
+    const [assetsRes, historyRes] = await Promise.all([
+      supabase.from("equipment_assets").select("*").eq("equipment_area", area).order("serial_number", { ascending: true }),
+      supabase.from("equipment_movements").select("*").eq("equipment_area", area).order("created_at", { ascending: false }).limit(300),
+    ]);
+
+    if (assetsRes.error) {
+      console.error(assetsRes.error);
+      setAssets([]);
+      setMsg("Errore caricamento attrezzature.");
+    } else {
+      setAssets((assetsRes.data ?? []) as EquipmentAssetRow[]);
+    }
+
+    if (historyRes.error) {
+      console.error(historyRes.error);
+      setHistory([]);
+      setMsg((prev) => prev ?? "Errore caricamento storico movimenti.");
+    } else {
+      setHistory((historyRes.data ?? []) as EquipmentMovementRow[]);
+    }
+
+    setLoading(false);
+  }, [area]);
+
+  useEffect(() => {
+    if (!user) return;
+    const timer = window.setTimeout(() => {
+      void loadData();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [user, loadData]);
+
+  useEffect(() => {
+    if (!user) return;
+    const timer = window.setTimeout(() => {
+      void loadCurrentProfile();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [user, loadCurrentProfile]);
+
+  useEffect(() => {
+    if (!profileInfo) return;
+    setForm((prev) => ({
+      ...prev,
+      assigned_to_name: profileInfo.fullName,
+      assigned_to_email: profileInfo.email,
+      assigned_to_badge: profileInfo.badge,
+    }));
+  }, [profileInfo]);
+
+  const assetMap = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
+  const selectedAsset = form.equipment_id ? assetMap.get(form.equipment_id) ?? null : null;
+  const cartItems = useMemo(() => cart.map((id) => assetMap.get(id)).filter(Boolean) as EquipmentAssetRow[], [assetMap, cart]);
+
+  const filteredAssets = useMemo(() => {
+    const search = assetSearch.trim().toLowerCase();
+    if (!search) return assets;
+    return assets.filter((asset) =>
+      [asset.serial_number, asset.name, asset.barcode, asset.nfc_tag_id, asset.assigned_to_name]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(search))
+    );
+  }, [assetSearch, assets]);
+
+  const assetMatches = useMemo(() => filteredAssets.slice(0, 12), [filteredAssets]);
+  const assetActive = useMemo(() => assetMatches[assetActiveIndex] ?? null, [assetActiveIndex, assetMatches]);
+
+  const displayHistory = useMemo(() => {
+    const baseRows = form.equipment_id
+      ? history.filter((row) => row.equipment_id === form.equipment_id)
+      : history;
+
+    const seen = new Set<string>();
+    return baseRows.filter((row) => {
+      const gid = row.movement_group_id;
+      if (gid) {
+        if (seen.has(gid)) return false;
+        seen.add(gid);
+      }
+      return true;
+    });
+  }, [form.equipment_id, history]);
+
+  const openMovements = useMemo(
+    () => displayHistory.filter((row) => getMovementStatus(row) === "OPEN"),
+    [displayHistory]
+  );
+
+  const selectedAssetHasOpenMovement = useMemo(() => {
+    if (!selectedAsset) return false;
+    return history.some((row) => row.equipment_id === selectedAsset.id && getMovementStatus(row) === "OPEN");
+  }, [history, selectedAsset]);
+
+  useEffect(() => {
+    if (!selectedAsset || assetSearch.trim()) return;
+    setAssetSearch(`${selectedAsset.serial_number || selectedAsset.asset_code} - ${selectedAsset.name}`);
+  }, [selectedAsset, assetSearch]);
+
+  function applySearchResult(value: string, mode: "barcode" | "nfc") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return;
+    setAssetSearch(value.trim());
+    const matched = assets.find((asset) => {
+      if (mode === "barcode") {
+        return [asset.barcode, asset.serial_number, asset.asset_code]
+          .filter(Boolean)
+          .some((item) => String(item).trim().toLowerCase() === normalized);
+      }
+      return String(asset.nfc_tag_id ?? "").trim().toLowerCase() === normalized;
+    });
+    if (matched) {
+      setForm((prev) => ({ ...prev, equipment_id: matched.id }));
+      setAssetSearch(`${matched.serial_number || matched.asset_code} - ${matched.name}`);
+      setAssetOpen(false);
+      setMsg(null);
+    } else {
+      setMsg(mode === "barcode" ? "Nessuna attrezzatura trovata per questo barcode." : "Nessuna attrezzatura associata a questo tag NFC.");
+    }
+  }
+
+  function pickAsset(row: EquipmentAssetRow) {
+    setForm((prev) => ({ ...prev, equipment_id: row.id }));
+    setAssetSearch(`${row.serial_number || row.asset_code} - ${row.name}`);
+    setAssetOpen(false);
+    setMsg(null);
+  }
+
+  function stopCameraScan() {
+    try {
+      (readerRef.current as { reset?: () => void } | null)?.reset?.();
+    } catch {}
+    try {
+      const video = videoRef.current;
+      const stream = video?.srcObject as MediaStream | null;
+      if (stream) stream.getTracks().forEach((track) => track.stop());
+      if (video) video.srcObject = null;
+    } catch {}
+    readerRef.current = null;
+    setCameraScanning(false);
+  }
+
+  async function startCameraScanForSearch() {
+    setMsg(null);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMsg("La fotocamera richiede HTTPS. Usa npm run dev:https e accedi da https://TUO_IP:3000");
+      return;
+    }
+
+    stopCameraScan();
+    setCameraScanning(true);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    let videoEl = videoRef.current;
+    for (let i = 0; i < 30 && !videoEl; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      videoEl = videoRef.current;
+    }
+
+    if (!videoEl) {
+      setCameraScanning(false);
+      setMsg("Video non disponibile. Riprova.");
+      return;
+    }
+
+    try {
+      readerRef.current = new BrowserMultiFormatReader();
+      const result = await readerRef.current.decodeOnceFromVideoDevice(undefined, videoEl);
+      stopCameraScan();
+      const text = String(result?.getText?.() ?? "").trim();
+      if (text) applySearchResult(text, "barcode");
+    } catch (error) {
+      stopCameraScan();
+      setMsg("Errore camera: " + (error instanceof Error ? error.message : "sconosciuto"));
+    }
+  }
+
+  async function searchByNfc() {
+    if (!isNfcSupported) {
+      setMsg(isIOS ? "NFC non disponibile su iPhone/iPad." : "NFC richiede Chrome su Android con HTTPS.");
+      return;
+    }
+    setSearchByNfcScanning(true);
+    setMsg(null);
+    try {
+      const ndef = new NDEFReader();
+      await ndef.scan();
+      const serialNumber = await new Promise<string>((resolve, reject) => {
+        const handler = (event: NDEFReadingEvent) => {
+          ndef.removeEventListener("reading", handler);
+          resolve(event.serialNumber ?? "");
+        };
+        ndef.addEventListener("reading", handler);
+        setTimeout(() => reject(new Error("Timeout: avvicina il telefono al tag entro 30 secondi")), 30000);
+      });
+      applySearchResult(serialNumber, "nfc");
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : "Errore lettura NFC");
+    } finally {
+      setSearchByNfcScanning(false);
+    }
+  }
+
+  useEffect(() => {
+    setAssetActiveIndex(0);
+  }, [assetSearch]);
+
+  useEffect(() => {
+    function onDocMouseDown(e: MouseEvent) {
+      if (!assetBoxRef.current) return;
+      if (!assetBoxRef.current.contains(e.target as Node)) setAssetOpen(false);
+    }
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, []);
+
+  function addSelectedToCart() {
+    if (!selectedAsset) {
+      setMsg("Seleziona un'attrezzatura prima di aggiungerla al carrello.");
+      return;
+    }
+    if (selectedAsset.status !== "AVAILABLE") {
+      setMsg("Puoi aggiungere al carrello solo attrezzature disponibili.");
+      return;
+    }
+    if (selectedAssetHasOpenMovement) {
+      setMsg("Questa attrezzatura ha già un movimento aperto.");
+      return;
+    }
+    if (cart.includes(selectedAsset.id)) {
+      setMsg("Attrezzatura già presente nel carrello.");
+      setCartOpen(true);
+      return;
+    }
+    setCart((prev) => [...prev, selectedAsset.id]);
+    setCartOpen(true);
+    setForm((prev) => ({ ...prev, equipment_id: "" }));
+    setAssetSearch("");
+    setAssetOpen(false);
+    setScanMode("CART");
+    setMsg("Attrezzatura aggiunta al carrello.");
+  }
+
+  function removeCartItem(id: string) {
+    setCart((prev) => prev.filter((item) => item !== id));
+  }
+
+  async function confirmCartPickup() {
+    if (!user?.id) {
+      setMsg("Devi essere loggato.");
+      return;
+    }
+    if (cartItems.length === 0) {
+      setMsg("Il carrello è vuoto.");
+      return;
+    }
+    if (!cartNote.trim()) {
+      setMsg("Le note sono obbligatorie.");
+      return;
+    }
+    if (!profileInfo?.fullName || !profileInfo.badge) {
+      setMsg("Completa nome, cognome e badge nel profilo prima di usare il carrello.");
+      return;
+    }
+
+    const unavailable = cartItems.filter((item) => item.status !== "AVAILABLE");
+    if (unavailable.length > 0) {
+      setMsg("Alcune attrezzature nel carrello non sono più disponibili. Aggiorna e riprova.");
+      return;
+    }
+
+    const alreadyOpen = cartItems.filter((item) =>
+      history.some((row) => row.equipment_id === item.id && getMovementStatus(row) === "OPEN")
+    );
+    if (alreadyOpen.length > 0) {
+      setMsg("Alcune attrezzature nel carrello hanno già un movimento aperto.");
+      return;
+    }
+
+    setCartBusy(true);
+    setMsg(null);
+
+    try {
+      const movementGroupId = crypto.randomUUID();
+      for (const item of cartItems) {
+        const { error } = await supabase.from("equipment_movements").insert({
+          equipment_id: item.id,
+          equipment_area: area,
+          type: "OUT",
+          status: "OPEN",
+          note: normalizeNullable(cartNote),
+          created_by: user.id,
+          created_by_name: profileInfo.fullName,
+          created_by_email: user.email ?? null,
+          assigned_to_name: profileInfo.fullName,
+          assigned_to_email: user.email ?? null,
+          assigned_to_badge: profileInfo.badge,
+          resolution_type: null,
+          close_note: null,
+          closed_at: null,
+          closed_by: null,
+          movement_group_id: movementGroupId,
+          details_json: {
+            asset_code: item.asset_code,
+            asset_name: item.name,
+            equipment_area: area,
+            mode: "cart",
+          },
+        });
+        if (error) throw error;
+      }
+
+      setCart([]);
+      setCartNote("");
+      setCartOpen(false);
+      setScanMode("NORMAL");
+      toast.success("Prelievo multiplo registrato");
+      await loadData();
+    } catch (error: unknown) {
+      console.error("equipment cart close error:", error);
+      const message = describeError(error);
+      setMsg("Registrazione carrello non riuscita: " + message);
+    } finally {
+      setCartBusy(false);
+    }
+  }
+
+  async function saveMovement() {
+    if (!selectedAsset) {
+      setMsg("Seleziona un'attrezzatura.");
+      return;
+    }
+    if (selectedAsset.status !== "AVAILABLE") {
+      setMsg("Puoi aprire un movimento solo su attrezzature disponibili.");
+      return;
+    }
+    if (selectedAssetHasOpenMovement) {
+      setMsg("Questa attrezzatura ha già un movimento aperto.");
+      return;
+    }
+
+    const parsed = equipmentMovementSchema.safeParse(form);
+    if (!parsed.success) {
+      setMsg(parsed.error.issues[0]?.message ?? "Verifica i dati inseriti.");
+      return;
+    }
+
+    setSaving(true);
+    setMsg(null);
+
+    const { error } = await supabase.from("equipment_movements").insert({
+      equipment_id: form.equipment_id,
+      equipment_area: area,
+      type: "OUT",
+      status: "OPEN",
+      note: normalizeNullable(form.note),
+      created_by: user?.id ?? null,
+      created_by_name: profileInfo?.fullName || user?.email || null,
+      created_by_email: user?.email ?? null,
+      assigned_to_name: normalizeNullable(form.assigned_to_name),
+      assigned_to_email: normalizeNullable(form.assigned_to_email),
+      assigned_to_badge: normalizeNullable(form.assigned_to_badge),
+      resolution_type: null,
+      close_note: null,
+      closed_at: null,
+      closed_by: null,
+      movement_group_id: null,
+      details_json: {
+        asset_code: selectedAsset.asset_code ?? null,
+        asset_name: selectedAsset.name ?? null,
+        equipment_area: area,
+        mode: "single",
+      },
+    });
+
+    if (error) {
+      console.error("equipment movement create error:", error);
+      setMsg("Registrazione movimento non riuscita: " + describeError(error));
+      setSaving(false);
+      return;
+    }
+
+    toast.success("Prelievo registrato");
+    setForm((prev) => ({
+      ...prev,
+      note: "",
+    }));
+    await loadData();
+    setSaving(false);
+  }
+
+  function canEditRow(row: EquipmentMovementRow) {
+    return sameUser(row.created_by, user?.id) || isAdmin;
+  }
+
+  function closeModal() {
+    setCloseOpen(false);
+    setClosing(null);
+    setClosingGroup([]);
+    setCloseResolutionType("RETURN");
+    setCloseNote("");
+    setGroupEditState({});
+    setMsg(null);
+  }
+
+  async function openCloseModal(row: EquipmentMovementRow) {
+    setMsg(null);
+
+    let group: EquipmentMovementRow[] = [row];
+    if (row.movement_group_id) {
+      const { data: groupData, error } = await supabase
+        .from("equipment_movements")
+        .select("*")
+        .eq("movement_group_id", row.movement_group_id)
+        .order("created_at", { ascending: true });
+      if (!error && groupData?.length) {
+        group = groupData as EquipmentMovementRow[];
+      }
+    }
+
+    setClosing(row);
+    setClosingGroup(group);
+    setCloseResolutionType(getMovementResolution(row));
+    setCloseNote(row.close_note ?? "");
+
+    const initState: GroupEditState = {};
+    for (const movement of group) {
+      initState[movement.id] = {
+        resolutionType: getMovementResolution(movement),
+        closeNote: movement.close_note ?? "",
+      };
+    }
+    setGroupEditState(initState);
+    setCloseOpen(true);
+  }
+
+  async function confirmClose() {
+    if (!closing) return;
+    const targetRows = closingGroup.length > 1 && closing.movement_group_id ? closingGroup : [closing];
+
+    if (targetRows.some((row) => getMovementStatus(row) === "OPEN" && !canEditRow(row))) {
+      setMsg("Solo il creatore del movimento o l'admin può chiudere questa uscita.");
+      return;
+    }
+
+    const now = new Date().toISOString();
+    setSaving(true);
+    setMsg(null);
+
+    try {
+      for (const row of targetRows) {
+        if (getMovementStatus(row) === "CLOSED") continue;
+        const resolutionType = targetRows.length > 1 ? groupEditState[row.id]?.resolutionType : closeResolutionType;
+        const note = targetRows.length > 1 ? groupEditState[row.id]?.closeNote : closeNote;
+
+        if (!resolutionType) {
+          setMsg("Seleziona l'esito finale prima di confermare la chiusura.");
+          setSaving(false);
+          return;
+        }
+
+        const { error } = await supabase
+          .from("equipment_movements")
+          .update({
+            status: "CLOSED",
+            resolution_type: resolutionType,
+            close_note: normalizeNullable(note ?? ""),
+            closed_at: now,
+            closed_by: user?.id ?? null,
+          } as never)
+          .eq("id", row.id);
+
+        if (error) throw error;
+      }
+
+      toast.success(targetRows.length > 1 ? "Gruppo chiuso" : "Movimento chiuso");
+      await loadData();
+      closeModal();
+    } catch (error) {
+      console.error("equipment movement close error:", error);
+      const message = describeError(error);
+      const maybeSchemaHint =
+        message === "errore sconosciuto"
+          ? " Verifica anche di aver eseguito l'ultimo SQL attrezzature, perché la chiusura usa i nuovi campi OPEN/CLOSED."
+          : "";
+      setMsg("Chiusura movimento non riuscita: " + message + maybeSchemaHint);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const areaLabel = EQUIPMENT_AREA_LABELS[area];
+
+  if (authLoading) {
+    return (
+      <main className="panel">
+        <div className="pageBar">
+          <div className="pageBarTitle">Attrezzature {areaLabel} - Movimenti</div>
+        </div>
+        <div className="card" style={{ padding: 12 }}>Caricamento...</div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="panel" style={{ overflowX: "hidden" }}>
+      <div className="pageBar">
+        <div className="pageBarTitle">Attrezzature {areaLabel} - Movimenti</div>
+      </div>
+
+      <div className="card" style={{ padding: 12 }}>
+        <div className="equipmentSectionHeader" style={{ marginBottom: 10 }}>
+          <div>
+            <div className="equipmentSectionTitle">Uscita attrezzature</div>
+            <div className="equipmentSectionHint">
+              Stessa logica dei materiali: l&apos;uscita si apre subito e rimane aperta finché non viene chiusa o rettificata.
+            </div>
+          </div>
+          <div className="equipmentAreaPill">Area: {areaLabel}</div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          <div style={{ minWidth: 240 }}>
+            <label className="label" htmlFor={`move-mode-${area}`}>Modalità uscita</label>
+            <select
+              id={`move-mode-${area}`}
+              className="input"
+              value={scanMode}
+              onChange={(e) => {
+                const nextMode = e.target.value as "NORMAL" | "CART";
+                setScanMode(nextMode);
+                if (nextMode === "CART") setCartOpen(true);
+              }}
+            >
+              <option value="NORMAL">Normale</option>
+              <option value="CART">Carrello multiplo {cart.length > 0 ? `(${cart.length})` : ""}</option>
+            </select>
+          </div>
+          <div style={{ display: "flex", alignItems: "end", gap: 8, flexWrap: "wrap" }}>
+            <button className="btn" onClick={startCameraScanForSearch} type="button" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <BarcodeIcon />
+              Barcode
+            </button>
+            <button className="btn" onClick={searchByNfc} disabled={searchByNfcScanning} type="button" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <NfcIcon />
+              {searchByNfcScanning ? "NFC..." : "NFC"}
+            </button>
+          </div>
+        </div>
+
+        <div className="equipmentFilterGrid mobileGrid1">
+          <div ref={assetBoxRef} style={{ minWidth: 0, position: "relative" }}>
+            <label className="label" htmlFor={`move-search-${area}`}>Attrezzatura (seriale o nome)</label>
+            <input
+              id={`move-search-${area}`}
+              className="input"
+              value={assetSearch}
+              onChange={(e) => {
+                const value = e.target.value;
+                setAssetSearch(value);
+                setForm((prev) => ({ ...prev, equipment_id: "" }));
+                setAssetOpen(true);
+                setMsg(null);
+              }}
+              onFocus={() => setAssetOpen(true)}
+              onKeyDown={(e) => {
+                if (!assetOpen) return;
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setAssetActiveIndex((i) => Math.min(i + 1, assetMatches.length - 1));
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setAssetActiveIndex((i) => Math.max(i - 1, 0));
+                } else if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (assetActive) pickAsset(assetActive);
+                } else if (e.key === "Escape") {
+                  setAssetOpen(false);
+                }
+              }}
+              placeholder="Filtra per seriale, nome, barcode, NFC..."
+            />
+            {assetOpen && assetSearch.trim() && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  top: "100%",
+                  marginTop: 6,
+                  background: "#fff",
+                  border: "1px solid rgba(15,23,42,0.12)",
+                  borderRadius: 12,
+                  boxShadow: "0 16px 40px rgba(0,0,0,0.12)",
+                  overflow: "hidden",
+                  zIndex: 50,
+                  maxHeight: 240,
+                  overflowY: "auto",
+                }}
+              >
+                {assetMatches.length === 0 ? (
+                  <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
+                ) : (
+                  assetMatches.map((asset, idx) => (
+                    <div
+                      key={asset.id}
+                      onMouseEnter={() => setAssetActiveIndex(idx)}
+                      onMouseDown={(ev) => {
+                        ev.preventDefault();
+                        pickAsset(asset);
+                      }}
+                      style={{
+                        padding: "10px 12px",
+                        cursor: "pointer",
+                        background: idx === assetActiveIndex ? "#eef2ff" : "white",
+                        borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
+                      }}
+                    >
+                      <div style={{ fontWeight: 900, color: "#0f172a" }}>{asset.serial_number || asset.asset_code}</div>
+                      <div style={{ fontSize: 12, color: "#334155" }}>{asset.name}</div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          <div style={{ minWidth: 0 }}>
+            <label className="label" htmlFor={`move-asset-${area}`}>Selezione rapida</label>
+            <select
+              id={`move-asset-${area}`}
+              className="input"
+              value={form.equipment_id}
+              onChange={(e) => {
+                const value = e.target.value;
+                const asset = assetMap.get(value) ?? null;
+                setForm((prev) => ({ ...prev, equipment_id: value }));
+                if (asset) setAssetSearch(`${asset.serial_number || asset.asset_code} - ${asset.name}`);
+              }}
+            >
+              <option value="">Seleziona attrezzatura</option>
+              {filteredAssets.map((asset) => (
+                <option key={asset.id} value={asset.id}>
+                  {(asset.serial_number || asset.asset_code)} - {asset.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ minWidth: 0 }}>
+            <label className="label" htmlFor={`move-note-${area}`}>Note *</label>
+            <input
+              id={`move-note-${area}`}
+              className="input"
+              value={scanMode === "CART" ? cartNote : form.note}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (scanMode === "CART") setCartNote(value);
+                else setForm((prev) => ({ ...prev, note: value }));
+              }}
+              placeholder="Commessa / reparto / motivo uscita"
+            />
+          </div>
+
+          <div style={{ minWidth: 0, display: "flex", alignItems: "end" }}>
+            {scanMode === "CART" ? (
+              <button className="btn btnPrimary" onClick={addSelectedToCart} disabled={!selectedAsset} type="button">
+                Aggiungi al carrello
+              </button>
+            ) : (
+              <button className="btn btnPrimary" onClick={saveMovement} disabled={saving || !form.equipment_id} type="button">
+                {saving ? "Salvataggio..." : "Conferma prelievo"}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {selectedAsset && (
+          <div className="equipmentInfoGrid" style={{ marginTop: 12 }}>
+            <div>
+              <div className="equipmentInfoLabel">Seriale</div>
+              <div className="equipmentInfoValue">{selectedAsset.serial_number || selectedAsset.asset_code}</div>
+            </div>
+            <div>
+              <div className="equipmentInfoLabel">Nome</div>
+              <div className="equipmentInfoValue">{selectedAsset.name}</div>
+            </div>
+            <div>
+              <div className="equipmentInfoLabel">Stato corrente</div>
+              <div style={{ marginTop: 4 }}>
+                <span style={equipmentStatusStyle(selectedAsset.status)}>{EQUIPMENT_STATUS_LABELS[selectedAsset.status]}</span>
+              </div>
+            </div>
+            <div>
+              <div className="equipmentInfoLabel">Assegnata a</div>
+              <div className="equipmentInfoValue">
+                {[selectedAsset.assigned_to_name, selectedAsset.assigned_to_badge ? `Badge ${selectedAsset.assigned_to_badge}` : null]
+                  .filter(Boolean)
+                  .join(" · ") || "—"}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: cameraScanning ? "block" : "none", marginTop: 12 }}>
+          <video
+            ref={videoRef}
+            style={{ width: "100%", borderRadius: 12, background: "black" }}
+            muted
+            playsInline
+          />
+          <div style={{ fontSize: 12, marginTop: 6, opacity: 0.9 }}>
+            Inquadra il barcode dell&apos;attrezzatura con la fotocamera.
+          </div>
+        </div>
+
+        {msg && <div style={{ marginTop: 12, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
+      </div>
+
+      {(cartOpen || cart.length > 0) && (
+        <div className="card" style={{ padding: 12, marginTop: 12 }}>
+          <div className="equipmentSectionHeader">
+            <div>
+              <div className="equipmentSectionTitle">Carrello prelievo multiplo</div>
+              <div className="equipmentSectionHint">
+                Ogni attrezzatura genera una sua uscita `OPEN`, ma il gruppo rimane collegato per la chiusura successiva.
+              </div>
+            </div>
+          </div>
+
+          <div className="tableWrap" style={{ marginTop: 10 }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Seriale</th>
+                  <th>Nome</th>
+                  <th>Stato</th>
+                  <th>Azioni</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cartItems.length === 0 ? (
+                  <tr>
+                    <td colSpan={4}>Carrello vuoto.</td>
+                  </tr>
+                ) : (
+                  cartItems.map((item) => (
+                    <tr key={item.id}>
+                      <td style={{ fontWeight: 900 }}>{item.serial_number || item.asset_code}</td>
+                      <td>{item.name}</td>
+                      <td><span style={equipmentStatusStyle(item.status)}>{EQUIPMENT_STATUS_LABELS[item.status]}</span></td>
+                      <td>
+                        <button className="btn" onClick={() => removeCartItem(item.id)} disabled={cartBusy} type="button">
+                          Rimuovi
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+            <div style={{ fontWeight: 800 }}>Righe: {cartItems.length}</div>
+            <button className="btn btnPrimary" onClick={confirmCartPickup} disabled={cartBusy || cartItems.length === 0} type="button">
+              {cartBusy ? "Salvataggio..." : "Conferma prelievo"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="card" style={{ padding: 12, marginTop: 12 }}>
+        <div className="equipmentSectionHeader">
+          <div>
+            <div className="equipmentSectionTitle">Movimenti aperti</div>
+            <div className="equipmentSectionHint">
+              Le uscite aperte restano qui finché non vengono chiuse o rettificate.
+            </div>
+          </div>
+        </div>
+
+        <div className="tableWrap" style={{ marginTop: 10 }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Stato</th>
+                <th>Tipo</th>
+                <th>Attrezzatura</th>
+                <th>Assegnatario</th>
+                <th>Note</th>
+                <th>Inserito da</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={7}>Caricamento...</td>
+                </tr>
+              ) : openMovements.length === 0 ? (
+                <tr>
+                  <td colSpan={7}>Nessun movimento aperto.</td>
+                </tr>
+              ) : (
+                openMovements.map((row) => {
+                  const asset = assetMap.get(row.equipment_id);
+                  const title = row.movement_group_id ? "Clicca per chiudere / rettificare il gruppo" : "Clicca per chiudere / rettificare";
+                  return (
+                    <tr
+                      key={row.id}
+                      onClick={() => openCloseModal(row)}
+                      style={{ cursor: "pointer", background: "rgba(148,163,184,0.18)" }}
+                      title={title}
+                    >
+                      <td>{fmtDateTime(row.created_at)}</td>
+                      <td>
+                        <span
+                          className="openStripe"
+                          style={(() => {
+                            const s = equipmentMovementPillStyle("OPEN");
+                            const { background, ...rest } = s;
+                            return rest;
+                          })()}
+                        >
+                          {EQUIPMENT_MOVEMENT_STATUS_LABELS.OPEN}
+                        </span>
+                      </td>
+                      <td><span style={equipmentMovementPillStyle("OUT")}>{EQUIPMENT_MOVEMENT_LABELS.OUT}</span></td>
+                      <td style={{ fontWeight: 900 }}>
+                        {row.movement_group_id
+                          ? `Prelievo multiplo (${history.filter((m) => m.movement_group_id === row.movement_group_id).length} attrezzature)`
+                          : asset
+                            ? `${asset.serial_number || asset.asset_code} - ${asset.name}`
+                            : row.equipment_id}
+                      </td>
+                      <td>
+                        {[row.assigned_to_name, row.assigned_to_badge ? `Badge ${row.assigned_to_badge}` : null]
+                          .filter(Boolean)
+                          .join(" · ") || "—"}
+                      </td>
+                      <td>{row.note || "—"}</td>
+                      <td>{row.created_by_name || row.created_by_email || "—"}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {closeOpen && closing && (
+        <div
+          onMouseDown={closeModal}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 14,
+            zIndex: 999,
+          }}
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              position: "relative",
+              width: "min(1100px, 100%)",
+              maxHeight: "85vh",
+              overflow: "auto",
+              background: "white",
+              borderRadius: 14,
+              border: "1px solid rgba(15,23,42,0.16)",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
+              padding: 12,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ fontWeight: 900, fontSize: 16 }}>
+                {closingGroup.length > 1 ? "Dettaglio gruppo / chiusura" : "Dettaglio movimento / chiusura"}
+              </div>
+              <button className="btn" onClick={closeModal} type="button">Chiudi</button>
+            </div>
+
+            {closingGroup.length <= 1 && (() => {
+              const asset = assetMap.get(closing.equipment_id);
+              const status = getMovementStatus(closing);
+              return (
+                <>
+                  <div
+                    style={{
+                      marginTop: 14,
+                      border: "1px solid rgba(59,130,246,0.25)",
+                      borderRadius: 14,
+                      padding: 12,
+                      background: "rgba(59,130,246,0.06)",
+                    }}
+                  >
+                    <div style={{ fontWeight: 900, marginBottom: 10 }}>Dettaglio uscita</div>
+                    <table className="table" style={{ fontSize: 13, width: "100%" }}>
+                      <tbody>
+                        {[
+                          { label: "Seriale", value: asset?.serial_number || asset?.asset_code || "—" },
+                          { label: "Nome", value: asset?.name || "—" },
+                          { label: "Stato movimento", value: EQUIPMENT_MOVEMENT_STATUS_LABELS[status] },
+                          { label: "Tipo", value: EQUIPMENT_MOVEMENT_LABELS.OUT },
+                          { label: "Area", value: EQUIPMENT_AREA_LABELS[closing.equipment_area] },
+                          { label: "Assegnatario", value: [closing.assigned_to_name, closing.assigned_to_badge ? `Badge ${closing.assigned_to_badge}` : null].filter(Boolean).join(" · ") || "—" },
+                          { label: "Nota uscita", value: closing.note || "—" },
+                          { label: "Esito finale", value: closing.resolution_type ? EQUIPMENT_RESOLUTION_LABELS[closing.resolution_type] : "—" },
+                          { label: "Nota chiusura", value: closing.close_note || "—" },
+                          { label: "Data chiusura", value: closing.closed_at ? fmtDateTime(closing.closed_at) : "—" },
+                        ].map((row) => (
+                          <tr key={row.label}>
+                            <td style={{ width: 220, padding: "8px 12px", fontWeight: 600, color: "#475569" }}>{row.label}</td>
+                            <td style={{ padding: "8px 12px", background: "#f8fafc", borderRadius: 4 }}>{row.value}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {status === "OPEN" && (
+                    <div
+                      style={{
+                        marginTop: 14,
+                        border: "1px solid rgba(15,23,42,0.12)",
+                        borderRadius: 14,
+                        padding: 12,
+                        background: "rgba(255,255,255,0.85)",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                        <div style={{ fontWeight: 900 }}>Rettifica / Chiusura uscita</div>
+                        <button className="btn btnPrimary" type="button" onClick={confirmClose} disabled={saving || !canEditRow(closing)}>
+                          {saving ? "Salvataggio..." : "Conferma chiusura"}
+                        </button>
+                      </div>
+
+                      <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>
+                        Solo il creatore del movimento o l&apos;admin può chiudere questa uscita.
+                      </div>
+
+                      <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
+                        <div style={{ gridColumn: "span 4" }}>
+                          <label className="label" htmlFor="equipmentCloseResolution">
+                            Esito finale
+                          </label>
+                          <select
+                            id="equipmentCloseResolution"
+                            className="input"
+                            value={closeResolutionType}
+                            onChange={(e) => setCloseResolutionType(e.target.value as EquipmentResolutionType)}
+                            disabled={!canEditRow(closing)}
+                          >
+                            {EQUIPMENT_RESOLUTION_TYPE_OPTIONS.map((option) => (
+                              <option key={option} value={option}>{EQUIPMENT_RESOLUTION_LABELS[option]}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div style={{ gridColumn: "span 8" }}>
+                          <label className="label" htmlFor="equipmentCloseNote">
+                            Nota chiusura
+                          </label>
+                          <input
+                            id="equipmentCloseNote"
+                            className="input"
+                            value={closeNote}
+                            onChange={(e) => setCloseNote(e.target.value)}
+                            placeholder="Esito finale / nota rettifica"
+                            disabled={!canEditRow(closing)}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
+                        Dopo la chiusura lo stato passa a <b>CHIUSO</b> e l&apos;asset viene aggiornato secondo l&apos;esito scelto.
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+
+            {closingGroup.length > 1 && (
+              <>
+                <div
+                  style={{
+                    marginTop: 14,
+                    border: "1px solid rgba(59,130,246,0.25)",
+                    borderRadius: 14,
+                    padding: 12,
+                    background: "rgba(59,130,246,0.06)",
+                  }}
+                >
+                  <div style={{ fontWeight: 900, marginBottom: 10 }}>Dettaglio gruppo</div>
+                  <div style={{ fontSize: 13, color: "#475569" }}>
+                    Ogni riga nasce come uscita aperta. Compila l&apos;esito di ogni attrezzatura e poi conferma la chiusura del gruppo.
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 14 }}>
+                  <div className="tableWrap">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>Seriale</th>
+                          <th>Nome</th>
+                          <th>Esito finale</th>
+                          <th>Nota chiusura</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {closingGroup.map((row) => {
+                          const asset = assetMap.get(row.equipment_id);
+                          const state = groupEditState[row.id] ?? {
+                            resolutionType: "RETURN" as EquipmentResolutionType,
+                            closeNote: "",
+                          };
+                          return (
+                            <tr key={row.id}>
+                              <td style={{ fontWeight: 900 }}>{asset?.serial_number || asset?.asset_code || row.equipment_id}</td>
+                              <td>{asset?.name || "—"}</td>
+                              <td>
+                                <select
+                                  className="input"
+                                  value={state.resolutionType}
+                                  onChange={(e) =>
+                                    setGroupEditState((prev) => ({
+                                      ...prev,
+                                      [row.id]: {
+                                        ...state,
+                                        resolutionType: e.target.value as EquipmentResolutionType,
+                                      },
+                                    }))
+                                  }
+                                  disabled={!canEditRow(row)}
+                                >
+                                  {EQUIPMENT_RESOLUTION_TYPE_OPTIONS.map((option) => (
+                                    <option key={option} value={option}>{EQUIPMENT_RESOLUTION_LABELS[option]}</option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td>
+                                <input
+                                  className="input"
+                                  value={state.closeNote}
+                                  onChange={(e) =>
+                                    setGroupEditState((prev) => ({
+                                      ...prev,
+                                      [row.id]: {
+                                        ...state,
+                                        closeNote: e.target.value,
+                                      },
+                                    }))
+                                  }
+                                  placeholder="Nota chiusura"
+                                  disabled={!canEditRow(row)}
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 16, padding: 16, border: "1px solid #e2e8f0", borderRadius: 12, background: "#f8fafc" }}>
+                  <div style={{ fontWeight: 900, marginBottom: 10 }}>Chiusura gruppo</div>
+                  <div style={{ fontSize: 13, marginBottom: 12, color: "#64748b" }}>
+                    Compila gli esiti nella tabella sopra e conferma la chiusura del gruppo.
+                  </div>
+                  <button className="btn btnPrimary" type="button" onClick={confirmClose} disabled={saving}>
+                    {saving ? "Salvataggio..." : "Conferma chiusura gruppo"}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {msg && <div style={{ marginTop: 10, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}

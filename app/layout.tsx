@@ -1,12 +1,11 @@
 import "./globals.css";
 import { createClient } from "./_lib/supabase/server";
-import SideNav from "./_components/SideNav";
-import TopBar from "./_components/TopBar";
 import { ToastProvider } from "./_lib/ToastContext";
 import { SidebarProvider } from "./_lib/SidebarContext";
 import ForceLogoutListener from "./_components/ForceLogoutListener";
 import OnlinePresenceTracker from "./_components/OnlinePresenceTracker";
 import { Inter } from "next/font/google";
+import AppShell from "./_components/AppShell";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 export const metadata = {
@@ -51,19 +50,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           {hasUser && <ForceLogoutListener />}
           {hasUser && user && <OnlinePresenceTracker userId={user.id} />}
           <SidebarProvider>
-            <div className={hasUser ? "app" : "app appLogin"}>
-              {hasUser && <SideNav />}
-
-              <div className="main">
-                {hasUser && <TopBar displayName={displayName} displayBadge={displayBadge} />}
-                <div className="content">
-                  {children}
-                  <footer className="app-footer">
-                    © <span suppressHydrationWarning>{new Date().getFullYear()}</span> · Gestionale Magazzino
-                  </footer>
-                </div>
-              </div>
-            </div>
+            <AppShell hasUser={hasUser} displayName={displayName} displayBadge={displayBadge}>
+              {children}
+            </AppShell>
           </SidebarProvider>
         </ToastProvider>
       </body>

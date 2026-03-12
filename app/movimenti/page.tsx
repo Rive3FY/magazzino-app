@@ -178,7 +178,7 @@ export default function MovimentiPage() {
   const searchParams = useSearchParams();
   const supabase = createClient();
   const { user } = useAuth();
-  const { isAdmin } = useIsAdmin();
+  const { canManageMaterials: isAdmin } = useIsAdmin();
   const userId = user?.id ?? null;
   const userEmail = user?.email ?? null;
 

@@ -13,7 +13,10 @@ type UserRow = {
   id: string;
   email: string | null;
   approved: boolean | null;
-  is_admin: boolean | null;
+  is_super_admin: boolean | null;
+  is_materials_admin: boolean | null;
+  is_equipment_linee_admin: boolean | null;
+  is_equipment_stazioni_admin: boolean | null;
   badge_number: string | null;
   first_name: string | null;
   last_name: string | null;
@@ -143,6 +146,8 @@ function renderAuditDetails(row: { action: string; details_json: Record<string, 
         <div><b>Area:</b> {String(d.equipment_area ?? "-")}</div>
         <div><b>Assegnatario:</b> {String(d.assigned_to_name ?? "-")}</div>
         <div><b>Nota:</b> {String(d.note ?? "-")}</div>
+        <div><b>Destinazione:</b> {String(d.destination ?? "-")}</div>
+        <div><b>Piano intervento:</b> {String(d.intervention_plan_number ?? "-")}</div>
         <div><b>Nota chiusura:</b> {String(d.close_note ?? "-")}</div>
       </div>
     );
@@ -210,18 +215,20 @@ export default function AdminPage() {
       return;
     }
     setMyId(u.user.id);
-    const { data, error } = await supabase.rpc("is_admin");
-    if (error) {
+    try {
+      const { data: superAdmin, error: superAdminError } = await supabase.rpc("is_super_admin");
+      const { data: legacyAdmin, error: legacyAdminError } = await supabase.rpc("is_admin");
+      if ((superAdminError && legacyAdminError) || !(superAdmin || legacyAdmin)) {
+        window.location.href = "/";
+        return;
+      }
+      setIsAdmin(true);
+      setChecking(false);
+    } catch (error) {
       console.error(error);
       setChecking(false);
       return;
     }
-    if (!data) {
-      window.location.href = "/";
-      return;
-    }
-    setIsAdmin(true);
-    setChecking(false);
   }
 
   async function loadUsers() {
@@ -256,6 +263,22 @@ export default function AdminPage() {
     if (error) {
       console.error(error);
       setMsg("Errore admin");
+    } else {
+      await loadUsers();
+    }
+    setWorkingId(null);
+  }
+
+  async function setAreaAdminFlag(
+    userId: string,
+    rpcName: "set_materials_admin" | "set_equipment_linee_admin" | "set_equipment_stazioni_admin",
+    enabled: boolean
+  ) {
+    setWorkingId(userId);
+    const { error } = await supabase.rpc(rpcName, { target_user: userId, enabled });
+    if (error) {
+      console.error(error);
+      setMsg("Errore aggiornamento ruolo area");
     } else {
       await loadUsers();
     }
@@ -575,7 +598,7 @@ export default function AdminPage() {
     return (
       <main className="panel">
         <div className="pageBar">
-          <div className="pageBarTitle">Admin</div>
+          <div className="pageBarTitle">Super Admin</div>
         </div>
         <div style={{ padding: 12 }}>Caricamento…</div>
       </main>
@@ -635,15 +658,18 @@ export default function AdminPage() {
                     <th>Badge</th>
                     <th>Nome</th>
                     <th>Approvato</th>
-                    <th>Admin</th>
+                    <th>Super</th>
+                    <th>Materiali</th>
+                    <th>Linee</th>
+                    <th>Stazioni</th>
                     <th>Azioni</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
-                    <tr><td colSpan={6} style={{ padding: 12 }}>Caricamento…</td></tr>
+                    <tr><td colSpan={9} style={{ padding: 12 }}>Caricamento…</td></tr>
                   ) : rows.length === 0 ? (
-                    <tr><td colSpan={6} style={{ padding: 12 }}>Nessun utente</td></tr>
+                    <tr><td colSpan={9} style={{ padding: 12 }}>Nessun utente</td></tr>
                   ) : (
                     rows.map((u) => {
                       const fullName = `${u.first_name ?? ""} ${u.last_name ?? ""}`.trim();
@@ -655,7 +681,10 @@ export default function AdminPage() {
                           <td>{u.badge_number ?? "-"}</td>
                           <td>{fullName || "-"}</td>
                           <td style={{ fontWeight: 800 }}>{u.approved ? "✅ SI" : "⛔ NO"}</td>
-                          <td style={{ fontWeight: 800 }}>{u.is_admin ? "✅ SI" : "-"}</td>
+                          <td style={{ fontWeight: 800 }}>{u.is_super_admin ? "✅ SI" : "-"}</td>
+                          <td style={{ fontWeight: 800 }}>{u.is_materials_admin ? "✅ SI" : "-"}</td>
+                          <td style={{ fontWeight: 800 }}>{u.is_equipment_linee_admin ? "✅ SI" : "-"}</td>
+                          <td style={{ fontWeight: 800 }}>{u.is_equipment_stazioni_admin ? "✅ SI" : "-"}</td>
                           <td>
                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                               {u.approved ? (
@@ -663,10 +692,25 @@ export default function AdminPage() {
                               ) : (
                                 <button className="btn btnPrimary" disabled={busy} onClick={() => setApproved(u.id, true)}>Approva</button>
                               )}
-                              {u.is_admin ? (
+                              {u.is_super_admin ? (
                                 <button className="btn" disabled={busy || isMe} title={isMe ? "Non puoi rimuovere admin a te stesso" : ""} onClick={() => setAdminFlag(u.id, false)}>Rimuovi admin</button>
                               ) : (
-                                <button className="btn" disabled={busy} onClick={() => setAdminFlag(u.id, true)}>Rendi admin</button>
+                                <button className="btn" disabled={busy} onClick={() => setAdminFlag(u.id, true)}>Rendi super admin</button>
+                              )}
+                              {u.is_materials_admin ? (
+                                <button className="btn" disabled={busy || isMe} onClick={() => setAreaAdminFlag(u.id, "set_materials_admin", false)}>Rimuovi admin Materiali</button>
+                              ) : (
+                                <button className="btn" disabled={busy} onClick={() => setAreaAdminFlag(u.id, "set_materials_admin", true)}>Admin Materiali</button>
+                              )}
+                              {u.is_equipment_linee_admin ? (
+                                <button className="btn" disabled={busy || isMe} onClick={() => setAreaAdminFlag(u.id, "set_equipment_linee_admin", false)}>Rimuovi admin Linee</button>
+                              ) : (
+                                <button className="btn" disabled={busy} onClick={() => setAreaAdminFlag(u.id, "set_equipment_linee_admin", true)}>Admin Linee</button>
+                              )}
+                              {u.is_equipment_stazioni_admin ? (
+                                <button className="btn" disabled={busy || isMe} onClick={() => setAreaAdminFlag(u.id, "set_equipment_stazioni_admin", false)}>Rimuovi admin Stazioni</button>
+                              ) : (
+                                <button className="btn" disabled={busy} onClick={() => setAreaAdminFlag(u.id, "set_equipment_stazioni_admin", true)}>Admin Stazioni</button>
                               )}
                               {!isMe && (
                                 <button

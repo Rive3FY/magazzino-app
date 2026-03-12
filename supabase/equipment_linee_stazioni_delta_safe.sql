@@ -1,30 +1,24 @@
 -- =============================================================================
--- DELTA SQL - Attrezzature Linee / Stazioni (VERSIONE CHE CANCELLA I DATI)
+-- DELTA SQL SICURO - Attrezzature Linee / Stazioni (NON cancella dati)
 -- =============================================================================
--- ATTENZIONE: Questo script fa DROP TABLE e CANCELLA tutti i dati attrezzature!
--- Per installazioni nuove o aggiornamenti SENZA perdere dati, usa invece:
---   equipment_linee_stazioni_delta_safe.sql
---
--- USO di questo file (solo se vuoi ricominciare da zero):
+-- USO:
 -- Supabase Dashboard > SQL Editor > incolla ed esegui questo file.
 --
--- Questo delta:
--- - crea il modulo attrezzature separato dai materiali
--- - usa due aree fisse: LINEE e STAZIONI
--- - NON usa Excel
--- - NON prevede trasferimenti tra le due aree
+-- Questo script:
+-- - Crea le tabelle equipment_* SOLO se non esistono (CREATE IF NOT EXISTS)
+-- - NON fa mai DROP TABLE: i dati esistenti restano intatti
+-- - Aggiorna funzioni, trigger e policy in modo sicuro
 --
--- NOTA: Se hai gia' dati nel registro attrezzature, NON usare questo script.
+-- Per la PRIMA installazione usa questo script.
+-- Per aggiornamenti successivi usa gli script incrementali:
+--   - equipment_destination_register_update.sql
+--   - fix_equipment_movement_trigger_rls.sql
+--   - equipment_movement_delete_trigger.sql
+--   - admin_roles_area_update.sql
 -- =============================================================================
 
-DROP TRIGGER IF EXISTS trg_apply_equipment_movement ON public.equipment_movements;
-DROP TRIGGER IF EXISTS trg_touch_equipment_assets_updated_at ON public.equipment_assets;
-DROP FUNCTION IF EXISTS public.apply_equipment_movement();
-DROP FUNCTION IF EXISTS public.touch_equipment_assets_updated_at();
-DROP TABLE IF EXISTS public.equipment_movements;
-DROP TABLE IF EXISTS public.equipment_assets;
-
-CREATE TABLE public.equipment_assets (
+-- Tabelle: crea solo se non esistono
+CREATE TABLE IF NOT EXISTS public.equipment_assets (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -49,21 +43,25 @@ CREATE TABLE public.equipment_assets (
   dismissed_at timestamptz
 );
 
-CREATE INDEX idx_equipment_assets_asset_code ON public.equipment_assets(asset_code);
-CREATE INDEX idx_equipment_assets_area ON public.equipment_assets(equipment_area);
-CREATE INDEX idx_equipment_assets_status ON public.equipment_assets(status);
-CREATE INDEX idx_equipment_assets_category ON public.equipment_assets(category);
-CREATE UNIQUE INDEX idx_equipment_assets_serial_number ON public.equipment_assets(serial_number) WHERE serial_number IS NOT NULL AND btrim(serial_number) <> '';
-CREATE UNIQUE INDEX idx_equipment_assets_barcode ON public.equipment_assets(barcode) WHERE barcode IS NOT NULL AND btrim(barcode) <> '';
-CREATE UNIQUE INDEX idx_equipment_assets_nfc_tag_id ON public.equipment_assets(nfc_tag_id) WHERE nfc_tag_id IS NOT NULL AND btrim(nfc_tag_id) <> '';
+CREATE INDEX IF NOT EXISTS idx_equipment_assets_asset_code ON public.equipment_assets(asset_code);
+CREATE INDEX IF NOT EXISTS idx_equipment_assets_area ON public.equipment_assets(equipment_area);
+CREATE INDEX IF NOT EXISTS idx_equipment_assets_status ON public.equipment_assets(status);
+CREATE INDEX IF NOT EXISTS idx_equipment_assets_category ON public.equipment_assets(category);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_equipment_assets_serial_number ON public.equipment_assets(serial_number) WHERE serial_number IS NOT NULL AND btrim(serial_number) <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_equipment_assets_barcode ON public.equipment_assets(barcode) WHERE barcode IS NOT NULL AND btrim(barcode) <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_equipment_assets_nfc_tag_id ON public.equipment_assets(nfc_tag_id) WHERE nfc_tag_id IS NOT NULL AND btrim(nfc_tag_id) <> '';
 
 ALTER TABLE public.equipment_assets ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "equipment_assets_select_all" ON public.equipment_assets;
 CREATE POLICY "equipment_assets_select_all" ON public.equipment_assets FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "equipment_assets_insert_admin" ON public.equipment_assets;
 CREATE POLICY "equipment_assets_insert_admin" ON public.equipment_assets FOR INSERT TO authenticated
   WITH CHECK (
     (equipment_area = 'LINEE' AND public.can_manage_equipment_linee())
     OR (equipment_area = 'STAZIONI' AND public.can_manage_equipment_stazioni())
   );
+DROP POLICY IF EXISTS "equipment_assets_update_admin" ON public.equipment_assets;
 CREATE POLICY "equipment_assets_update_admin" ON public.equipment_assets FOR UPDATE TO authenticated
   USING (
     (equipment_area = 'LINEE' AND public.can_manage_equipment_linee())
@@ -73,13 +71,15 @@ CREATE POLICY "equipment_assets_update_admin" ON public.equipment_assets FOR UPD
     (equipment_area = 'LINEE' AND public.can_manage_equipment_linee())
     OR (equipment_area = 'STAZIONI' AND public.can_manage_equipment_stazioni())
   );
+DROP POLICY IF EXISTS "equipment_assets_delete_admin" ON public.equipment_assets;
 CREATE POLICY "equipment_assets_delete_admin" ON public.equipment_assets FOR DELETE TO authenticated
   USING (
     (equipment_area = 'LINEE' AND public.can_manage_equipment_linee())
     OR (equipment_area = 'STAZIONI' AND public.can_manage_equipment_stazioni())
   );
 
-CREATE TABLE public.equipment_movements (
+-- equipment_movements: crea solo se non esiste
+CREATE TABLE IF NOT EXISTS public.equipment_movements (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   created_at timestamptz NOT NULL DEFAULT now(),
   equipment_id uuid NOT NULL REFERENCES public.equipment_assets(id) ON DELETE CASCADE,
@@ -103,15 +103,23 @@ CREATE TABLE public.equipment_movements (
   details_json jsonb
 );
 
-CREATE INDEX idx_equipment_movements_area ON public.equipment_movements(equipment_area);
-CREATE INDEX idx_equipment_movements_created_at ON public.equipment_movements(created_at DESC);
-CREATE INDEX idx_equipment_movements_equipment_id ON public.equipment_movements(equipment_id);
-CREATE INDEX idx_equipment_movements_status ON public.equipment_movements(status);
-CREATE INDEX idx_equipment_movements_group ON public.equipment_movements(movement_group_id);
+-- Colonne aggiuntive se mancanti (per DB creati con versioni precedenti)
+ALTER TABLE public.equipment_movements ADD COLUMN IF NOT EXISTS destination text;
+ALTER TABLE public.equipment_movements ADD COLUMN IF NOT EXISTS intervention_plan_number text;
+
+CREATE INDEX IF NOT EXISTS idx_equipment_movements_area ON public.equipment_movements(equipment_area);
+CREATE INDEX IF NOT EXISTS idx_equipment_movements_created_at ON public.equipment_movements(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_equipment_movements_equipment_id ON public.equipment_movements(equipment_id);
+CREATE INDEX IF NOT EXISTS idx_equipment_movements_status ON public.equipment_movements(status);
+CREATE INDEX IF NOT EXISTS idx_equipment_movements_group ON public.equipment_movements(movement_group_id);
 
 ALTER TABLE public.equipment_movements ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "equipment_movements_select_all" ON public.equipment_movements;
 CREATE POLICY "equipment_movements_select_all" ON public.equipment_movements FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "equipment_movements_insert_auth" ON public.equipment_movements;
 CREATE POLICY "equipment_movements_insert_auth" ON public.equipment_movements FOR INSERT TO authenticated WITH CHECK (true);
+DROP POLICY IF EXISTS "equipment_movements_update_creator_or_admin" ON public.equipment_movements;
 CREATE POLICY "equipment_movements_update_creator_or_admin" ON public.equipment_movements FOR UPDATE TO authenticated
   USING (
     (created_by IS NOT NULL AND created_by::text = auth.uid()::text)
@@ -123,12 +131,14 @@ CREATE POLICY "equipment_movements_update_creator_or_admin" ON public.equipment_
     OR (equipment_area = 'LINEE' AND public.can_manage_equipment_linee())
     OR (equipment_area = 'STAZIONI' AND public.can_manage_equipment_stazioni())
   );
+DROP POLICY IF EXISTS "equipment_movements_delete_admin" ON public.equipment_movements;
 CREATE POLICY "equipment_movements_delete_admin" ON public.equipment_movements FOR DELETE TO authenticated
   USING (
     (equipment_area = 'LINEE' AND public.can_manage_equipment_linee())
     OR (equipment_area = 'STAZIONI' AND public.can_manage_equipment_stazioni())
   );
 
+-- Funzioni e trigger (aggiornabili senza perdita dati)
 CREATE OR REPLACE FUNCTION public.touch_equipment_assets_updated_at()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -140,6 +150,7 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS trg_touch_equipment_assets_updated_at ON public.equipment_assets;
 CREATE TRIGGER trg_touch_equipment_assets_updated_at
 BEFORE UPDATE ON public.equipment_assets
 FOR EACH ROW
@@ -148,6 +159,7 @@ EXECUTE FUNCTION public.touch_equipment_assets_updated_at();
 CREATE OR REPLACE FUNCTION public.apply_equipment_movement()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
@@ -264,7 +276,36 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS trg_apply_equipment_movement ON public.equipment_movements;
 CREATE TRIGGER trg_apply_equipment_movement
 BEFORE INSERT OR UPDATE ON public.equipment_movements
 FOR EACH ROW
 EXECUTE FUNCTION public.apply_equipment_movement();
+
+-- Trigger per ripristinare asset quando si elimina un movimento OPEN
+CREATE OR REPLACE FUNCTION public.on_equipment_movement_delete()
+RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  IF OLD.status = 'OPEN' THEN
+    UPDATE public.equipment_assets
+    SET
+      status = 'AVAILABLE',
+      assigned_to_name = NULL,
+      assigned_to_email = NULL,
+      assigned_to_badge = NULL,
+      assigned_at = NULL,
+      maintenance_note = NULL,
+      dismissed_at = NULL
+    WHERE id = OLD.equipment_id;
+  END IF;
+  RETURN OLD;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_on_equipment_movement_delete ON public.equipment_movements;
+CREATE TRIGGER trg_on_equipment_movement_delete
+AFTER DELETE ON public.equipment_movements
+FOR EACH ROW
+EXECUTE FUNCTION public.on_equipment_movement_delete();

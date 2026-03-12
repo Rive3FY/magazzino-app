@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { createClient as createServerClient } from "../../../_lib/supabase/server";
 import { NextResponse } from "next/server";
+import { loadServerAdminAccess } from "../../../_lib/admin-access";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -18,9 +19,9 @@ export async function POST() {
     if (!user) {
       return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
     }
-    const { data: isAdm, error: errAdmin } = await serverSupabase.rpc("is_admin");
-    if (errAdmin || !isAdm) {
-      return NextResponse.json({ error: "Solo admin può fare il reset" }, { status: 403 });
+    const access = await loadServerAdminAccess(serverSupabase);
+    if (!access.isSuperAdmin) {
+      return NextResponse.json({ error: "Solo il super admin può fare il reset" }, { status: 403 });
     }
 
     const admin = getSupabaseAdmin();

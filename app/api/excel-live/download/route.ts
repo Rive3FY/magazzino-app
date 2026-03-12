@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import { createClient } from "@supabase/supabase-js";
 import { createClient as createServerClient } from "../../../_lib/supabase/server";
 import { EXCEL_COLS } from "../../../_lib/excel-cols";
+import { loadServerAdminAccess } from "../../../_lib/admin-access";
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -24,9 +25,9 @@ export async function GET() {
     if (!user) {
       return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
     }
-    const { data: isAdm, error: errAdmin } = await serverSupabase.rpc("is_admin");
-    if (errAdmin || !isAdm) {
-      return NextResponse.json({ error: "Accesso negato: solo admin" }, { status: 403 });
+    const access = await loadServerAdminAccess(serverSupabase);
+    if (!access.canManageMaterials) {
+      return NextResponse.json({ error: "Accesso negato: solo admin Materiali o super admin" }, { status: 403 });
     }
     const supabase = getSupabaseAdmin();
 

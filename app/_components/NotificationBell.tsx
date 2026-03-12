@@ -14,7 +14,7 @@ type ExcelLiveRequest = { id: string; movement_id: string; code: string; warehou
 
 export default function NotificationBell() {
   const [mounted, setMounted] = useState(false);
-  const { isAdmin } = useIsAdmin();
+  const { isSuperAdmin, canManageMaterials } = useIsAdmin();
   const [open, setOpen] = useState(false);
   const [negativeStocks, setNegativeStocks] = useState<NegativeStock[]>([]);
   const [openMovements, setOpenMovements] = useState<OpenMovement[]>([]);
@@ -25,7 +25,11 @@ export default function NotificationBell() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [dropdownStyle, setDropdownStyle] = useState<{ top: number; left: number } | null>(null);
 
-  const total = negativeStocks.length + openMovements.length + (isAdmin ? pendingUsers.length : 0) + (isAdmin ? excelLiveRequests.length : 0);
+  const total =
+    negativeStocks.length +
+    openMovements.length +
+    (isSuperAdmin ? pendingUsers.length : 0) +
+    (canManageMaterials ? excelLiveRequests.length : 0);
 
   useEffect(() => {
     setMounted(true);
@@ -38,8 +42,8 @@ export default function NotificationBell() {
       const [stocksRes, movementsRes, pendingRes, requestsRes] = await Promise.all([
         supabase.from("excel_live").select("code,warehouse,qty_free").lt("qty_free", 0).order("qty_free", { ascending: true }).limit(20),
         supabase.from("movements").select("id,code,qty,note,created_at").eq("type", "OUT").eq("status", "OPEN").order("created_at", { ascending: false }).limit(20),
-        isAdmin ? supabase.from("profiles").select("id,first_name,last_name,badge_number").eq("approved", false) : Promise.resolve({ data: [] }),
-        isAdmin ? supabase.from("excel_live_requests").select("id,movement_id,code,warehouse,delta_free,requested_at,details_json").eq("status", "pending").order("requested_at", { ascending: false }).limit(20) : Promise.resolve({ data: [] }),
+        isSuperAdmin ? supabase.from("profiles").select("id,first_name,last_name,badge_number").eq("approved", false) : Promise.resolve({ data: [] }),
+        canManageMaterials ? supabase.from("excel_live_requests").select("id,movement_id,code,warehouse,delta_free,requested_at,details_json").eq("status", "pending").order("requested_at", { ascending: false }).limit(20) : Promise.resolve({ data: [] }),
       ]);
 
       setNegativeStocks((stocksRes.data ?? []) as NegativeStock[]);
@@ -54,7 +58,7 @@ export default function NotificationBell() {
     } finally {
       setLoading(false);
     }
-  }, [isAdmin]);
+  }, [canManageMaterials, isSuperAdmin]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -70,14 +74,14 @@ export default function NotificationBell() {
       .on("postgres_changes", { event: "*", schema: "public", table: "movements" }, () => void load())
       .subscribe();
 
-    const chProf = isAdmin
+    const chProf = isSuperAdmin
       ? supabase
           .channel("notif-profiles-live")
           .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => void load())
           .subscribe()
       : null;
 
-    const chRequests = isAdmin
+    const chRequests = canManageMaterials
       ? supabase
           .channel("notif-excel-live-requests")
           .on("postgres_changes", { event: "*", schema: "public", table: "excel_live_requests" }, () => void load())
@@ -93,7 +97,7 @@ export default function NotificationBell() {
       if (chRequests) supabase.removeChannel(chRequests);
       clearInterval(interval);
     };
-  }, [isAdmin, load]);
+  }, [canManageMaterials, isSuperAdmin, load]);
 
   useEffect(() => {
     if (open && wrapRef.current) {
@@ -204,7 +208,7 @@ export default function NotificationBell() {
                       {excelLiveRequests.map((req) => (
                         <Link
                           key={req.id}
-                          href={`/admin?tab=richieste-excel`}
+                          href={`/materiali/admin?tab=richieste-excel`}
                           className="notificationBellItem notificationBellLink"
                           onClick={() => setOpen(false)}
                         >

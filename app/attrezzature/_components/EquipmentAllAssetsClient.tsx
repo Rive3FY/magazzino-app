@@ -55,7 +55,9 @@ function NfcIcon() {
 
 export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const { user, loading: authLoading, approved } = useAuth();
-  const { isAdmin, loading: adminLoading } = useIsAdmin();
+  const access = useIsAdmin();
+  const isAdmin = area === "LINEE" ? access.canManageEquipmentLinee : access.canManageEquipmentStazioni;
+  const adminLoading = access.loading;
   const toast = useToast();
 
   const [rows, setRows] = useState<EquipmentAssetRow[]>([]);

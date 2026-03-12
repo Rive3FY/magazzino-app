@@ -73,7 +73,7 @@ export default function Home() {
               <div className="launcherCardBadge">Profilo</div>
               <div className="launcherCardTitle">Gestione Profilo</div>
               <div className="launcherCardText">
-                Modifica badge, nome e cognome del tuo profilo senza entrare in un contesto operativo specifico.
+                Modifica badge, nome e cognome del tuo profilo.
               </div>
             </div>
             <div className="launcherCardFooter">

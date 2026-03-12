@@ -58,7 +58,7 @@ export default function ImportPage() {
   const [prmUnlocked, setPrmUnlocked] = useState(false);
   const [realeUnlocked, setRealeUnlocked] = useState(false);
 
-  const { isAdmin, loading: checking } = useIsAdmin();
+  const { canManageMaterials: isAdmin, loading: checking } = useIsAdmin();
 
   async function loadCounts() {
     try {

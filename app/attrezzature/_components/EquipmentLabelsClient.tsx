@@ -49,7 +49,9 @@ function getBarcodeValue(row: EquipmentAssetRow) {
 }
 
 export default function EquipmentLabelsClient({ area, basePath }: Props) {
-  const { isAdmin, loading: adminLoading } = useIsAdmin();
+  const access = useIsAdmin();
+  const isAdmin = area === "LINEE" ? access.canManageEquipmentLinee : access.canManageEquipmentStazioni;
+  const adminLoading = access.loading;
 
   const [rows, setRows] = useState<EquipmentAssetRow[]>([]);
   const [loading, setLoading] = useState(true);

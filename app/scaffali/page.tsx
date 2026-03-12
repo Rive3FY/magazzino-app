@@ -75,7 +75,7 @@ type ShelfEntry = { shelf: string; place: string; nfcTagId: string; barcode: str
 
 export default function ScaffaliPage() {
   const supabase = createClient();
-  const { isAdmin, loading: adminLoading } = useIsAdmin();
+  const { canManageMaterials: isAdmin, loading: adminLoading } = useIsAdmin();
 
   const [items, setItems] = useState<ItemRow[]>([]);
   const [shelves, setShelves] = useState<Record<string, { PRM: ShelfEntry; REALE: ShelfEntry }>>({});

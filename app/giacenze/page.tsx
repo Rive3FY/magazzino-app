@@ -108,7 +108,7 @@ export default function GiacenzePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, loading: authLoading, approved } = useAuth();
-  const { isAdmin, loading: adminLoading } = useIsAdmin();
+  const { canManageMaterials: isAdmin, loading: adminLoading } = useIsAdmin();
 
   const urlCode = searchParams.get("code");
   const urlWarehouse = searchParams.get("warehouse") as "PRM" | "REALE" | null;

@@ -1,5 +1,6 @@
 import { createClient } from "../../../_lib/supabase/server";
 import { NextResponse } from "next/server";
+import { loadServerAdminAccess } from "../../../_lib/admin-access";
 
 export async function POST() {
   try {
@@ -8,9 +9,9 @@ export async function POST() {
     if (!user) {
       return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
     }
-    const { data: isAdm, error: errAdmin } = await supabase.rpc("is_admin");
-    if (errAdmin || !isAdm) {
-      return NextResponse.json({ error: "Solo admin" }, { status: 403 });
+    const access = await loadServerAdminAccess(supabase);
+    if (!access.isSuperAdmin) {
+      return NextResponse.json({ error: "Solo super admin" }, { status: 403 });
     }
 
     const { error } = await supabase.from("force_logout_events").insert({});

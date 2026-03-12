@@ -42,7 +42,7 @@ function BarcodeSvg({ value, options }: { value: string; options?: Record<string
 
 export default function EtichettePage() {
   const supabase = createClient();
-  const { isAdmin, loading: adminLoading } = useIsAdmin();
+  const { canManageMaterials: isAdmin, loading: adminLoading } = useIsAdmin();
 
   const [items, setItems] = useState<ItemRow[]>([]);
   const [shelves, setShelves] = useState<Record<string, Record<string, { shelf: string; place: string; barcode: string }>>>({});

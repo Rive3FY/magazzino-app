@@ -35,6 +35,7 @@ type MovementFormState = {
   equipment_id: string;
   type: "OUT";
   note: string;
+  destination: string;
   assigned_to_name: string;
   assigned_to_email: string;
   assigned_to_badge: string;
@@ -66,6 +67,7 @@ const emptyForm: MovementFormState = {
   equipment_id: "",
   type: "OUT",
   note: "",
+  destination: "",
   assigned_to_name: "",
   assigned_to_email: "",
   assigned_to_badge: "",
@@ -76,17 +78,11 @@ function normalizeNullable(value: string) {
   return trimmed ? trimmed : null;
 }
 
-function describeError(error: unknown) {
+function describeError(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;
   if (error && typeof error === "object") {
-    const maybe = error as {
-      message?: unknown;
-      details?: unknown;
-      hint?: unknown;
-      code?: unknown;
-      error_description?: unknown;
-    };
+    const maybe = error as Record<string, unknown>;
     const parts = [
       maybe.message,
       maybe.details,
@@ -94,15 +90,26 @@ function describeError(error: unknown) {
       maybe.code,
       maybe.error_description,
     ]
-      .filter((value) => typeof value === "string" && value.trim())
-      .map((value) => String(value).trim());
-
+      .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+      .map((v) => String(v).trim());
     if (parts.length > 0) return parts.join(" | ");
 
     try {
       const raw = JSON.stringify(error);
       if (raw && raw !== "{}") return raw;
-    } catch {}
+    } catch {
+      /* ignore */
+    }
+    try {
+      const keys = Object.getOwnPropertyNames(error);
+      const extras = keys
+        .filter((k) => !["message", "details", "hint", "code"].includes(k))
+        .map((k) => `${k}: ${String((error as Record<string, unknown>)[k])}`)
+        .filter((s) => s.length < 200);
+      if (extras.length > 0) return extras.join("; ");
+    } catch {
+      /* ignore */
+    }
   }
   return "errore sconosciuto";
 }
@@ -147,7 +154,8 @@ function getMovementResolution(row: EquipmentMovementRow) {
 export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const searchParams = useSearchParams();
   const { user, loading: authLoading, approved } = useAuth();
-  const { isAdmin } = useIsAdmin();
+  const access = useIsAdmin();
+  const isAdmin = area === "LINEE" ? access.canManageEquipmentLinee : access.canManageEquipmentStazioni;
   const toast = useToast();
   const initialAssetId = searchParams.get("asset") ?? "";
 
@@ -164,6 +172,8 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const [cartOpen, setCartOpen] = useState(false);
   const [cart, setCart] = useState<string[]>([]);
   const [cartNote, setCartNote] = useState("");
+  const [cartDestination, setCartDestination] = useState("");
+  const [cartInterventionPlanNumber, setCartInterventionPlanNumber] = useState("");
   const [profileInfo, setProfileInfo] = useState<UserProfileInfo | null>(null);
   const [cameraScanning, setCameraScanning] = useState(false);
   const [searchByNfcScanning, setSearchByNfcScanning] = useState(false);
@@ -506,8 +516,12 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       setMsg("Il carrello è vuoto.");
       return;
     }
-    if (!cartNote.trim()) {
-      setMsg("Le note sono obbligatorie.");
+    if (!cartDestination.trim()) {
+      setMsg("La destinazione è obbligatoria.");
+      return;
+    }
+    if (!cartInterventionPlanNumber.trim()) {
+      setMsg("Il numero piano d'intervento è obbligatorio nel prelievo multiplo.");
       return;
     }
     if (!profileInfo?.fullName || !profileInfo.badge) {
@@ -541,6 +555,8 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           type: "OUT",
           status: "OPEN",
           note: normalizeNullable(cartNote),
+          destination: normalizeNullable(cartDestination),
+          intervention_plan_number: normalizeNullable(cartInterventionPlanNumber),
           created_by: user.id,
           created_by_name: profileInfo.fullName,
           created_by_email: user.email ?? null,
@@ -564,6 +580,8 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
       setCart([]);
       setCartNote("");
+      setCartDestination("");
+      setCartInterventionPlanNumber("");
       setCartOpen(false);
       setScanMode("NORMAL");
       toast.success("Prelievo multiplo registrato");
@@ -606,6 +624,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       type: "OUT",
       status: "OPEN",
       note: normalizeNullable(form.note),
+      destination: normalizeNullable(form.destination),
       created_by: user?.id ?? null,
       created_by_name: profileInfo?.fullName || user?.email || null,
       created_by_email: user?.email ?? null,
@@ -626,8 +645,9 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     });
 
     if (error) {
-      console.error("equipment movement create error:", error);
-      setMsg("Registrazione movimento non riuscita: " + describeError(error));
+      const errMsg = describeError(error);
+      console.error("equipment movement create error:", errMsg, error);
+      setMsg("Registrazione movimento non riuscita: " + errMsg);
       setSaving(false);
       return;
     }
@@ -636,6 +656,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     setForm((prev) => ({
       ...prev,
       note: "",
+      destination: "",
     }));
     await loadData();
     setSaving(false);
@@ -643,6 +664,47 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
   function canEditRow(row: EquipmentMovementRow) {
     return sameUser(row.created_by, user?.id) || isAdmin;
+  }
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function deleteMovement(row: EquipmentMovementRow) {
+    if (!isAdmin) return;
+    const asset = assetMap.get(row.equipment_id);
+    const label = row.movement_group_id
+      ? `Prelievo multiplo (${history.filter((m) => m.movement_group_id === row.movement_group_id).length} attrezzature)`
+      : asset
+        ? `${asset.serial_number || asset.asset_code} - ${asset.name}`
+        : row.equipment_id;
+    if (!window.confirm(`Eliminare il movimento "${label}"?\n\nLe attrezzature coinvolte torneranno disponibili.`)) return;
+
+    setDeletingId(row.id);
+    setMsg(null);
+
+    try {
+      if (row.movement_group_id) {
+        const { error } = await supabase
+          .from("equipment_movements")
+          .delete()
+          .eq("movement_group_id", row.movement_group_id)
+          .eq("equipment_area", area);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("equipment_movements")
+          .delete()
+          .eq("id", row.id)
+          .eq("equipment_area", area);
+        if (error) throw error;
+      }
+      toast.success("Movimento eliminato");
+      await loadData();
+    } catch (error: unknown) {
+      const message = describeError(error);
+      setMsg("Eliminazione non riuscita: " + message);
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   function closeModal() {
@@ -900,7 +962,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           </div>
 
           <div style={{ minWidth: 0 }}>
-            <label className="label" htmlFor={`move-note-${area}`}>Note *</label>
+            <label className="label" htmlFor={`move-note-${area}`}>Note</label>
             <input
               id={`move-note-${area}`}
               className="input"
@@ -913,6 +975,34 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
               placeholder="Commessa / reparto / motivo uscita"
             />
           </div>
+
+          <div style={{ minWidth: 0 }}>
+            <label className="label" htmlFor={`move-destination-${area}`}>Destinazione *</label>
+            <input
+              id={`move-destination-${area}`}
+              className="input"
+              value={scanMode === "CART" ? cartDestination : form.destination}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (scanMode === "CART") setCartDestination(value);
+                else setForm((prev) => ({ ...prev, destination: value }));
+              }}
+              placeholder="Reparto / linea / stazione di utilizzo"
+            />
+          </div>
+
+          {scanMode === "CART" && (
+            <div style={{ minWidth: 0 }}>
+              <label className="label" htmlFor={`move-intervention-plan-${area}`}>Numero piano d&apos;intervento *</label>
+              <input
+                id={`move-intervention-plan-${area}`}
+                className="input"
+                value={cartInterventionPlanNumber}
+                onChange={(e) => setCartInterventionPlanNumber(e.target.value)}
+                placeholder="Numero piano d'intervento"
+              />
+            </div>
+          )}
 
           <div style={{ minWidth: 0, display: "flex", alignItems: "end" }}>
             {scanMode === "CART" ? (
@@ -1043,21 +1133,23 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 <th>Assegnatario</th>
                 <th>Note</th>
                 <th>Inserito da</th>
+                {isAdmin && <th>Azioni</th>}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7}>Caricamento...</td>
+                  <td colSpan={isAdmin ? 8 : 7}>Caricamento...</td>
                 </tr>
               ) : openMovements.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>Nessun movimento aperto.</td>
+                  <td colSpan={isAdmin ? 8 : 7}>Nessun movimento aperto.</td>
                 </tr>
               ) : (
                 openMovements.map((row) => {
                   const asset = assetMap.get(row.equipment_id);
                   const title = row.movement_group_id ? "Clicca per chiudere / rettificare il gruppo" : "Clicca per chiudere / rettificare";
+                  const busy = deletingId === row.id;
                   return (
                     <tr
                       key={row.id}
@@ -1093,6 +1185,22 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                       </td>
                       <td>{row.note || "—"}</td>
                       <td>{row.created_by_name || row.created_by_email || "—"}</td>
+                      {isAdmin && (
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <button
+                            className="btn"
+                            disabled={busy}
+                            onClick={() => void deleteMovement(row)}
+                            style={{
+                              borderColor: "rgba(239,68,68,0.5)",
+                              background: "rgba(239,68,68,0.1)",
+                              color: "#991b1b",
+                            }}
+                          >
+                            {busy ? "Eliminazione..." : "Elimina"}
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })
@@ -1134,7 +1242,28 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
               <div style={{ fontWeight: 900, fontSize: 16 }}>
                 {closingGroup.length > 1 ? "Dettaglio gruppo / chiusura" : "Dettaglio movimento / chiusura"}
               </div>
-              <button className="btn" onClick={closeModal} type="button">Chiudi</button>
+              <div style={{ display: "flex", gap: 8 }}>
+                {isAdmin && (
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={saving}
+                    onClick={async () => {
+                      if (!closing) return;
+                      await deleteMovement(closing);
+                      closeModal();
+                    }}
+                    style={{
+                      borderColor: "rgba(239,68,68,0.5)",
+                      background: "rgba(239,68,68,0.1)",
+                      color: "#991b1b",
+                    }}
+                  >
+                    Elimina movimento
+                  </button>
+                )}
+                <button className="btn" onClick={closeModal} type="button">Chiudi</button>
+              </div>
             </div>
 
             {closingGroup.length <= 1 && (() => {

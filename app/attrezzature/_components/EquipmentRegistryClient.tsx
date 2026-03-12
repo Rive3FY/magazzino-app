@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../../_lib/supabase/client";
 import { useAuth } from "../../_lib/hooks/useAuth";
 import { useIsAdmin } from "../../_lib/hooks/useIsAdmin";
+import { useToast } from "../../_lib/ToastContext";
 import { fmtDateTime, toIsoEndOfDay, toIsoStartOfDay } from "../../_lib/utils";
 import {
   EQUIPMENT_AREA_LABELS,
@@ -52,7 +53,10 @@ function NfcIcon() {
 
 export default function EquipmentRegistryClient({ area, basePath }: Props) {
   const { user, loading: authLoading, approved } = useAuth();
-  const { loading: adminLoading } = useIsAdmin();
+  const access = useIsAdmin();
+  const adminLoading = access.loading;
+  const isAdmin = area === "LINEE" ? access.canManageEquipmentLinee : access.canManageEquipmentStazioni;
+  const toast = useToast();
 
   const [rows, setRows] = useState<EquipmentAssetRow[]>([]);
   const [history, setHistory] = useState<EquipmentMovementRow[]>([]);
@@ -199,6 +203,49 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     });
   }, [history, historyFrom, historyTo]);
 
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function deleteMovement(row: EquipmentMovementRow) {
+    if (!isAdmin) return;
+    const asset = rows.find((r) => r.id === row.equipment_id);
+    const groupCount = row.movement_group_id ? (historyGroupCountMap.get(row.movement_group_id) ?? 1) : 1;
+    const label =
+      groupCount > 1
+        ? `Prelievo multiplo (${groupCount} attrezzature)`
+        : asset
+          ? `${asset.serial_number || asset.asset_code} - ${asset.name}`
+          : row.equipment_id;
+    if (!window.confirm(`Eliminare il movimento "${label}"?\n\nLe attrezzature coinvolte torneranno disponibili.`)) return;
+
+    setDeletingId(row.id);
+    setMsg(null);
+
+    try {
+      if (row.movement_group_id) {
+        const { error } = await supabase
+          .from("equipment_movements")
+          .delete()
+          .eq("movement_group_id", row.movement_group_id)
+          .eq("equipment_area", area);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("equipment_movements")
+          .delete()
+          .eq("id", row.id)
+          .eq("equipment_area", area);
+        if (error) throw error;
+      }
+      toast.success("Movimento eliminato");
+      await loadAssets();
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      setMsg("Eliminazione non riuscita: " + (err?.message ?? "errore sconosciuto"));
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   function applyQuickResult(value: string, mode: "barcode" | "nfc") {
     const normalized = value.trim().toLowerCase();
     if (!normalized) return;
@@ -333,6 +380,11 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     <main className="panel" style={{ overflowX: "hidden" }}>
       <div className="pageBar">
         <div className="pageBarTitle">Attrezzature {areaLabel} - Dashboard</div>
+        <div className="pageBarActions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <a className="btn" href={`/api/attrezzature/registro-docx?area=${area}`}>
+            Scarica registro DOCX
+          </a>
+        </div>
       </div>
 
       <div className="card" style={{ padding: 12 }}>
@@ -594,22 +646,24 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                 <th>Note uscita</th>
                 <th>Note chiusura</th>
                 <th>Inserito da</th>
+                {isAdmin && <th>Azioni</th>}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8}>Caricamento...</td>
+                  <td colSpan={isAdmin ? 9 : 8}>Caricamento...</td>
                 </tr>
               ) : displayHistory.length === 0 ? (
                 <tr>
-                  <td colSpan={8}>Nessun movimento disponibile.</td>
+                  <td colSpan={isAdmin ? 9 : 8}>Nessun movimento disponibile.</td>
                 </tr>
               ) : (
                 displayHistory.map((row) => {
                   const asset = rows.find((item) => item.id === row.equipment_id);
                   const status = row.status ?? "OPEN";
                   const groupCount = row.movement_group_id ? (historyGroupCountMap.get(row.movement_group_id) ?? 1) : 1;
+                  const busy = deletingId === row.id;
                   return (
                     <tr
                       key={row.id}
@@ -646,6 +700,22 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                       <td>{row.note || "—"}</td>
                       <td>{row.close_note || "—"}</td>
                       <td>{row.created_by_name || row.created_by_email || "—"}</td>
+                      {isAdmin && (
+                        <td>
+                          <button
+                            className="btn"
+                            disabled={busy}
+                            onClick={() => void deleteMovement(row)}
+                            style={{
+                              borderColor: "rgba(239,68,68,0.5)",
+                              background: "rgba(239,68,68,0.1)",
+                              color: "#991b1b",
+                            }}
+                          >
+                            {busy ? "Eliminazione..." : "Elimina"}
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })

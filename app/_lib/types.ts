@@ -102,6 +102,8 @@ export type EquipmentMovementRow = {
   type: EquipmentMovementType;
   status: EquipmentMovementStatus | null;
   note: string | null;
+  destination: string | null;
+  intervention_plan_number: string | null;
   created_by: string | null;
   created_by_name: string | null;
   created_by_email: string | null;

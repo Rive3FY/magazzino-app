@@ -20,9 +20,18 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   badge_number text,
   approved boolean DEFAULT false,
   is_admin boolean DEFAULT false,
+  is_super_admin boolean DEFAULT false,
+  is_materials_admin boolean DEFAULT false,
+  is_equipment_linee_admin boolean DEFAULT false,
+  is_equipment_stazioni_admin boolean DEFAULT false,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
+
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS is_super_admin boolean DEFAULT false;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS is_materials_admin boolean DEFAULT false;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS is_equipment_linee_admin boolean DEFAULT false;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS is_equipment_stazioni_admin boolean DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS public.items (
   code text PRIMARY KEY,
@@ -120,13 +129,80 @@ ALTER TABLE movements ADD COLUMN IF NOT EXISTS movement_group_id uuid;
 CREATE INDEX IF NOT EXISTS idx_movements_group_id ON movements(movement_group_id) WHERE movement_group_id IS NOT NULL;
 
 -- -----------------------------------------------------------------------------
--- 1. FUNZIONE is_admin()
+-- 1. FUNZIONI RUOLI ADMIN
 -- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.is_super_admin()
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$
+  SELECT COALESCE(
+    (
+      SELECT COALESCE(is_super_admin, false) OR COALESCE(is_admin, false)
+      FROM profiles
+      WHERE id = auth.uid()
+    ),
+    false
+  ) = true;
+$$;
+GRANT EXECUTE ON FUNCTION public.is_super_admin() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.is_materials_admin()
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$
+  SELECT COALESCE((SELECT is_materials_admin FROM profiles WHERE id = auth.uid()), false) = true;
+$$;
+GRANT EXECUTE ON FUNCTION public.is_materials_admin() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.is_equipment_linee_admin()
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$
+  SELECT COALESCE((SELECT is_equipment_linee_admin FROM profiles WHERE id = auth.uid()), false) = true;
+$$;
+GRANT EXECUTE ON FUNCTION public.is_equipment_linee_admin() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.is_equipment_stazioni_admin()
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$
+  SELECT COALESCE((SELECT is_equipment_stazioni_admin FROM profiles WHERE id = auth.uid()), false) = true;
+$$;
+GRANT EXECUTE ON FUNCTION public.is_equipment_stazioni_admin() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.can_manage_materials()
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$
+  SELECT public.is_super_admin() OR public.is_materials_admin();
+$$;
+GRANT EXECUTE ON FUNCTION public.can_manage_materials() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.can_manage_equipment_linee()
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$
+  SELECT public.is_super_admin() OR public.is_equipment_linee_admin();
+$$;
+GRANT EXECUTE ON FUNCTION public.can_manage_equipment_linee() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.can_manage_equipment_stazioni()
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$
+  SELECT public.is_super_admin() OR public.is_equipment_stazioni_admin();
+$$;
+GRANT EXECUTE ON FUNCTION public.can_manage_equipment_stazioni() TO authenticated;
+
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
 AS $$
-  SELECT COALESCE((SELECT is_admin FROM profiles WHERE id = auth.uid()), false) = true;
+  SELECT
+    public.is_super_admin()
+    OR public.is_materials_admin()
+    OR public.is_equipment_linee_admin()
+    OR public.is_equipment_stazioni_admin();
 $$;
 GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
 
@@ -142,7 +218,7 @@ DROP POLICY IF EXISTS "profiles_update_policy" ON profiles;
 DROP POLICY IF EXISTS "Enable read for users" ON profiles;
 DROP POLICY IF EXISTS "Enable update for users" ON profiles;
 CREATE POLICY "profiles_select_own" ON profiles FOR SELECT TO authenticated USING (id = auth.uid());
-CREATE POLICY "profiles_select_admin" ON profiles FOR SELECT TO authenticated USING (is_admin());
+CREATE POLICY "profiles_select_admin" ON profiles FOR SELECT TO authenticated USING (is_super_admin());
 CREATE POLICY "profiles_update_own" ON profiles FOR UPDATE TO authenticated USING (id = auth.uid()) WITH CHECK (id = auth.uid());
 
 -- -----------------------------------------------------------------------------
@@ -154,8 +230,8 @@ DROP POLICY IF EXISTS "items_insert_admin" ON items;
 DROP POLICY IF EXISTS "items_update_admin" ON items;
 DROP POLICY IF EXISTS "items_upsert_admin" ON items;
 CREATE POLICY "items_select_all" ON items FOR SELECT TO authenticated USING (true);
-CREATE POLICY "items_insert_admin" ON items FOR INSERT TO authenticated WITH CHECK (is_admin());
-CREATE POLICY "items_update_admin" ON items FOR UPDATE TO authenticated USING (is_admin()) WITH CHECK (is_admin());
+CREATE POLICY "items_insert_admin" ON items FOR INSERT TO authenticated WITH CHECK (can_manage_materials());
+CREATE POLICY "items_update_admin" ON items FOR UPDATE TO authenticated USING (can_manage_materials()) WITH CHECK (can_manage_materials());
 
 -- -----------------------------------------------------------------------------
 -- 4. RLS - ITEM_STOCKS
@@ -166,7 +242,7 @@ DROP POLICY IF EXISTS "item_stocks_insert_admin" ON item_stocks;
 DROP POLICY IF EXISTS "item_stocks_update_admin" ON item_stocks;
 DROP POLICY IF EXISTS "item_stocks_modify_admin" ON item_stocks;
 CREATE POLICY "item_stocks_select_all" ON item_stocks FOR SELECT TO authenticated USING (true);
-CREATE POLICY "item_stocks_modify_admin" ON item_stocks FOR ALL TO authenticated USING (is_admin()) WITH CHECK (is_admin());
+CREATE POLICY "item_stocks_modify_admin" ON item_stocks FOR ALL TO authenticated USING (can_manage_materials()) WITH CHECK (can_manage_materials());
 
 -- -----------------------------------------------------------------------------
 -- 5. RLS - MOVEMENTS
@@ -183,9 +259,9 @@ DROP POLICY IF EXISTS "movements_delete_policy" ON movements;
 CREATE POLICY "movements_select_all" ON movements FOR SELECT TO authenticated USING (true);
 CREATE POLICY "movements_insert_auth" ON movements FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY "movements_update_creator_or_admin" ON movements FOR UPDATE TO authenticated
-  USING ((created_by IS NOT NULL AND created_by::text = auth.uid()::text) OR is_admin())
-  WITH CHECK ((created_by IS NOT NULL AND created_by::text = auth.uid()::text) OR is_admin());
-CREATE POLICY "movements_delete_admin" ON movements FOR DELETE TO authenticated USING (is_admin());
+  USING ((created_by IS NOT NULL AND created_by::text = auth.uid()::text) OR can_manage_materials())
+  WITH CHECK ((created_by IS NOT NULL AND created_by::text = auth.uid()::text) OR can_manage_materials());
+CREATE POLICY "movements_delete_admin" ON movements FOR DELETE TO authenticated USING (can_manage_materials());
 
 -- -----------------------------------------------------------------------------
 -- 6. RLS - REFERENTS
@@ -199,9 +275,9 @@ DROP POLICY IF EXISTS "Allow admin update referents" ON referents;
 DROP POLICY IF EXISTS "referents_update_policy" ON referents;
 DROP POLICY IF EXISTS "Enable update for admins" ON referents;
 CREATE POLICY "referents_select_all" ON referents FOR SELECT TO authenticated USING (true);
-CREATE POLICY "referents_insert_admin" ON referents FOR INSERT TO authenticated WITH CHECK (is_admin());
-CREATE POLICY "referents_update_admin" ON referents FOR UPDATE TO authenticated USING (is_admin()) WITH CHECK (is_admin());
-CREATE POLICY "referents_delete_admin" ON referents FOR DELETE TO authenticated USING (is_admin());
+CREATE POLICY "referents_insert_admin" ON referents FOR INSERT TO authenticated WITH CHECK (can_manage_materials());
+CREATE POLICY "referents_update_admin" ON referents FOR UPDATE TO authenticated USING (can_manage_materials()) WITH CHECK (can_manage_materials());
+CREATE POLICY "referents_delete_admin" ON referents FOR DELETE TO authenticated USING (can_manage_materials());
 
 -- -----------------------------------------------------------------------------
 -- 7. RLS - AUDIT_LOG
@@ -211,7 +287,7 @@ DROP POLICY IF EXISTS "audit_log_select_admin" ON audit_log;
 DROP POLICY IF EXISTS "audit_log_insert_auth" ON audit_log;
 DROP POLICY IF EXISTS "audit_log_select_policy" ON audit_log;
 DROP POLICY IF EXISTS "audit_log_insert_policy" ON audit_log;
-CREATE POLICY "audit_log_select_admin" ON audit_log FOR SELECT TO authenticated USING (is_admin());
+CREATE POLICY "audit_log_select_admin" ON audit_log FOR SELECT TO authenticated USING (is_super_admin());
 CREATE POLICY "audit_log_insert_auth" ON audit_log FOR INSERT TO authenticated WITH CHECK (true);
 
 -- -----------------------------------------------------------------------------
@@ -223,9 +299,9 @@ DROP POLICY IF EXISTS "excel_live_insert_admin" ON excel_live;
 DROP POLICY IF EXISTS "excel_live_update_admin" ON excel_live;
 DROP POLICY IF EXISTS "excel_live_delete_admin" ON excel_live;
 CREATE POLICY "excel_live_select_all" ON excel_live FOR SELECT TO authenticated USING (true);
-CREATE POLICY "excel_live_insert_admin" ON excel_live FOR INSERT TO authenticated WITH CHECK (is_admin());
-CREATE POLICY "excel_live_update_admin" ON excel_live FOR UPDATE TO authenticated USING (is_admin()) WITH CHECK (is_admin());
-CREATE POLICY "excel_live_delete_admin" ON excel_live FOR DELETE TO authenticated USING (is_admin());
+CREATE POLICY "excel_live_insert_admin" ON excel_live FOR INSERT TO authenticated WITH CHECK (can_manage_materials());
+CREATE POLICY "excel_live_update_admin" ON excel_live FOR UPDATE TO authenticated USING (can_manage_materials()) WITH CHECK (can_manage_materials());
+CREATE POLICY "excel_live_delete_admin" ON excel_live FOR DELETE TO authenticated USING (can_manage_materials());
 
 -- -----------------------------------------------------------------------------
 -- 9. RLS - EXCEL_ORIGINAL
@@ -234,9 +310,9 @@ ALTER TABLE excel_original ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "excel_original_select_admin" ON excel_original;
 DROP POLICY IF EXISTS "excel_original_insert_admin" ON excel_original;
 DROP POLICY IF EXISTS "excel_original_update_admin" ON excel_original;
-CREATE POLICY "excel_original_select_admin" ON excel_original FOR SELECT TO authenticated USING (is_admin());
-CREATE POLICY "excel_original_insert_admin" ON excel_original FOR INSERT TO authenticated WITH CHECK (is_admin());
-CREATE POLICY "excel_original_update_admin" ON excel_original FOR UPDATE TO authenticated USING (is_admin()) WITH CHECK (is_admin());
+CREATE POLICY "excel_original_select_admin" ON excel_original FOR SELECT TO authenticated USING (can_manage_materials());
+CREATE POLICY "excel_original_insert_admin" ON excel_original FOR INSERT TO authenticated WITH CHECK (can_manage_materials());
+CREATE POLICY "excel_original_update_admin" ON excel_original FOR UPDATE TO authenticated USING (can_manage_materials()) WITH CHECK (can_manage_materials());
 
 -- -----------------------------------------------------------------------------
 -- 10. Trigger profilo alla registrazione
@@ -263,7 +339,7 @@ CREATE TABLE IF NOT EXISTS public.force_logout_events (id uuid PRIMARY KEY DEFAU
 ALTER TABLE public.force_logout_events ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "force_logout_insert_admin" ON public.force_logout_events;
 DROP POLICY IF EXISTS "force_logout_select_auth" ON public.force_logout_events;
-CREATE POLICY "force_logout_insert_admin" ON public.force_logout_events FOR INSERT TO authenticated WITH CHECK (public.is_admin());
+CREATE POLICY "force_logout_insert_admin" ON public.force_logout_events FOR INSERT TO authenticated WITH CHECK (public.is_super_admin());
 CREATE POLICY "force_logout_select_auth" ON public.force_logout_events FOR SELECT TO authenticated USING (true);
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN CREATE PUBLICATION supabase_realtime; END IF; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.force_logout_events; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
@@ -284,9 +360,9 @@ DROP POLICY IF EXISTS "material_shelves_insert_admin" ON public.material_shelves
 DROP POLICY IF EXISTS "material_shelves_update_admin" ON public.material_shelves;
 DROP POLICY IF EXISTS "material_shelves_delete_admin" ON public.material_shelves;
 CREATE POLICY "material_shelves_select_all" ON public.material_shelves FOR SELECT TO authenticated USING (true);
-CREATE POLICY "material_shelves_insert_admin" ON public.material_shelves FOR INSERT TO authenticated WITH CHECK (public.is_admin());
-CREATE POLICY "material_shelves_update_admin" ON public.material_shelves FOR UPDATE TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
-CREATE POLICY "material_shelves_delete_admin" ON public.material_shelves FOR DELETE TO authenticated USING (public.is_admin());
+CREATE POLICY "material_shelves_insert_admin" ON public.material_shelves FOR INSERT TO authenticated WITH CHECK (public.can_manage_materials());
+CREATE POLICY "material_shelves_update_admin" ON public.material_shelves FOR UPDATE TO authenticated USING (public.can_manage_materials()) WITH CHECK (public.can_manage_materials());
+CREATE POLICY "material_shelves_delete_admin" ON public.material_shelves FOR DELETE TO authenticated USING (public.can_manage_materials());
 
 -- -----------------------------------------------------------------------------
 -- 13. Fix returned_qty
@@ -313,28 +389,133 @@ DROP POLICY IF EXISTS "excel_live_requests_select_admin" ON public.excel_live_re
 DROP POLICY IF EXISTS "excel_live_requests_insert_own" ON public.excel_live_requests;
 DROP POLICY IF EXISTS "excel_live_requests_update_admin" ON public.excel_live_requests;
 CREATE POLICY "excel_live_requests_select_own" ON public.excel_live_requests FOR SELECT TO authenticated USING (requested_by = auth.uid());
-CREATE POLICY "excel_live_requests_select_admin" ON public.excel_live_requests FOR SELECT TO authenticated USING (public.is_admin());
+CREATE POLICY "excel_live_requests_select_admin" ON public.excel_live_requests FOR SELECT TO authenticated USING (public.can_manage_materials());
 CREATE POLICY "excel_live_requests_insert_own" ON public.excel_live_requests FOR INSERT TO authenticated WITH CHECK (requested_by = auth.uid());
-CREATE POLICY "excel_live_requests_update_admin" ON public.excel_live_requests FOR UPDATE TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
+CREATE POLICY "excel_live_requests_update_admin" ON public.excel_live_requests FOR UPDATE TO authenticated USING (public.can_manage_materials()) WITH CHECK (public.can_manage_materials());
 
 -- -----------------------------------------------------------------------------
 -- 15. RPC - admin_list_users
 -- -----------------------------------------------------------------------------
 DROP FUNCTION IF EXISTS public.admin_list_users();
 CREATE OR REPLACE FUNCTION public.admin_list_users()
-RETURNS TABLE (id uuid, user_id uuid, email text, approved boolean, is_admin boolean, badge_number text, first_name text, last_name text, created_at timestamptz, profile_updated_at timestamptz)
+RETURNS TABLE (
+  id uuid,
+  user_id uuid,
+  email text,
+  approved boolean,
+  is_super_admin boolean,
+  is_materials_admin boolean,
+  is_equipment_linee_admin boolean,
+  is_equipment_stazioni_admin boolean,
+  badge_number text,
+  first_name text,
+  last_name text,
+  created_at timestamptz,
+  profile_updated_at timestamptz
+)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 AS $$
 BEGIN
-  IF NOT public.is_admin() THEN RAISE EXCEPTION 'not_admin'; END IF;
+  IF NOT public.is_super_admin() THEN RAISE EXCEPTION 'not_admin'; END IF;
   RETURN QUERY
-  SELECT u.id, u.id AS user_id, u.email::text, COALESCE(p.approved, false), COALESCE(p.is_admin, false), p.badge_number, p.first_name, p.last_name, u.created_at, p.updated_at AS profile_updated_at
+  SELECT
+    u.id,
+    u.id AS user_id,
+    u.email::text,
+    COALESCE(p.approved, false),
+    COALESCE(p.is_super_admin, false) OR COALESCE(p.is_admin, false),
+    COALESCE(p.is_materials_admin, false),
+    COALESCE(p.is_equipment_linee_admin, false),
+    COALESCE(p.is_equipment_stazioni_admin, false),
+    p.badge_number,
+    p.first_name,
+    p.last_name,
+    u.created_at,
+    p.updated_at AS profile_updated_at
   FROM auth.users u
   LEFT JOIN public.profiles p ON p.id = u.id
   ORDER BY u.created_at DESC;
 END;
 $$;
 GRANT EXECUTE ON FUNCTION public.admin_list_users() TO authenticated;
+
+DROP FUNCTION IF EXISTS public.admin_list_materials_admins();
+CREATE OR REPLACE FUNCTION public.admin_list_materials_admins()
+RETURNS TABLE (id uuid, user_id uuid, email text, approved boolean, is_materials_admin boolean, badge_number text, first_name text, last_name text, created_at timestamptz, profile_updated_at timestamptz)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  IF NOT public.can_manage_materials() THEN RAISE EXCEPTION 'not_admin'; END IF;
+  RETURN QUERY
+  SELECT
+    u.id,
+    u.id AS user_id,
+    u.email::text,
+    COALESCE(p.approved, false),
+    COALESCE(p.is_materials_admin, false),
+    p.badge_number,
+    p.first_name,
+    p.last_name,
+    u.created_at,
+    p.updated_at AS profile_updated_at
+  FROM auth.users u
+  LEFT JOIN public.profiles p ON p.id = u.id
+  ORDER BY u.created_at DESC;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_list_materials_admins() TO authenticated;
+
+DROP FUNCTION IF EXISTS public.admin_list_linee_admins();
+CREATE OR REPLACE FUNCTION public.admin_list_linee_admins()
+RETURNS TABLE (id uuid, user_id uuid, email text, approved boolean, is_equipment_linee_admin boolean, badge_number text, first_name text, last_name text, created_at timestamptz, profile_updated_at timestamptz)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  IF NOT public.can_manage_equipment_linee() THEN RAISE EXCEPTION 'not_admin'; END IF;
+  RETURN QUERY
+  SELECT
+    u.id,
+    u.id AS user_id,
+    u.email::text,
+    COALESCE(p.approved, false),
+    COALESCE(p.is_equipment_linee_admin, false),
+    p.badge_number,
+    p.first_name,
+    p.last_name,
+    u.created_at,
+    p.updated_at AS profile_updated_at
+  FROM auth.users u
+  LEFT JOIN public.profiles p ON p.id = u.id
+  ORDER BY u.created_at DESC;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_list_linee_admins() TO authenticated;
+
+DROP FUNCTION IF EXISTS public.admin_list_stazioni_admins();
+CREATE OR REPLACE FUNCTION public.admin_list_stazioni_admins()
+RETURNS TABLE (id uuid, user_id uuid, email text, approved boolean, is_equipment_stazioni_admin boolean, badge_number text, first_name text, last_name text, created_at timestamptz, profile_updated_at timestamptz)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  IF NOT public.can_manage_equipment_stazioni() THEN RAISE EXCEPTION 'not_admin'; END IF;
+  RETURN QUERY
+  SELECT
+    u.id,
+    u.id AS user_id,
+    u.email::text,
+    COALESCE(p.approved, false),
+    COALESCE(p.is_equipment_stazioni_admin, false),
+    p.badge_number,
+    p.first_name,
+    p.last_name,
+    u.created_at,
+    p.updated_at AS profile_updated_at
+  FROM auth.users u
+  LEFT JOIN public.profiles p ON p.id = u.id
+  ORDER BY u.created_at DESC;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_list_stazioni_admins() TO authenticated;
 
 -- -----------------------------------------------------------------------------
 -- 17. RPC - set_approved
@@ -344,7 +525,7 @@ CREATE OR REPLACE FUNCTION public.set_approved(p_user uuid, p_approved boolean)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 AS $$
 BEGIN
-  IF NOT public.is_admin() THEN RAISE EXCEPTION 'not_admin'; END IF;
+  IF NOT public.is_super_admin() THEN RAISE EXCEPTION 'not_admin'; END IF;
   INSERT INTO public.profiles (id, approved, updated_at) VALUES (p_user, p_approved, now())
   ON CONFLICT (id) DO UPDATE SET approved = p_approved, updated_at = now();
 END;
@@ -359,9 +540,9 @@ CREATE OR REPLACE FUNCTION public.set_admin(p_user uuid, p_is_admin boolean)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 AS $$
 BEGIN
-  IF NOT public.is_admin() THEN RAISE EXCEPTION 'not_admin'; END IF;
-  INSERT INTO public.profiles (id, is_admin, updated_at) VALUES (p_user, p_is_admin, now())
-  ON CONFLICT (id) DO UPDATE SET is_admin = p_is_admin, updated_at = now();
+  IF NOT public.is_super_admin() THEN RAISE EXCEPTION 'not_admin'; END IF;
+  INSERT INTO public.profiles (id, is_admin, is_super_admin, updated_at) VALUES (p_user, p_is_admin, p_is_admin, now())
+  ON CONFLICT (id) DO UPDATE SET is_admin = p_is_admin, is_super_admin = p_is_admin, updated_at = now();
 END;
 $$;
 GRANT EXECUTE ON FUNCTION public.set_admin(uuid, boolean) TO authenticated;
@@ -374,9 +555,9 @@ CREATE OR REPLACE FUNCTION public.admin_grant_admin(target_user uuid)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 AS $$
 BEGIN
-  IF NOT public.is_admin() THEN RAISE EXCEPTION 'not_admin'; END IF;
-  INSERT INTO public.profiles (id, is_admin, updated_at) VALUES (target_user, true, now())
-  ON CONFLICT (id) DO UPDATE SET is_admin = true, updated_at = now();
+  IF NOT public.is_super_admin() THEN RAISE EXCEPTION 'not_admin'; END IF;
+  INSERT INTO public.profiles (id, is_admin, is_super_admin, updated_at) VALUES (target_user, true, true, now())
+  ON CONFLICT (id) DO UPDATE SET is_admin = true, is_super_admin = true, updated_at = now();
 END;
 $$;
 GRANT EXECUTE ON FUNCTION public.admin_grant_admin(uuid) TO authenticated;
@@ -390,11 +571,11 @@ RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 AS $$
 DECLARE admin_count int;
 BEGIN
-  IF NOT public.is_admin() THEN RAISE EXCEPTION 'not_admin'; END IF;
+  IF NOT public.is_super_admin() THEN RAISE EXCEPTION 'not_admin'; END IF;
   IF target_user = auth.uid() THEN RAISE EXCEPTION 'cannot_revoke_self'; END IF;
-  SELECT COUNT(*)::int INTO admin_count FROM public.profiles WHERE is_admin = true;
+  SELECT COUNT(*)::int INTO admin_count FROM public.profiles WHERE COALESCE(is_super_admin, false) = true OR COALESCE(is_admin, false) = true;
   IF admin_count <= 1 THEN RAISE EXCEPTION 'cannot_remove_last_admin'; END IF;
-  UPDATE public.profiles SET is_admin = false, updated_at = now() WHERE id = target_user;
+  UPDATE public.profiles SET is_admin = false, is_super_admin = false, updated_at = now() WHERE id = target_user;
 END;
 $$;
 GRANT EXECUTE ON FUNCTION public.admin_revoke_admin(uuid) TO authenticated;
@@ -414,6 +595,42 @@ END;
 $$;
 GRANT EXECUTE ON FUNCTION public.admin_update_profile(uuid, text, text, text) TO authenticated;
 
+DROP FUNCTION IF EXISTS public.set_materials_admin(uuid, boolean);
+CREATE OR REPLACE FUNCTION public.set_materials_admin(target_user uuid, enabled boolean)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  IF NOT public.can_manage_materials() THEN RAISE EXCEPTION 'not_admin'; END IF;
+  INSERT INTO public.profiles (id, is_materials_admin, updated_at) VALUES (target_user, enabled, now())
+  ON CONFLICT (id) DO UPDATE SET is_materials_admin = enabled, updated_at = now();
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.set_materials_admin(uuid, boolean) TO authenticated;
+
+DROP FUNCTION IF EXISTS public.set_equipment_linee_admin(uuid, boolean);
+CREATE OR REPLACE FUNCTION public.set_equipment_linee_admin(target_user uuid, enabled boolean)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  IF NOT public.can_manage_equipment_linee() THEN RAISE EXCEPTION 'not_admin'; END IF;
+  INSERT INTO public.profiles (id, is_equipment_linee_admin, updated_at) VALUES (target_user, enabled, now())
+  ON CONFLICT (id) DO UPDATE SET is_equipment_linee_admin = enabled, updated_at = now();
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.set_equipment_linee_admin(uuid, boolean) TO authenticated;
+
+DROP FUNCTION IF EXISTS public.set_equipment_stazioni_admin(uuid, boolean);
+CREATE OR REPLACE FUNCTION public.set_equipment_stazioni_admin(target_user uuid, enabled boolean)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  IF NOT public.can_manage_equipment_stazioni() THEN RAISE EXCEPTION 'not_admin'; END IF;
+  INSERT INTO public.profiles (id, is_equipment_stazioni_admin, updated_at) VALUES (target_user, enabled, now())
+  ON CONFLICT (id) DO UPDATE SET is_equipment_stazioni_admin = enabled, updated_at = now();
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.set_equipment_stazioni_admin(uuid, boolean) TO authenticated;
+
 -- -----------------------------------------------------------------------------
 -- 22. RPC - reset_magazzino
 -- -----------------------------------------------------------------------------
@@ -422,7 +639,7 @@ CREATE OR REPLACE FUNCTION public.reset_magazzino()
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 AS $$
 BEGIN
-  IF NOT public.is_admin() THEN RAISE EXCEPTION 'not_admin'; END IF;
+  IF NOT public.is_super_admin() THEN RAISE EXCEPTION 'not_admin'; END IF;
   DELETE FROM public.excel_live_requests;
   DELETE FROM public.movements;
   DELETE FROM public.excel_live;
@@ -485,8 +702,8 @@ CREATE INDEX IF NOT EXISTS idx_import_file_backups_warehouse ON public.import_fi
 ALTER TABLE public.import_file_backups ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "import_file_backups_select_admin" ON public.import_file_backups;
 DROP POLICY IF EXISTS "import_file_backups_insert_admin" ON public.import_file_backups;
-CREATE POLICY "import_file_backups_select_admin" ON public.import_file_backups FOR SELECT TO authenticated USING (public.is_admin());
-CREATE POLICY "import_file_backups_insert_admin" ON public.import_file_backups FOR INSERT TO authenticated WITH CHECK (public.is_admin());
+CREATE POLICY "import_file_backups_select_admin" ON public.import_file_backups FOR SELECT TO authenticated USING (public.can_manage_materials());
+CREATE POLICY "import_file_backups_insert_admin" ON public.import_file_backups FOR INSERT TO authenticated WITH CHECK (public.can_manage_materials());
 
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES (
@@ -543,9 +760,25 @@ DROP POLICY IF EXISTS "equipment_assets_insert_admin" ON public.equipment_assets
 DROP POLICY IF EXISTS "equipment_assets_update_admin" ON public.equipment_assets;
 DROP POLICY IF EXISTS "equipment_assets_delete_admin" ON public.equipment_assets;
 CREATE POLICY "equipment_assets_select_all" ON public.equipment_assets FOR SELECT TO authenticated USING (true);
-CREATE POLICY "equipment_assets_insert_admin" ON public.equipment_assets FOR INSERT TO authenticated WITH CHECK (public.is_admin());
-CREATE POLICY "equipment_assets_update_admin" ON public.equipment_assets FOR UPDATE TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
-CREATE POLICY "equipment_assets_delete_admin" ON public.equipment_assets FOR DELETE TO authenticated USING (public.is_admin());
+CREATE POLICY "equipment_assets_insert_admin" ON public.equipment_assets FOR INSERT TO authenticated
+  WITH CHECK (
+    (equipment_area = 'LINEE' AND public.can_manage_equipment_linee())
+    OR (equipment_area = 'STAZIONI' AND public.can_manage_equipment_stazioni())
+  );
+CREATE POLICY "equipment_assets_update_admin" ON public.equipment_assets FOR UPDATE TO authenticated
+  USING (
+    (equipment_area = 'LINEE' AND public.can_manage_equipment_linee())
+    OR (equipment_area = 'STAZIONI' AND public.can_manage_equipment_stazioni())
+  )
+  WITH CHECK (
+    (equipment_area = 'LINEE' AND public.can_manage_equipment_linee())
+    OR (equipment_area = 'STAZIONI' AND public.can_manage_equipment_stazioni())
+  );
+CREATE POLICY "equipment_assets_delete_admin" ON public.equipment_assets FOR DELETE TO authenticated
+  USING (
+    (equipment_area = 'LINEE' AND public.can_manage_equipment_linee())
+    OR (equipment_area = 'STAZIONI' AND public.can_manage_equipment_stazioni())
+  );
 
 CREATE TABLE IF NOT EXISTS public.equipment_movements (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -555,6 +788,8 @@ CREATE TABLE IF NOT EXISTS public.equipment_movements (
   type text NOT NULL DEFAULT 'OUT' CHECK (type IN ('OUT')),
   status text NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'CLOSED')),
   note text,
+  destination text,
+  intervention_plan_number text,
   created_by uuid REFERENCES auth.users(id),
   created_by_name text,
   created_by_email text,
@@ -583,9 +818,21 @@ DROP POLICY IF EXISTS "equipment_movements_delete_admin" ON public.equipment_mov
 CREATE POLICY "equipment_movements_select_all" ON public.equipment_movements FOR SELECT TO authenticated USING (true);
 CREATE POLICY "equipment_movements_insert_auth" ON public.equipment_movements FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY "equipment_movements_update_creator_or_admin" ON public.equipment_movements FOR UPDATE TO authenticated
-  USING ((created_by IS NOT NULL AND created_by::text = auth.uid()::text) OR public.is_admin())
-  WITH CHECK ((created_by IS NOT NULL AND created_by::text = auth.uid()::text) OR public.is_admin());
-CREATE POLICY "equipment_movements_delete_admin" ON public.equipment_movements FOR DELETE TO authenticated USING (public.is_admin());
+  USING (
+    (created_by IS NOT NULL AND created_by::text = auth.uid()::text)
+    OR (equipment_area = 'LINEE' AND public.can_manage_equipment_linee())
+    OR (equipment_area = 'STAZIONI' AND public.can_manage_equipment_stazioni())
+  )
+  WITH CHECK (
+    (created_by IS NOT NULL AND created_by::text = auth.uid()::text)
+    OR (equipment_area = 'LINEE' AND public.can_manage_equipment_linee())
+    OR (equipment_area = 'STAZIONI' AND public.can_manage_equipment_stazioni())
+  );
+CREATE POLICY "equipment_movements_delete_admin" ON public.equipment_movements FOR DELETE TO authenticated
+  USING (
+    (equipment_area = 'LINEE' AND public.can_manage_equipment_linee())
+    OR (equipment_area = 'STAZIONI' AND public.can_manage_equipment_stazioni())
+  );
 
 DROP FUNCTION IF EXISTS public.touch_equipment_assets_updated_at();
 CREATE OR REPLACE FUNCTION public.touch_equipment_assets_updated_at()
@@ -609,6 +856,7 @@ DROP FUNCTION IF EXISTS public.apply_equipment_movement();
 CREATE OR REPLACE FUNCTION public.apply_equipment_movement()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
@@ -712,6 +960,8 @@ BEGIN
       'status', NEW.status,
       'resolution_type', NEW.resolution_type,
       'note', NEW.note,
+      'destination', NEW.destination,
+      'intervention_plan_number', NEW.intervention_plan_number,
       'close_note', NEW.close_note,
       'assigned_to_name', NEW.assigned_to_name,
       'assigned_to_email', NEW.assigned_to_email,
@@ -728,6 +978,33 @@ CREATE TRIGGER trg_apply_equipment_movement
 BEFORE INSERT OR UPDATE ON public.equipment_movements
 FOR EACH ROW
 EXECUTE FUNCTION public.apply_equipment_movement();
+
+CREATE OR REPLACE FUNCTION public.on_equipment_movement_delete()
+RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  IF OLD.status = 'OPEN' THEN
+    UPDATE public.equipment_assets
+    SET
+      status = 'AVAILABLE',
+      assigned_to_name = NULL,
+      assigned_to_email = NULL,
+      assigned_to_badge = NULL,
+      assigned_at = NULL,
+      maintenance_note = NULL,
+      dismissed_at = NULL
+    WHERE id = OLD.equipment_id;
+  END IF;
+  RETURN OLD;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_on_equipment_movement_delete ON public.equipment_movements;
+CREATE TRIGGER trg_on_equipment_movement_delete
+AFTER DELETE ON public.equipment_movements
+FOR EACH ROW
+EXECUTE FUNCTION public.on_equipment_movement_delete();
 
 -- =============================================================================
 -- FINE DB_MASTER

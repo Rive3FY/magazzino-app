@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createClient as createServerClient } from "../../_lib/supabase/server";
+import { loadServerAdminAccess } from "../../_lib/admin-access";
 
 type WarehouseKind = "PRM" | "REALE";
 
@@ -41,9 +42,9 @@ async function requireAdmin() {
     return { error: NextResponse.json({ error: "Non autenticato" }, { status: 401 }) };
   }
 
-  const { data: isAdm, error: errAdmin } = await serverSupabase.rpc("is_admin");
-  if (errAdmin || !isAdm) {
-    return { error: NextResponse.json({ error: "Accesso negato: solo admin" }, { status: 403 }) };
+  const access = await loadServerAdminAccess(serverSupabase);
+  if (!access.canManageMaterials) {
+    return { error: NextResponse.json({ error: "Accesso negato: solo admin Materiali o super admin" }, { status: 403 }) };
   }
 
   return { user };

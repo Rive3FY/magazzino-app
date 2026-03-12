@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
+import { deriveAdminAccess } from "../_lib/admin-access";
 
 export default function LoginPage() {
   const supabase = createClient();
@@ -32,27 +33,52 @@ export default function LoginPage() {
       if (!alive) return;
 
       if (data.user) {
-        const { data: p, error: e2 } = await supabase
-          .from("profiles")
-          .select("approved,is_admin")
-          .eq("id", data.user.id)
-          .maybeSingle();
+        try {
+          const { data: profile, error } = await supabase
+            .from("profiles")
+            .select("approved,is_admin,is_super_admin,is_materials_admin,is_equipment_linee_admin,is_equipment_stazioni_admin")
+            .eq("id", data.user.id)
+            .maybeSingle();
 
-        // se non riesco a leggere il profilo: logout e torno al login
-        if (e2) {
-          console.error("profiles read error:", e2);
-          await supabase.auth.signOut();
-          if (!alive) return;
-          setLoading(false);
+          if (error) throw error;
+
+          const access = deriveAdminAccess({
+            approved: !!profile?.approved,
+            legacyAdmin: !!profile?.is_admin,
+            isSuperAdmin: !!profile?.is_super_admin || !!profile?.is_admin,
+            isMaterialsAdmin: !!profile?.is_materials_admin,
+            isEquipmentLineeAdmin: !!profile?.is_equipment_linee_admin,
+            isEquipmentStazioniAdmin: !!profile?.is_equipment_stazioni_admin,
+          });
+          if (access.approved || access.isAdmin) window.location.href = "/";
+          else window.location.href = "/pending";
           return;
+        } catch (e2) {
+          try {
+            const { data: legacyProfile, error: legacyError } = await supabase
+              .from("profiles")
+              .select("approved,is_admin")
+              .eq("id", data.user.id)
+              .maybeSingle();
+
+            if (legacyError) throw legacyError;
+
+            const access = deriveAdminAccess({
+              approved: !!legacyProfile?.approved,
+              legacyAdmin: !!legacyProfile?.is_admin,
+              isSuperAdmin: !!legacyProfile?.is_admin,
+            });
+            if (access.approved || access.isAdmin) window.location.href = "/";
+            else window.location.href = "/pending";
+            return;
+          } catch {
+            console.error("profiles read error:", e2);
+            await supabase.auth.signOut();
+            if (!alive) return;
+            setLoading(false);
+            return;
+          }
         }
-
-        const approved = !!p?.approved;
-        const admin = !!p?.is_admin;
-
-        if (approved || admin) window.location.href = "/";
-        else window.location.href = "/pending";
-        return;
       }
 
       setLoading(false);
@@ -86,24 +112,49 @@ export default function LoginPage() {
     }
 
     // Controllo approved/admin sul profilo (own-only, quindi ok)
-    const { data: p, error: e2 } = await supabase
-      .from("profiles")
-      .select("approved,is_admin")
-      .eq("id", data.user.id)
-      .maybeSingle();
+    let access = deriveAdminAccess(null);
+    try {
+      const { data: profile, error } = await supabase
+        .from("profiles")
+        .select("approved,is_admin,is_super_admin,is_materials_admin,is_equipment_linee_admin,is_equipment_stazioni_admin")
+        .eq("id", data.user.id)
+        .maybeSingle();
 
-    if (e2) {
-      console.error("profiles read error:", e2);
-      await supabase.auth.signOut();
-      setMsg("Profilo non disponibile o permessi mancanti. Contatta l'admin.");
-      setWorking(false);
-      return;
+      if (error) throw error;
+
+      access = deriveAdminAccess({
+        approved: !!profile?.approved,
+        legacyAdmin: !!profile?.is_admin,
+        isSuperAdmin: !!profile?.is_super_admin || !!profile?.is_admin,
+        isMaterialsAdmin: !!profile?.is_materials_admin,
+        isEquipmentLineeAdmin: !!profile?.is_equipment_linee_admin,
+        isEquipmentStazioniAdmin: !!profile?.is_equipment_stazioni_admin,
+      });
+    } catch (e2) {
+      try {
+        const { data: legacyProfile, error: legacyError } = await supabase
+          .from("profiles")
+          .select("approved,is_admin")
+          .eq("id", data.user.id)
+          .maybeSingle();
+
+        if (legacyError) throw legacyError;
+
+        access = deriveAdminAccess({
+          approved: !!legacyProfile?.approved,
+          legacyAdmin: !!legacyProfile?.is_admin,
+          isSuperAdmin: !!legacyProfile?.is_admin,
+        });
+      } catch {
+        console.error("profiles read error:", e2);
+        await supabase.auth.signOut();
+        setMsg("Profilo non disponibile o permessi mancanti. Contatta l'admin.");
+        setWorking(false);
+        return;
+      }
     }
 
-    const approved = !!p?.approved;
-    const admin = !!p?.is_admin;
-
-    if (!approved && !admin) {
+    if (!access.approved && !access.isAdmin) {
       await supabase.auth.signOut();
       setMsg("Account creato ✅ ma non ancora approvato dall'admin.");
       setWorking(false);

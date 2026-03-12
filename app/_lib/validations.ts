@@ -28,7 +28,8 @@ export const equipmentMovementSchema = z
   .object({
     equipment_id: z.string().uuid("Seleziona un'attrezzatura valida."),
     type: z.enum(["OUT"]),
-    note: z.string().min(1, "Le note sono obbligatorie.").trim(),
+    note: z.string().trim().optional().or(z.literal("")),
+    destination: z.string().min(1, "La destinazione è obbligatoria.").trim(),
     assigned_to_name: z.string().trim().optional().or(z.literal("")),
     assigned_to_email: z.string().trim().optional().or(z.literal("")),
     assigned_to_badge: z.string().trim().optional().or(z.literal("")),

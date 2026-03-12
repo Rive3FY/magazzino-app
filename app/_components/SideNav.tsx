@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
@@ -13,7 +12,13 @@ export default function SideNav() {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
-  const { isAdmin, loading } = useIsAdmin();
+  const {
+    canManageMaterials,
+    canManageEquipmentLinee,
+    canManageEquipmentStazioni,
+    isSuperAdmin,
+    loading,
+  } = useIsAdmin();
   const usersCount = useUsersCount();
   const { isOpen, setIsOpen } = useSidebar();
   const checked = !loading;
@@ -37,6 +42,7 @@ export default function SideNav() {
     pathname.startsWith("/scaffali") ||
     pathname.startsWith("/etichette") ||
     pathname.startsWith("/import") ||
+    pathname.startsWith("/materiali/admin") ||
     pathname.startsWith("/admin") ||
     pathname.startsWith("/referenti") ||
     pathname.startsWith("/audit-log") ||
@@ -83,21 +89,14 @@ export default function SideNav() {
         aria-hidden="true"
       />
       <aside className={`sidebar ${isOpen ? "sidebarOpen" : ""}`} aria-label="Menu di navigazione">
-        <div className="sidebarHeader">
-          <button
-            type="button"
-            className="sidebarCloseBtn"
-            onClick={() => setIsOpen(false)}
-            aria-label="Chiudi menu"
-          >
-            ✕
-          </button>
-          <Link href="/" className="sidebarBrand" style={{ display: "flex", alignItems: "center", gap: 8, textDecoration: "none", color: "inherit" }}>
-            <Image src="/logo.svg" alt="" width={48} height={17} style={{ objectFit: "contain", filter: "brightness(0) invert(1)" }} />
-            <span>GESTIONALE</span>
-          </Link>
-          <div className="sidebarVersion">Versione: 2.06.09</div>
-        </div>
+        <button
+          type="button"
+          className="sidebarCloseBtn"
+          onClick={() => setIsOpen(false)}
+          aria-label="Chiudi menu"
+        >
+          ✕
+        </button>
 
         <nav className="sideNav">
           {inMaterials && (
@@ -108,10 +107,11 @@ export default function SideNav() {
               <Link className={clsExact("/materiali")} href="/materiali" onClick={handleLinkClick}>Dashboard</Link>
               <Link className={cls("/movimenti")} href="/movimenti" onClick={handleLinkClick}>Movimenti</Link>
               <Link className={cls("/giacenze")} href="/giacenze" onClick={handleLinkClick}>Giacenze</Link>
-              {isAdmin && <Link className={cls("/scaffali")} href="/scaffali" onClick={handleLinkClick}>Scaffali</Link>}
-              {isAdmin && <Link className={cls("/etichette")} href="/etichette" onClick={handleLinkClick}>Etichette</Link>}
-              {isAdmin && <Link className={cls("/import")} href="/import" onClick={handleLinkClick}>Import & Export</Link>}
-              {isAdmin && <Link className={cls("/admin")} href="/admin" onClick={handleLinkClick}>Admin</Link>}
+              {canManageMaterials && <Link className={cls("/scaffali")} href="/scaffali" onClick={handleLinkClick}>Scaffali</Link>}
+              {canManageMaterials && <Link className={cls("/etichette")} href="/etichette" onClick={handleLinkClick}>Etichette</Link>}
+              {canManageMaterials && <Link className={cls("/import")} href="/import" onClick={handleLinkClick}>Import & Export</Link>}
+              {canManageMaterials && <Link className={cls("/materiali/admin")} href="/materiali/admin" onClick={handleLinkClick}>Gestione Admin</Link>}
+              {isSuperAdmin && <Link className={cls("/admin")} href="/admin" onClick={handleLinkClick}>Super Admin</Link>}
             </>
           )}
 
@@ -122,8 +122,9 @@ export default function SideNav() {
               </div>
               <Link className={clsExact("/attrezzature/linee")} href="/attrezzature/linee" onClick={handleLinkClick}>Dashboard</Link>
               <Link className={cls("/attrezzature/linee/movimenti")} href="/attrezzature/linee/movimenti" onClick={handleLinkClick}>Movimenti</Link>
-              <Link className={cls("/attrezzature/linee/etichette")} href="/attrezzature/linee/etichette" onClick={handleLinkClick}>Etichette</Link>
+              {canManageEquipmentLinee && <Link className={cls("/attrezzature/linee/etichette")} href="/attrezzature/linee/etichette" onClick={handleLinkClick}>Etichette</Link>}
               <Link className={cls("/attrezzature/linee/tutte-attrezzature")} href="/attrezzature/linee/tutte-attrezzature" onClick={handleLinkClick}>Tutte le attrezzature</Link>
+              {canManageEquipmentLinee && <Link className={cls("/attrezzature/linee/admin")} href="/attrezzature/linee/admin" onClick={handleLinkClick}>Gestione Admin</Link>}
             </>
           )}
 
@@ -134,8 +135,9 @@ export default function SideNav() {
               </div>
               <Link className={clsExact("/attrezzature/stazioni")} href="/attrezzature/stazioni" onClick={handleLinkClick}>Dashboard</Link>
               <Link className={cls("/attrezzature/stazioni/movimenti")} href="/attrezzature/stazioni/movimenti" onClick={handleLinkClick}>Movimenti</Link>
-              <Link className={cls("/attrezzature/stazioni/etichette")} href="/attrezzature/stazioni/etichette" onClick={handleLinkClick}>Etichette</Link>
+              {canManageEquipmentStazioni && <Link className={cls("/attrezzature/stazioni/etichette")} href="/attrezzature/stazioni/etichette" onClick={handleLinkClick}>Etichette</Link>}
               <Link className={cls("/attrezzature/stazioni/tutte-attrezzature")} href="/attrezzature/stazioni/tutte-attrezzature" onClick={handleLinkClick}>Tutte le attrezzature</Link>
+              {canManageEquipmentStazioni && <Link className={cls("/attrezzature/stazioni/admin")} href="/attrezzature/stazioni/admin" onClick={handleLinkClick}>Gestione Admin</Link>}
             </>
           )}
 

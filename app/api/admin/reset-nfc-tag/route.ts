@@ -1,16 +1,6 @@
-import { createClient } from "@supabase/supabase-js";
 import { createClient as createServerClient } from "../../../_lib/supabase/server";
 import { NextResponse } from "next/server";
 import { loadServerAdminAccess } from "../../../_lib/admin-access";
-
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceKey) {
-    throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
-  }
-  return createClient(url, serviceKey, { auth: { persistSession: false } });
-}
 
 export async function POST(request: Request) {
   try {
@@ -30,15 +20,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "nfcTagId richiesto" }, { status: 400 });
     }
 
-    const admin = getSupabaseAdmin();
-
-    const { data: eqData, error: eqErr } = await admin
+    const { data: eqData, error: eqErr } = await serverSupabase
       .from("equipment_assets")
       .update({ nfc_tag_id: null })
       .eq("nfc_tag_id", nfcTagId)
       .select("id");
 
-    const { data: shelfData, error: shelfErr } = await admin
+    const { data: shelfData, error: shelfErr } = await serverSupabase
       .from("material_shelves")
       .update({ nfc_tag_id: null })
       .eq("nfc_tag_id", nfcTagId)

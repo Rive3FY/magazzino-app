@@ -221,8 +221,6 @@ export default function AdminPage() {
     { path: "/attrezzature/stazioni", label: "Attrezzature Stazioni" },
     { path: "/attrezzature/linee", label: "Attrezzature Linee" },
     { path: "/materiali", label: "Materiali" },
-    { path: "/movimenti", label: "Movimenti" },
-    { path: "/scaffali", label: "Scaffali" },
   ] as const;
   const [nfcWriteModalOpen, setNfcWriteModalOpen] = useState(false);
   const [nfcWriteDestination, setNfcWriteDestination] = useState("/attrezzature/stazioni");

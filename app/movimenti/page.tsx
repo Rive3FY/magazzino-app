@@ -1024,7 +1024,7 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
   setCartOpen(true);
   setScanSource(null);
 }
-  async function startCartNfcScan() {
+  async function startNfcScan() {
     if (!isNfcSupported) {
       const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
       setMsg(
@@ -1059,7 +1059,7 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
         setMsg(`Tag NFC non associato a nessun materiale.`);
         return;
       }
-      await pickItemByCode((shelf as any).code, true);
+      await pickItemByCode((shelf as any).code, scanMode === "CART");
     } catch (e: any) {
       setMsg(e?.message ?? "Errore NFC");
     } finally {
@@ -1070,7 +1070,7 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
     setCartNfcScanning(false);
     setScanInfo(null);
     setScanSource(null);
-    if (cart.length > 0) setCartOpen(true);
+    if (scanMode === "CART" && cart.length > 0) setCartOpen(true);
   }
   async function addCartManualByCode(code: string) {
     const c = String(code ?? "").trim();
@@ -2402,8 +2402,27 @@ async function confirmCartPickup() {
                 )}
               </button>
             )}
-            <button className="btn" type="button" onClick={() => (scanning ? stopScan() : startScan())} aria-label={scanning ? "Ferma scansione barcode" : "Avvia scansione barcode"}>
-              {scanning ? "Chiudi camera" : "Scanner"}
+            <button
+              className="btn"
+              type="button"
+              onClick={() => (scanning ? stopScan() : startScan())}
+              aria-label={scanning ? "Ferma scansione barcode" : "Avvia scansione barcode"}
+              disabled={cartNfcScanning}
+              style={{ display: "flex", alignItems: "center", gap: 6 }}
+            >
+              <BarcodeIcon />
+              Barcode
+            </button>
+
+            <button
+              className="btn"
+              type="button"
+              onClick={startNfcScan}
+              disabled={scanning || cartNfcScanning}
+              style={{ display: "flex", alignItems: "center", gap: 6 }}
+            >
+              {cartNfcScanning ? <SpinnerIcon /> : <NfcIcon />}
+              {cartNfcScanning ? "NFC..." : "NFC"}
             </button>
 
             <button className="btn" type="button" onClick={resetSearch}>
@@ -3668,7 +3687,7 @@ async function confirmCartPickup() {
           <button
             type="button"
             className="btn"
-            onClick={startCartNfcScan}
+            onClick={startNfcScan}
             disabled={cartBusy || cartNfcScanning}
             style={{ display: "flex", alignItems: "center", gap: 6 }}
           >

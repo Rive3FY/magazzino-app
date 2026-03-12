@@ -216,6 +216,19 @@ export default function AdminPage() {
   const [nfcResetMsg, setNfcResetMsg] = useState<string | null>(null);
   const [nfcScanning, setNfcScanning] = useState(false);
 
+  // ASSOCIA TAG NFC A PAGINA (scrive URL sul tag)
+  const NFC_DESTINATIONS = [
+    { path: "/attrezzature/stazioni", label: "Attrezzature Stazioni" },
+    { path: "/attrezzature/linee", label: "Attrezzature Linee" },
+    { path: "/materiali", label: "Materiali" },
+    { path: "/movimenti", label: "Movimenti" },
+    { path: "/scaffali", label: "Scaffali" },
+  ] as const;
+  const [nfcWriteModalOpen, setNfcWriteModalOpen] = useState(false);
+  const [nfcWriteDestination, setNfcWriteDestination] = useState("/attrezzature/stazioni");
+  const [nfcWriteLoading, setNfcWriteLoading] = useState(false);
+  const [nfcWriteMsg, setNfcWriteMsg] = useState<string | null>(null);
+
   async function guardAdmin() {
     const { data: u } = await supabase.auth.getUser();
     if (!u.user) {
@@ -387,6 +400,32 @@ export default function AdminPage() {
     } catch (e: unknown) {
       setNfcResetMsg("Errore lettura NFC: " + (e instanceof Error ? e.message : "sconosciuto"));
       setNfcScanning(false);
+    }
+  }
+
+  async function writeNfcUrlToTag() {
+    if (!("NDEFReader" in window)) {
+      setNfcWriteMsg("NFC non disponibile (Chrome Android con HTTPS).");
+      return;
+    }
+    const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
+    if (!baseUrl) {
+      setNfcWriteMsg("Impossibile determinare l'URL dell'app.");
+      return;
+    }
+    const url = baseUrl + nfcWriteDestination;
+    setNfcWriteLoading(true);
+    setNfcWriteMsg(null);
+    try {
+      const ndef = new NDEFReader();
+      await ndef.write({
+        records: [{ recordType: "url", data: url }],
+      });
+      setNfcWriteMsg("URL scritto sul tag. Alla scansione aprirà: " + url);
+    } catch (e: unknown) {
+      setNfcWriteMsg("Errore scrittura: " + (e instanceof Error ? e.message : "sconosciuto"));
+    } finally {
+      setNfcWriteLoading(false);
     }
   }
 
@@ -726,6 +765,13 @@ export default function AdminPage() {
                   title="Rimuovi l'associazione di un tag NFC da attrezzature e scaffali"
                 >
                   Reset tag NFC
+                </button>
+                <button
+                  className="btn"
+                  onClick={() => { setNfcWriteModalOpen(true); setNfcWriteMsg(null); }}
+                  title="Scrivi un URL sul tag NFC: alla scansione aprirà la pagina selezionata"
+                >
+                  Associa tag NFC a pagina
                 </button>
               </div>
             </div>
@@ -1078,6 +1124,50 @@ export default function AdminPage() {
                 disabled={nfcResetLoading || !nfcTagIdInput.trim()}
               >
                 {nfcResetLoading ? "Reset…" : "Reset tag"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {nfcWriteModalOpen && (
+        <div
+          className="modalOverlay"
+          onClick={() => setNfcWriteModalOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="nfc-write-title"
+        >
+          <div className="modalWindow" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420, padding: 20 }}>
+            <div id="nfc-write-title" style={{ fontWeight: 900, fontSize: 18, marginBottom: 12 }}>Associa tag NFC a pagina</div>
+            <p style={{ fontSize: 14, color: "#64748b", marginBottom: 16 }}>
+              Scrivi un URL sul tag NFC. Quando qualcuno scansionerà il tag (anche da blocco schermo), si aprirà la pagina selezionata.
+            </p>
+            <div style={{ marginBottom: 16 }}>
+              <label className="label" htmlFor="nfcWriteDest">Pagina di destinazione</label>
+              <select
+                id="nfcWriteDest"
+                className="input"
+                value={nfcWriteDestination}
+                onChange={(e) => setNfcWriteDestination(e.target.value)}
+                style={{ width: "100%", marginTop: 6 }}
+              >
+                {NFC_DESTINATIONS.map((d) => (
+                  <option key={d.path} value={d.path}>{d.label}</option>
+                ))}
+              </select>
+            </div>
+            {nfcWriteMsg && (
+              <div style={{ marginBottom: 12, fontSize: 14, fontWeight: 600 }}>{nfcWriteMsg}</div>
+            )}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="btn" onClick={() => setNfcWriteModalOpen(false)}>Chiudi</button>
+              <button
+                className="btn btnPrimary"
+                onClick={writeNfcUrlToTag}
+                disabled={nfcWriteLoading}
+              >
+                {nfcWriteLoading ? "Scrittura…" : "Scrivi URL sul tag"}
               </button>
             </div>
           </div>

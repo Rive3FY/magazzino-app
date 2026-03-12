@@ -12,7 +12,7 @@ type Props = {
 };
 
 function shouldHideSidebar(pathname: string) {
-  return pathname === "/" || pathname === "/attrezzature" || pathname === "/profilo";
+  return pathname === "/" || pathname === "/attrezzature" || pathname === "/profilo" || pathname.startsWith("/admin");
 }
 
 export default function AppShell({ hasUser, displayName, displayBadge, children }: Props) {

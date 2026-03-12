@@ -26,6 +26,7 @@ type AssetFormState = {
   serial_number: string;
   name: string;
   category: string;
+  warehouse: string;
   notes: string;
 };
 
@@ -42,6 +43,7 @@ const emptyForm: AssetFormState = {
   serial_number: "",
   name: "",
   category: "",
+  warehouse: "",
   notes: "",
 };
 
@@ -53,6 +55,14 @@ function NfcIcon() {
       <path d="M9 11h6" />
       <path d="M9 15h4" />
       <path d="M12 6v12" />
+    </svg>
+  );
+}
+
+function SpinnerIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 1s linear infinite", transformOrigin: "center" }}>
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
     </svg>
   );
 }
@@ -81,6 +91,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const [searchActiveIndex, setSearchActiveIndex] = useState(0);
   const [statusFilter, setStatusFilter] = useState<"ALL" | EquipmentStatus>("ALL");
   const [categoryFilter, setCategoryFilter] = useState<string>("");
+  const [warehouseFilter, setWarehouseFilter] = useState<string>("ALL");
   const [msg, setMsg] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<EquipmentAssetRow | null>(null);
@@ -170,11 +181,22 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     return Array.from(set).sort();
   }, [rows]);
 
+  const warehouses = useMemo(() => {
+    const set = new Set<string>();
+    for (const row of rows) {
+      const w = (row.warehouse ?? "").trim();
+      if (w) set.add(w);
+    }
+    return Array.from(set).sort();
+  }, [rows]);
+
   const filtered = useMemo(() => {
     const search = q.trim().toLowerCase();
     return rows.filter((row) => {
       if (statusFilter !== "ALL" && row.status !== statusFilter) return false;
       if (categoryFilter && (row.category ?? "").trim() !== categoryFilter) return false;
+      if (warehouseFilter !== "ALL" && warehouseFilter !== "" && (row.warehouse ?? "").trim() !== warehouseFilter) return false;
+      if (warehouseFilter === "" && (row.warehouse ?? "").trim() !== "") return false;
       if (!search) return true;
 
       return [
@@ -189,7 +211,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(search));
     });
-  }, [q, rows, statusFilter, categoryFilter]);
+  }, [q, rows, statusFilter, categoryFilter, warehouseFilter]);
 
   const stats = useMemo(() => {
     return EQUIPMENT_STATUS_OPTIONS.reduce<Record<EquipmentStatus, number>>(
@@ -210,6 +232,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     const search = q.trim().toLowerCase();
     let base = rows;
     if (categoryFilter) base = base.filter((row) => (row.category ?? "").trim() === categoryFilter);
+    if (warehouseFilter !== "ALL") base = base.filter((row) => (row.warehouse ?? "").trim() === warehouseFilter);
     if (!search) return base.slice(0, 12);
     return base
       .filter((row) =>
@@ -226,7 +249,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
           .some((value) => String(value).toLowerCase().includes(search))
       )
       .slice(0, 12);
-  }, [q, rows, categoryFilter]);
+  }, [q, rows, categoryFilter, warehouseFilter]);
 
   const searchActive = useMemo(() => searchMatches[searchActiveIndex] ?? null, [searchMatches, searchActiveIndex]);
 
@@ -332,6 +355,11 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     }
   }
 
+  function stopNfcScan() {
+    setSearchByNfcScanning(false);
+    setMsg(null);
+  }
+
   async function saveNfcAssociation(row: EquipmentAssetRow, serialNumber: string) {
     await supabase.from("equipment_assets").update({ nfc_tag_id: null }).eq("nfc_tag_id", serialNumber);
     const { error } = await supabase
@@ -415,6 +443,11 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     }
   }
 
+  function stopNfcAssociation() {
+    setNfcAssociatingId(null);
+    setMsg(null);
+  }
+
   useEffect(() => {
     setSearchActiveIndex(0);
   }, [q]);
@@ -449,6 +482,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
       serial_number: row.serial_number ?? "",
       name: row.name ?? "",
       category: row.category ?? "",
+      warehouse: row.warehouse ?? "",
       notes: row.notes ?? "",
     }]);
     setMsg(null);
@@ -485,6 +519,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
         name: form.name.trim(),
         category: form.category.trim() || null,
         notes: form.notes.trim() || null,
+        warehouse: form.warehouse.trim() || null,
         equipment_area: area,
       };
       const result = await supabase.from("equipment_assets").update(payload).eq("id", editingRow.id).eq("equipment_area", area).select("id").single();
@@ -523,6 +558,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
         name: form.name.trim(),
         category: form.category.trim() || null,
         notes: form.notes.trim() || null,
+        warehouse: form.warehouse.trim() || null,
         equipment_area: area,
       };
       const result = await supabase.from("equipment_assets").insert(payload).select("id").single();
@@ -724,22 +760,87 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                 ))}
               </select>
             </div>
+            <div style={{ minWidth: 0 }}>
+              <label className="label" htmlFor={`all-equipment-warehouse-${area}`}>Magazzino</label>
+              <select
+                id={`all-equipment-warehouse-${area}`}
+                className="input"
+                value={warehouseFilter}
+                onChange={(e) => setWarehouseFilter(e.target.value)}
+              >
+                <option value="ALL">Tutti i magazzini</option>
+                <option value="">Nessuno (senza magazzino)</option>
+                {warehouses.map((w) => (
+                  <option key={w} value={w}>{w}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {msg && !modalOpen && <div className="equipmentInlineMessage">{msg}</div>}
-          <div style={{ display: cameraScanning ? "block" : "none" }}>
-            <video
-              ref={videoRef}
-              style={{ width: "100%", borderRadius: 12, background: "black" }}
-              muted
-              playsInline
-            />
-            <div style={{ fontSize: 12, marginTop: 6, opacity: 0.9 }}>
-              Inquadra il barcode dell&apos;attrezzatura con la fotocamera.
-            </div>
-          </div>
         </div>
       </div>
+
+      {(cameraScanning || searchByNfcScanning || !!nfcAssociatingId) && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+            zIndex: 1100,
+          }}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: 14,
+              padding: 24,
+              maxWidth: 420,
+              width: "100%",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.3)",
+            }}
+          >
+            {cameraScanning ? (
+              <>
+                <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner barcode</div>
+                <div style={{ padding: 12, background: "#0f172a", borderRadius: 12, marginBottom: 12 }}>
+                  <video ref={videoRef} style={{ width: "100%", maxWidth: 360, borderRadius: 8 }} muted playsInline />
+                  <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il codice a barre</div>
+                </div>
+                <button type="button" className="btn" onClick={stopCameraScan}>
+                  Fine
+                </button>
+              </>
+            ) : searchByNfcScanning ? (
+              <>
+                <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner NFC</div>
+                <div style={{ padding: 24, background: "#0f172a", borderRadius: 12, marginBottom: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+                  <SpinnerIcon />
+                  <div style={{ fontSize: 14, color: "#94a3b8" }}>Avvicina il telefono al tag NFC</div>
+                </div>
+                <button type="button" className="btn" onClick={stopNfcScan}>
+                  Fine
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Associazione NFC</div>
+                <div style={{ padding: 24, background: "#0f172a", borderRadius: 12, marginBottom: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+                  <SpinnerIcon />
+                  <div style={{ fontSize: 14, color: "#94a3b8" }}>Avvicina il telefono al tag NFC</div>
+                </div>
+                <button type="button" className="btn" onClick={stopNfcAssociation}>
+                  Fine
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
         <div className="equipmentSectionHeader">
@@ -756,6 +857,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                 <th>Seriale</th>
                 <th>Nome</th>
                 <th>Categoria</th>
+                <th>Magazzino</th>
                 <th>Note</th>
                 <th>Stato</th>
                 <th>Ubicazione</th>
@@ -769,12 +871,12 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
             <tbody>
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={11}>Nessuna attrezzatura trovata.</td>
+                  <td colSpan={12}>Nessuna attrezzatura trovata.</td>
                 </tr>
               )}
               {loading && (
                 <tr>
-                  <td colSpan={11}>Caricamento attrezzature...</td>
+                  <td colSpan={12}>Caricamento attrezzature...</td>
                 </tr>
               )}
               {filtered.map((row) => {
@@ -792,6 +894,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                     </td>
                     <td>{row.name}</td>
                     <td>{row.category || "—"}</td>
+                    <td>{row.warehouse || "—"}</td>
                     <td style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={row.notes ?? ""}>{row.notes || "—"}</td>
                     <td><span style={equipmentStatusStyle(row.status)}>{EQUIPMENT_STATUS_LABELS[row.status]}</span></td>
                     <td>{location}</td>
@@ -951,6 +1054,23 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                     <div style={{ minWidth: 0 }}>
                       <label className="label" htmlFor={`modal-asset-category-${area}-${idx}`}>Categoria / sottogruppo</label>
                       <input id={`modal-asset-category-${area}-${idx}`} className="input" value={entry.category} onChange={(e) => setFormEntries((prev) => { const n = [...prev]; n[idx] = { ...n[idx], category: e.target.value }; return n; })} placeholder="Es. Braghe 1500kg" />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <label className="label" htmlFor={`modal-asset-warehouse-${area}-${idx}`}>Magazzino</label>
+                      <input
+                        id={`modal-asset-warehouse-${area}-${idx}`}
+                        className="input"
+                        type="text"
+                        list={`modal-asset-warehouse-list-${area}-${idx}`}
+                        value={entry.warehouse}
+                        onChange={(e) => setFormEntries((prev) => { const n = [...prev]; n[idx] = { ...n[idx], warehouse: e.target.value }; return n; })}
+                        placeholder="Es. Magazzino A, Reparto X..."
+                      />
+                      <datalist id={`modal-asset-warehouse-list-${area}-${idx}`}>
+                        {warehouses.map((w) => (
+                          <option key={w} value={w} />
+                        ))}
+                      </datalist>
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <label className="label" htmlFor={`modal-asset-notes-${area}-${idx}`}>Note</label>

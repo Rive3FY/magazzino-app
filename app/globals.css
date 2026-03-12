@@ -1283,6 +1283,11 @@ input[type="date"].input{
   padding-right:12px;
 }
 
+/* Input con datalist: nasconde il triangolino del menu a tendina (Chrome) */
+input[list].input::-webkit-calendar-picker-indicator{
+  display:none !important;
+}
+
 /* Textarea con stile input coerente */
 textarea.input{
   padding: 0 12px;
@@ -1445,68 +1450,62 @@ textarea.input{
 .launcherHero{
   display:grid;
   gap:10px;
-  margin-bottom:18px;
+  margin-bottom:24px;
 }
 
 .launcherTitle{
-  font-size:28px;
-  line-height:1.1;
-  font-weight:900;
-  color:var(--text);
+  font-size:24px;
+  line-height:1.2;
+  font-weight:800;
+  color:#0f172a;
+  letter-spacing:-0.02em;
 }
 
 .launcherText{
-  color:var(--muted);
+  color:#64748b;
   font-size:14px;
-  line-height:1.55;
+  line-height:1.6;
   max-width:760px;
 }
 
 .launcherGrid{
   display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(min(250px, 100%),1fr));
-  gap:16px;
+  grid-template-columns:repeat(auto-fit,minmax(min(260px, 100%),1fr));
+  gap:18px;
 }
 
 .launcherCard{
   position:relative;
   overflow:hidden;
-  min-height:200px;
-  border-radius:18px;
-  padding:22px;
-  color:#ffffff;
-  box-shadow:var(--shadow-md);
+  min-height:190px;
+  border-radius:16px;
+  padding:0;
+  background:#ffffff;
+  color:#0f172a;
+  box-shadow:0 10px 24px rgba(15,23,42,0.06);
   display:grid;
   align-content:space-between;
-  gap:18px;
+  gap:0;
   text-decoration:none !important;
-  border:1px solid rgba(255,255,255,0.18);
+  border:1px solid rgba(15,23,42,0.08);
+  border-top-width:4px;
+  transition:box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
 
 .launcherCard:hover{
-  transform:translateY(-1px);
-  box-shadow:var(--shadow-lg);
-  color:#ffffff;
+  box-shadow:0 16px 34px rgba(15,23,42,0.10);
+  border-color:rgba(15,23,42,0.14);
+  transform:translateY(-2px);
 }
 
-.launcherCard::before{
-  content:"";
-  position:absolute;
-  inset:auto -20px -35px auto;
-  width:120px;
-  height:120px;
-  border-radius:999px;
-  background:rgba(255,255,255,0.10);
+.launcherCard:hover .launcherArrow{
+  background:#dbeafe;
+  color:#0f172a;
 }
 
+.launcherCard::before,
 .launcherCard::after{
-  content:"";
-  position:absolute;
-  inset:18px auto auto -24px;
-  width:90px;
-  height:90px;
-  border-radius:999px;
-  background:rgba(255,255,255,0.08);
+  display:none;
 }
 
 .launcherCardContent{
@@ -1514,6 +1513,7 @@ textarea.input{
   z-index:1;
   display:grid;
   gap:10px;
+  padding:18px 20px 16px;
 }
 
 .launcherCardBadge{
@@ -1521,25 +1521,28 @@ textarea.input{
   align-items:center;
   gap:6px;
   width:max-content;
-  padding:6px 10px;
+  padding:5px 10px;
   border-radius:999px;
-  background:rgba(255,255,255,0.14);
-  font-size:12px;
+  background:#e2e8f0;
+  color:#334155;
+  font-size:11px;
   font-weight:800;
-  letter-spacing:0.2px;
+  letter-spacing:0.35px;
+  text-transform:uppercase;
 }
 
 .launcherCardTitle{
-  font-size:26px;
-  line-height:1.1;
-  font-weight:900;
+  font-size:20px;
+  line-height:1.25;
+  font-weight:800;
+  color:#0f172a;
 }
 
 .launcherCardText{
-  font-size:14px;
-  line-height:1.5;
-  color:rgba(255,255,255,0.92);
-  max-width:34ch;
+  font-size:13px;
+  line-height:1.6;
+  color:#64748b;
+  max-width:40ch;
 }
 
 .launcherCardFooter{
@@ -1549,19 +1552,24 @@ textarea.input{
   align-items:center;
   justify-content:space-between;
   gap:10px;
-  font-weight:800;
+  font-weight:700;
   font-size:13px;
+  color:#475569;
+  padding:14px 20px 16px;
+  border-top:1px solid rgba(15,23,42,0.08);
+  background:linear-gradient(180deg, rgba(248,250,252,0.8) 0%, rgba(255,255,255,1) 100%);
 }
 
 .launcherArrow{
-  width:38px;
-  height:38px;
-  border-radius:999px;
+  width:32px;
+  height:32px;
+  border-radius:10px;
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  background:rgba(255,255,255,0.16);
-  border:1px solid rgba(255,255,255,0.18);
+  background:#eff6ff;
+  border:1px solid rgba(15,23,42,0.08);
+  color:#475569;
 }
 /* =========================
    GIACENZE: layout con tabella scrollabile

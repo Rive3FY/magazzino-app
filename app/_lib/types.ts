@@ -80,6 +80,7 @@ export type EquipmentAssetRow = {
   brand: string | null;
   model: string | null;
   equipment_area: EquipmentArea;
+  warehouse: string | null;
   status: EquipmentStatus;
   shelf: string | null;
   place: string | null;

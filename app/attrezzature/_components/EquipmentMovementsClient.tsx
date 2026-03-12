@@ -143,6 +143,14 @@ function NfcIcon() {
   );
 }
 
+function SpinnerIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 1s linear infinite", transformOrigin: "center" }}>
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
+}
+
 function getMovementStatus(row: EquipmentMovementRow) {
   return row.status ?? "OPEN";
 }
@@ -166,6 +174,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const [cartBusy, setCartBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [scanMode, setScanMode] = useState<"NORMAL" | "CART">("NORMAL");
+  const [warehouseFilter, setWarehouseFilter] = useState<string>("");
   const [assetSearch, setAssetSearch] = useState("");
   const [assetCategoryFilter, setAssetCategoryFilter] = useState<string>("");
   const [assetOpen, setAssetOpen] = useState(false);
@@ -317,17 +326,31 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const selectedAsset = form.equipment_id ? assetMap.get(form.equipment_id) ?? null : null;
   const cartItems = useMemo(() => cart.map((id) => assetMap.get(id)).filter(Boolean) as EquipmentAssetRow[], [assetMap, cart]);
 
-  const assetCategories = useMemo(() => {
+  const warehouses = useMemo(() => {
     const set = new Set<string>();
     for (const asset of assets) {
-      const c = (asset.category ?? "").trim();
-      if (c) set.add(c);
+      const w = (asset.warehouse ?? "").trim();
+      if (w) set.add(w);
     }
     return Array.from(set).sort();
   }, [assets]);
 
+  const assetsByWarehouse = useMemo(() => {
+    if (!warehouseFilter) return [];
+    return assets.filter((asset) => (asset.warehouse ?? "").trim() === warehouseFilter);
+  }, [assets, warehouseFilter]);
+
+  const assetCategories = useMemo(() => {
+    const set = new Set<string>();
+    for (const asset of assetsByWarehouse) {
+      const c = (asset.category ?? "").trim();
+      if (c) set.add(c);
+    }
+    return Array.from(set).sort();
+  }, [assetsByWarehouse]);
+
   const filteredAssets = useMemo(() => {
-    let base = assets;
+    let base = assetsByWarehouse;
     if (assetCategoryFilter) base = base.filter((asset) => (asset.category ?? "").trim() === assetCategoryFilter);
     const search = assetSearch.trim().toLowerCase();
     if (!search) return base;
@@ -336,7 +359,9 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(search))
     );
-  }, [assetSearch, assets, assetCategoryFilter]);
+  }, [assetSearch, assetsByWarehouse, assetCategoryFilter]);
+
+  const warehouseSelected = !!warehouseFilter;
 
   const assetMatches = useMemo(() => filteredAssets.slice(0, 12), [filteredAssets]);
   const assetActive = useMemo(() => assetMatches[assetActiveIndex] ?? null, [assetActiveIndex, assetMatches]);
@@ -375,8 +400,13 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   function applySearchResult(value: string, mode: "barcode" | "nfc") {
     const normalized = value.trim().toLowerCase();
     if (!normalized) return;
+    if (!warehouseSelected) {
+      setMsg("Seleziona prima il magazzino da cui prelevare.");
+      return;
+    }
     setAssetSearch(value.trim());
-    const matched = assets.find((asset) => {
+    const searchBase = warehouseSelected ? assetsByWarehouse : [];
+    const matched = searchBase.find((asset) => {
       if (mode === "barcode") {
         return [asset.barcode, asset.serial_number, asset.asset_code]
           .filter(Boolean)
@@ -390,7 +420,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       setAssetOpen(false);
       setMsg(null);
     } else {
-      setMsg(mode === "barcode" ? "Nessuna attrezzatura trovata per questo barcode." : "Nessuna attrezzatura associata a questo tag NFC.");
+      setMsg(mode === "barcode" ? "Nessuna attrezzatura trovata per questo barcode nel magazzino selezionato." : "Nessuna attrezzatura associata a questo tag NFC nel magazzino selezionato.");
     }
   }
 
@@ -476,6 +506,11 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     }
   }
 
+  function stopNfcScan() {
+    setSearchByNfcScanning(false);
+    setMsg(null);
+  }
+
   useEffect(() => {
     setAssetActiveIndex(0);
   }, [assetSearch]);
@@ -522,6 +557,10 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   }
 
   async function confirmCartPickup() {
+    if (!warehouseSelected) {
+      setMsg("Seleziona prima il magazzino da cui prelevare.");
+      return;
+    }
     if (!user?.id) {
       setMsg("Devi essere loggato.");
       return;
@@ -607,6 +646,10 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   }
 
   async function saveMovement() {
+    if (!warehouseSelected) {
+      setMsg("Seleziona prima il magazzino da cui prelevare.");
+      return;
+    }
     if (!selectedAsset) {
       setMsg("Seleziona un'attrezzatura.");
       return;
@@ -844,7 +887,43 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           <div className="equipmentAreaPill">Area: {areaLabel}</div>
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12, alignItems: "flex-end" }}>
+          <div className="mobileInputFull" style={{ minWidth: 240 }}>
+            <label className="label" htmlFor={`move-warehouse-${area}`}>Magazzino prelievo *</label>
+            <select
+              id={`move-warehouse-${area}`}
+              className="input"
+              value={warehouseFilter}
+              onChange={(e) => {
+                const value = e.target.value;
+                setWarehouseFilter(value);
+                setForm((prev) => ({ ...prev, equipment_id: "" }));
+                setAssetCategoryFilter("");
+                setAssetSearch("");
+                setCart([]);
+                setCartOpen(false);
+                setMsg(null);
+              }}
+            >
+              <option value="">— Seleziona magazzino —</option>
+              {warehouses.map((w) => (
+                <option key={w} value={w}>{w}</option>
+              ))}
+            </select>
+          </div>
+          {!warehouseSelected && (
+            <div style={{ padding: 10, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 12, fontWeight: 700, color: "#b45309" }}>
+              Seleziona il magazzino prima di continuare.
+            </div>
+          )}
+          {warehouses.length === 0 && !loading && (
+            <div style={{ fontSize: 13, color: "#64748b" }}>
+              Nessun magazzino configurato. Assegna un magazzino alle attrezzature in Tutte le attrezzature.
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12, opacity: warehouseSelected ? 1 : 0.5, pointerEvents: warehouseSelected ? "auto" : "none" }}>
           <div className="mobileInputFull" style={{ minWidth: 240 }}>
             <label className="label" htmlFor={`move-mode-${area}`}>Modalità uscita</label>
             <select
@@ -856,24 +935,25 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 setScanMode(nextMode);
                 if (nextMode === "CART") setCartOpen(true);
               }}
+              disabled={!warehouseSelected}
             >
               <option value="NORMAL">Normale</option>
               <option value="CART">Carrello multiplo {cart.length > 0 ? `(${cart.length})` : ""}</option>
             </select>
           </div>
           <div style={{ display: "flex", alignItems: "end", gap: 8, flexWrap: "wrap" }}>
-            <button className="btn" onClick={startCameraScanForSearch} type="button" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <button className="btn" onClick={startCameraScanForSearch} type="button" style={{ display: "inline-flex", alignItems: "center", gap: 6 }} disabled={!warehouseSelected}>
               <BarcodeIcon />
               Barcode
             </button>
-            <button className="btn" onClick={searchByNfc} disabled={searchByNfcScanning} type="button" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <button className="btn" onClick={searchByNfc} disabled={searchByNfcScanning || !warehouseSelected} type="button" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <NfcIcon />
               {searchByNfcScanning ? "NFC..." : "NFC"}
             </button>
           </div>
         </div>
 
-        <div className="equipmentFilterGrid mobileGrid1">
+        <div className="equipmentFilterGrid mobileGrid1" style={{ opacity: warehouseSelected ? 1 : 0.5, pointerEvents: warehouseSelected ? "auto" : "none" }}>
           <div style={{ minWidth: 0 }}>
             <label className="label" htmlFor={`move-category-${area}`}>Categoria</label>
             <select
@@ -881,6 +961,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
               className="input"
               value={assetCategoryFilter}
               onChange={(e) => setAssetCategoryFilter(e.target.value)}
+              disabled={!warehouseSelected}
             >
               <option value="">Tutte</option>
               {assetCategories.map((c) => (
@@ -894,6 +975,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
               id={`move-search-${area}`}
               className="input"
               value={assetSearch}
+              disabled={!warehouseSelected}
               onChange={(e) => {
                 const value = e.target.value;
                 setAssetSearch(value);
@@ -993,6 +1075,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
               id={`move-asset-${area}`}
               className="input"
               value={form.equipment_id}
+              disabled={!warehouseSelected}
               onChange={(e) => {
                 const value = e.target.value;
                 const asset = assetMap.get(value) ?? null;
@@ -1019,6 +1102,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
               id={`move-note-${area}`}
               className="input"
               value={scanMode === "CART" ? cartNote : form.note}
+              disabled={!warehouseSelected}
               onChange={(e) => {
                 const value = e.target.value;
                 if (scanMode === "CART") setCartNote(value);
@@ -1033,6 +1117,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
               id={`move-destination-${area}`}
               className="input"
               value={scanMode === "CART" ? cartDestination : form.destination}
+              disabled={!warehouseSelected}
               onChange={(e) => {
                 const value = e.target.value;
                 if (scanMode === "CART") setCartDestination(value);
@@ -1043,10 +1128,11 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
           {scanMode === "CART" && (
             <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 10 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", margin: 0 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: warehouseSelected ? "pointer" : "not-allowed", margin: 0 }}>
                 <input
                   type="checkbox"
                   checked={cartInterventionPlanEnabled}
+                  disabled={!warehouseSelected}
                   onChange={(e) => {
                     const checked = e.target.checked;
                     setCartInterventionPlanEnabled(checked);
@@ -1062,7 +1148,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 className="input"
                 value={cartInterventionPlanNumber}
                 onChange={(e) => setCartInterventionPlanNumber(e.target.value)}
-                disabled={!cartInterventionPlanEnabled}
+                disabled={!cartInterventionPlanEnabled || !warehouseSelected}
                 style={{ flex: 1, minWidth: 0, opacity: cartInterventionPlanEnabled ? 1 : 0.6 }}
               />
             </div>
@@ -1070,11 +1156,11 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
           <div style={{ minWidth: 0, display: "flex", alignItems: "end" }}>
             {scanMode === "CART" ? (
-              <button className="btn btnPrimary" onClick={addSelectedToCart} disabled={!selectedAsset} type="button">
+              <button className="btn btnPrimary" onClick={addSelectedToCart} disabled={!warehouseSelected || !selectedAsset} type="button">
                 Aggiungi al carrello
               </button>
             ) : (
-              <button className="btn btnPrimary" onClick={saveMovement} disabled={saving || !form.equipment_id} type="button">
+              <button className="btn btnPrimary" onClick={saveMovement} disabled={!warehouseSelected || saving || !form.equipment_id} type="button">
                 {saving ? "Salvataggio..." : "Conferma prelievo"}
               </button>
             )}
@@ -1107,18 +1193,6 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
             </div>
           </div>
         )}
-
-        <div style={{ display: cameraScanning ? "block" : "none", marginTop: 12 }}>
-          <video
-            ref={videoRef}
-            style={{ width: "100%", borderRadius: 12, background: "black" }}
-            muted
-            playsInline
-          />
-          <div style={{ fontSize: 12, marginTop: 6, opacity: 0.9 }}>
-            Inquadra il barcode dell&apos;attrezzatura con la fotocamera.
-          </div>
-        </div>
 
         {msg && <div style={{ marginTop: 12, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
       </div>
@@ -1169,7 +1243,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
             <div style={{ fontWeight: 800 }}>Righe: {cartItems.length}</div>
-            <button className="btn btnPrimary" onClick={confirmCartPickup} disabled={cartBusy || cartItems.length === 0} type="button">
+            <button className="btn btnPrimary" onClick={confirmCartPickup} disabled={!warehouseSelected || cartBusy || cartItems.length === 0} type="button">
               {cartBusy ? "Salvataggio..." : "Conferma prelievo"}
             </button>
           </div>
@@ -1273,6 +1347,56 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           </table>
         </div>
       </div>
+
+      {(cameraScanning || searchByNfcScanning) && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+            zIndex: 1100,
+          }}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: 14,
+              padding: 24,
+              maxWidth: 420,
+              width: "100%",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.3)",
+            }}
+          >
+            {cameraScanning ? (
+              <>
+                <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner barcode</div>
+                <div style={{ padding: 12, background: "#0f172a", borderRadius: 12, marginBottom: 12 }}>
+                  <video ref={videoRef} style={{ width: "100%", maxWidth: 360, borderRadius: 8 }} muted playsInline />
+                  <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il codice a barre</div>
+                </div>
+                <button type="button" className="btn" onClick={stopCameraScan}>
+                  Fine
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner NFC</div>
+                <div style={{ padding: 24, background: "#0f172a", borderRadius: 12, marginBottom: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+                  <SpinnerIcon />
+                  <div style={{ fontSize: 14, color: "#94a3b8" }}>Avvicina il telefono al tag NFC</div>
+                </div>
+                <button type="button" className="btn" onClick={stopNfcScan}>
+                  Fine
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {closeOpen && closing && (
         <div

@@ -303,7 +303,10 @@ export default function MaterialiAdminPage() {
     <main className="panel" style={{ overflowX: "hidden" }}>
       <div className="pageBar">
         <div className="pageBarTitle">Materiali - Gestione Admin</div>
-        <div style={{ display: "flex", gap: 8, marginLeft: "auto", flexWrap: "wrap" }}>
+      </div>
+
+      <div style={{ padding: 12, display: "grid", gap: 12 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {tabs.map((tab) => (
             <button
               key={tab.id}
@@ -315,9 +318,7 @@ export default function MaterialiAdminPage() {
             </button>
           ))}
         </div>
-      </div>
 
-      <div style={{ padding: 12, display: "grid", gap: 12 }}>
         {activeTab === "utenti" && (
           <ScopedRoleAdminUsersClient
             scope="MATERIALS"

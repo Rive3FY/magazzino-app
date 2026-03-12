@@ -204,21 +204,19 @@ export default function ScopedRoleAdminUsersClient({ scope, title, intro }: Prop
   return (
     <>
       <div className="card" style={{ padding: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-          <div>
+        <div style={{ marginBottom: 10 }}>
             <div style={{ fontWeight: 900 }}>{title ?? config.title}</div>
             {intro ? <div style={{ marginTop: 4, color: "#64748b", fontSize: 13 }}>{intro}</div> : null}
           </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <input
-              className="input"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Cerca per email, badge o nome"
-              style={{ minWidth: 260 }}
-            />
-            <button className="btn" onClick={loadRows}>Aggiorna</button>
-          </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+          <input
+            className="input"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Cerca per email, badge o nome"
+            style={{ minWidth: 200, flex: "1 1 200px" }}
+          />
+          <button className="btn" onClick={loadRows}>Aggiorna</button>
         </div>
         {msg ? <div style={{ marginBottom: 10, fontWeight: 700 }}>{msg}</div> : null}
         <div className="tableWrap">

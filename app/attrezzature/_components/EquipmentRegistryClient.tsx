@@ -51,6 +51,14 @@ function NfcIcon() {
   );
 }
 
+function SpinnerIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 1s linear infinite", transformOrigin: "center" }}>
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
+}
+
 export default function EquipmentRegistryClient({ area, basePath }: Props) {
   const { user, loading: authLoading, approved } = useAuth();
   const access = useIsAdmin();
@@ -64,6 +72,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   const [quickSearch, setQuickSearch] = useState("");
   const [quickSelectedId, setQuickSelectedId] = useState("");
   const [quickCategoryFilter, setQuickCategoryFilter] = useState<string>("");
+  const [quickWarehouseFilter, setQuickWarehouseFilter] = useState<string>("ALL");
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickActiveIndex, setQuickActiveIndex] = useState(0);
   const [msg, setMsg] = useState<string | null>(null);
@@ -140,21 +149,6 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     setIsIOS(/iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
   }, []);
 
-  const stats = useMemo(() => {
-    return EQUIPMENT_STATUS_OPTIONS.reduce<Record<EquipmentStatus, number>>(
-      (acc, status) => {
-        acc[status] = rows.filter((row) => row.status === status).length;
-        return acc;
-      },
-      {
-        AVAILABLE: 0,
-        ASSIGNED: 0,
-        MAINTENANCE: 0,
-        DISMISSED: 0,
-      }
-    );
-  }, [rows]);
-
   const quickCategories = useMemo(() => {
     const set = new Set<string>();
     for (const row of rows) {
@@ -164,9 +158,39 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     return Array.from(set).sort();
   }, [rows]);
 
-  const quickMatches = useMemo(() => {
+  const quickWarehouses = useMemo(() => {
+    const set = new Set<string>();
+    for (const row of rows) {
+      const w = (row.warehouse ?? "").trim();
+      if (w) set.add(w);
+    }
+    return Array.from(set).sort();
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
     let base = rows;
     if (quickCategoryFilter) base = base.filter((row) => (row.category ?? "").trim() === quickCategoryFilter);
+    if (quickWarehouseFilter !== "ALL") base = base.filter((row) => (row.warehouse ?? "").trim() === quickWarehouseFilter);
+    return base;
+  }, [rows, quickCategoryFilter, quickWarehouseFilter]);
+
+  const stats = useMemo(() => {
+    return EQUIPMENT_STATUS_OPTIONS.reduce<Record<EquipmentStatus, number>>(
+      (acc, status) => {
+        acc[status] = filteredRows.filter((row) => row.status === status).length;
+        return acc;
+      },
+      {
+        AVAILABLE: 0,
+        ASSIGNED: 0,
+        MAINTENANCE: 0,
+        DISMISSED: 0,
+      }
+    );
+  }, [filteredRows]);
+
+  const quickMatches = useMemo(() => {
+    let base = filteredRows;
     const search = quickSearch.trim().toLowerCase();
     if (!search) return base.slice(0, 12);
     return base
@@ -184,12 +208,14 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
           .some((value) => String(value).toLowerCase().includes(search))
       )
       .slice(0, 12);
-  }, [quickSearch, rows, quickCategoryFilter]);
+  }, [quickSearch, filteredRows]);
 
   const quickSelected = useMemo(() => {
     if (!quickSelectedId) return null;
     return rows.find((row) => row.id === quickSelectedId) ?? null;
   }, [quickSelectedId, rows]);
+
+  const filteredAssetIds = useMemo(() => new Set(filteredRows.map((r) => r.id)), [filteredRows]);
 
   const quickActive = useMemo(() => quickMatches[quickActiveIndex] ?? null, [quickMatches, quickActiveIndex]);
   const historyGroupCountMap = useMemo(() => {
@@ -205,6 +231,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     const toIso = toIsoEndOfDay(historyTo);
     const seen = new Set<string>();
     return history.filter((row) => {
+      if (quickWarehouseFilter !== "ALL" && !filteredAssetIds.has(row.equipment_id)) return false;
       if (fromIso && row.created_at < fromIso) return false;
       if (toIso && row.created_at > toIso) return false;
       const gid = row.movement_group_id;
@@ -214,7 +241,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
       }
       return true;
     });
-  }, [history, historyFrom, historyTo]);
+  }, [history, historyFrom, historyTo, quickWarehouseFilter, filteredAssetIds]);
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -363,6 +390,11 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     }
   }
 
+  function stopNfcScan() {
+    setSearchByNfcScanning(false);
+    setMsg(null);
+  }
+
   useEffect(() => {
     setQuickActiveIndex(0);
   }, [quickSearch]);
@@ -395,7 +427,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
         <div className="pageBarTitle">Attrezzature {areaLabel} - Dashboard</div>
         <div className="pageBarActions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <a className="btn" href={`/api/attrezzature/registro-docx?area=${area}`}>
-            Scarica registro DOCX
+            Scarica registro Movimenti
           </a>
         </div>
       </div>
@@ -416,7 +448,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
           <div className="equipmentStatsGrid">
             <div className="equipmentStatCard">
               <div className="equipmentStatLabel">Registrate</div>
-              <div className="equipmentStatValue">{rows.length}</div>
+              <div className="equipmentStatValue">{filteredRows.length}</div>
             </div>
             {EQUIPMENT_STATUS_OPTIONS.map((status) => (
               <div key={status} className="equipmentStatCard">
@@ -438,6 +470,21 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                 <option value="">Tutte</option>
                 {quickCategories.map((c) => (
                   <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <label className="label" htmlFor={`equipment-quick-warehouse-${area}`}>Magazzino</label>
+              <select
+                id={`equipment-quick-warehouse-${area}`}
+                className="input"
+                value={quickWarehouseFilter}
+                onChange={(e) => setQuickWarehouseFilter(e.target.value)}
+              >
+                <option value="ALL">Tutti</option>
+                <option value="">Nessuno</option>
+                {quickWarehouses.map((w) => (
+                  <option key={w} value={w}>{w}</option>
                 ))}
               </select>
             </div>
@@ -586,21 +633,59 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
             </div>
           )}
 
-          <div style={{ display: cameraScanning ? "block" : "none" }}>
-            <video
-              ref={videoRef}
-              style={{ width: "100%", borderRadius: 12, background: "black" }}
-              muted
-              playsInline
-            />
-            <div style={{ fontSize: 12, marginTop: 6, opacity: 0.9 }}>
-              Inquadra il barcode dell&apos;attrezzatura con la fotocamera.
-            </div>
-          </div>
-
           {msg && <div className="equipmentInlineMessage">{msg}</div>}
         </div>
       </div>
+
+      {(cameraScanning || searchByNfcScanning) && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+            zIndex: 1100,
+          }}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: 14,
+              padding: 24,
+              maxWidth: 420,
+              width: "100%",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.3)",
+            }}
+          >
+            {cameraScanning ? (
+              <>
+                <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner barcode</div>
+                <div style={{ padding: 12, background: "#0f172a", borderRadius: 12, marginBottom: 12 }}>
+                  <video ref={videoRef} style={{ width: "100%", maxWidth: 360, borderRadius: 8 }} muted playsInline />
+                  <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il codice a barre</div>
+                </div>
+                <button type="button" className="btn" onClick={stopCameraScan}>
+                  Fine
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner NFC</div>
+                <div style={{ padding: 24, background: "#0f172a", borderRadius: 12, marginBottom: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+                  <SpinnerIcon />
+                  <div style={{ fontSize: 14, color: "#94a3b8" }}>Avvicina il telefono al tag NFC</div>
+                </div>
+                <button type="button" className="btn" onClick={stopNfcScan}>
+                  Fine
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
         <div className="equipmentSectionHeader">

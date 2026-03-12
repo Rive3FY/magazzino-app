@@ -17,6 +17,7 @@ export const equipmentAssetSchema = z.object({
   category: z.string().trim().optional().or(z.literal("")),
   brand: z.string().trim().optional().or(z.literal("")),
   model: z.string().trim().optional().or(z.literal("")),
+  warehouse: z.string().trim().optional().or(z.literal("")),
   shelf: z.string().trim().optional().or(z.literal("")),
   place: z.string().trim().optional().or(z.literal("")),
   barcode: z.string().trim().optional().or(z.literal("")),

@@ -17,7 +17,6 @@ export default function SideNav({ hideSidebar = false }: Props) {
     canManageMaterials,
     canManageEquipmentLinee,
     canManageEquipmentStazioni,
-    isSuperAdmin,
     loading,
   } = useIsAdmin();
   const usersCount = useUsersCount();
@@ -113,7 +112,6 @@ export default function SideNav({ hideSidebar = false }: Props) {
               {canManageMaterials && <Link className={cls("/etichette")} href="/etichette" onClick={handleLinkClick}>Etichette</Link>}
               {canManageMaterials && <Link className={cls("/import")} href="/import" onClick={handleLinkClick}>Import & Export</Link>}
               {canManageMaterials && <Link className={cls("/materiali/admin")} href="/materiali/admin" onClick={handleLinkClick}>Gestione Admin</Link>}
-              {isSuperAdmin && <Link className={cls("/admin")} href="/admin" onClick={handleLinkClick}>Super Admin</Link>}
             </>
           )}
 

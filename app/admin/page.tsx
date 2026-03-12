@@ -201,6 +201,7 @@ export default function AdminPage() {
   const [auditMsg, setAuditMsg] = useState<string | null>(null);
   const [auditQ, setAuditQ] = useState("");
   const [auditAction, setAuditAction] = useState("ALL");
+  const [auditArea, setAuditArea] = useState<"ALL" | "MATERIALI" | "LINEE" | "STAZIONI">("ALL");
 
   // RICHIESTE EXCEL
   const [excelRequests, setExcelRequests] = useState<ExcelLiveRequestRow[]>([]);
@@ -468,9 +469,22 @@ export default function AdminPage() {
   }
 
   const auditRows = (() => {
+    let filtered = auditData;
+    if (auditArea !== "ALL") {
+      filtered = auditData.filter((r) => {
+        if (auditArea === "MATERIALI") {
+          return r.entity_type === "material" || r.entity_type === "movement";
+        }
+        if (auditArea === "LINEE" || auditArea === "STAZIONI") {
+          const area = r.warehouse ?? (r.details_json as Record<string, unknown>)?.equipment_area;
+          return r.entity_type === "equipment_asset" && area === auditArea;
+        }
+        return true;
+      });
+    }
     const text = auditQ.trim().toLowerCase();
-    if (!text) return auditData;
-    return auditData.filter((r) => {
+    if (!text) return filtered;
+    return filtered.filter((r) => {
       const blob = [r.action, r.entity_type, r.entity_id, r.code, r.warehouse, r.user_email, r.user_name, JSON.stringify(r.details_json ?? {})].join(" ").toLowerCase();
       return blob.includes(text);
     });
@@ -618,36 +632,37 @@ export default function AdminPage() {
     <main className="panel" style={{ overflowX: "hidden" }}>
       <div className="pageBar">
         <div className="pageBarTitle">Admin</div>
-        <div style={{ display: "flex", gap: 8, marginLeft: "auto", flexWrap: "wrap" }}>
-          <div style={{ display: "flex", gap: 4 }}>
-            {tabs.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                className={`btn ${activeTab === t.id ? "btnPrimary" : ""}`}
-                onClick={() => setActiveTab(t.id)}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-          <button
-            className="btn"
-            onClick={handleResetMagazzino}
-            disabled={resetting}
-            style={{ borderColor: "rgba(239,68,68,0.5)", background: "rgba(239,68,68,0.10)", color: "#991b1b" }}
-          >
-            {resetting ? "Reset…" : "Reset magazzino"}
-          </button>
-        </div>
       </div>
 
       <div style={{ padding: 12 }}>
+        <div style={{ display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={`btn ${activeTab === t.id ? "btnPrimary" : ""}`}
+              onClick={() => setActiveTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
         {activeTab === "utenti" && (
           <div className="card" style={{ padding: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 10, flexWrap: "wrap" }}>
               <div style={{ fontWeight: 900 }}>Utenti registrati</div>
-              <button className="btn" onClick={loadUsers}>Aggiorna</button>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button className="btn" onClick={loadUsers}>Aggiorna</button>
+                <button
+                  className="btn"
+                  onClick={handleResetMagazzino}
+                  disabled={resetting}
+                  style={{ borderColor: "rgba(239,68,68,0.5)", background: "rgba(239,68,68,0.10)", color: "#991b1b" }}
+                >
+                  {resetting ? "Reset…" : "Reset magazzino"}
+                </button>
+              </div>
             </div>
             {msg && <div style={{ marginBottom: 10, fontWeight: 700 }}>{msg}</div>}
             <div className="tableWrap">
@@ -880,10 +895,19 @@ export default function AdminPage() {
         {activeTab === "audit" && (
           <>
             <div className="card" style={{ padding: 12 }}>
-              <div className="mobileGrid1" style={{ display: "grid", gridTemplateColumns: "minmax(240px,1fr) 220px auto", gap: 10, alignItems: "end" }}>
+              <div className="mobileGrid1" style={{ display: "grid", gridTemplateColumns: "minmax(200px,1fr) minmax(180px,1fr) minmax(180px,1fr) auto", gap: 10, alignItems: "end" }}>
                 <div>
                   <label className="label" htmlFor="auditSearch">Cerca</label>
                   <input id="auditSearch" className="input" value={auditQ} onChange={(e) => setAuditQ(e.target.value)} placeholder="Codice, email, azione, dettagli..." />
+                </div>
+                <div>
+                  <label className="label" htmlFor="auditArea">Area</label>
+                  <select id="auditArea" className="input" value={auditArea} onChange={(e) => setAuditArea(e.target.value as "ALL" | "MATERIALI" | "LINEE" | "STAZIONI")}>
+                    <option value="ALL">Tutte</option>
+                    <option value="MATERIALI">Materiali</option>
+                    <option value="LINEE">Attrezzature linee</option>
+                    <option value="STAZIONI">Attrezzature stazioni</option>
+                  </select>
                 </div>
                 <div>
                   <label className="label" htmlFor="auditAction">Azione</label>
@@ -895,6 +919,10 @@ export default function AdminPage() {
                     <option value="MATERIAL_CREATED">MATERIAL_CREATED</option>
                     <option value="MATERIAL_UPDATED">MATERIAL_UPDATED</option>
                     <option value="MATERIAL_DELETED">MATERIAL_DELETED</option>
+                    <option value="EQUIPMENT_CREATED">EQUIPMENT_CREATED</option>
+                    <option value="EQUIPMENT_UPDATED">EQUIPMENT_UPDATED</option>
+                    <option value="EQUIPMENT_DELETED">EQUIPMENT_DELETED</option>
+                    <option value="EQUIPMENT_MOVEMENT">EQUIPMENT_MOVEMENT</option>
                   </select>
                 </div>
                 <div>

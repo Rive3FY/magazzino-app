@@ -30,7 +30,7 @@ export default function AttrezzaturePage() {
           <Link
             href="/attrezzature/linee"
             className="launcherCard"
-            style={{ background: "linear-gradient(135deg, #14532d 0%, #16a34a 100%)" }}
+            style={{ borderTopColor: "#15803d" }}
           >
             <div className="launcherCardContent">
               <div className="launcherCardBadge">Dashboard Linee</div>
@@ -48,7 +48,7 @@ export default function AttrezzaturePage() {
           <Link
             href="/attrezzature/stazioni"
             className="launcherCard"
-            style={{ background: "linear-gradient(135deg, #7c2d12 0%, #f97316 100%)" }}
+            style={{ borderTopColor: "#c2410c" }}
           >
             <div className="launcherCardContent">
               <div className="launcherCardBadge">Dashboard Stazioni</div>

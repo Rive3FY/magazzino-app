@@ -55,6 +55,12 @@ type UserProfileInfo = {
   email: string;
 };
 
+type ScanResultState = {
+  asset: EquipmentAssetRow;
+  source: "barcode" | "nfc";
+  mode: "NORMAL" | "CART";
+};
+
 type ProfileRow = {
   first_name: string | null;
   last_name: string | null;
@@ -188,6 +194,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const [profileInfo, setProfileInfo] = useState<UserProfileInfo | null>(null);
   const [cameraScanning, setCameraScanning] = useState(false);
   const [searchByNfcScanning, setSearchByNfcScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<ScanResultState | null>(null);
   const [isNfcSupported, setIsNfcSupported] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [form, setForm] = useState<MovementFormState>(() => ({
@@ -392,6 +399,13 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     return history.some((row) => row.equipment_id === selectedAsset.id && getMovementStatus(row) === "OPEN");
   }, [history, selectedAsset]);
 
+  const scanResultHasOpenMovement = useMemo(() => {
+    if (!scanResult) return false;
+    return history.some((row) => row.equipment_id === scanResult.asset.id && getMovementStatus(row) === "OPEN");
+  }, [history, scanResult]);
+
+  const scanResultCanPickup = !!scanResult && scanResult.asset.status === "AVAILABLE" && !scanResultHasOpenMovement;
+
   useEffect(() => {
     if (!selectedAsset || assetSearch.trim()) return;
     setAssetSearch(`${selectedAsset.serial_number || selectedAsset.asset_code} - ${selectedAsset.name}`);
@@ -419,6 +433,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       setAssetSearch(`${matched.serial_number || matched.asset_code} - ${matched.name}`);
       setAssetOpen(false);
       setMsg(null);
+      setScanResult({ asset: matched, source: mode, mode: scanMode });
     } else {
       setMsg(mode === "barcode" ? "Nessuna attrezzatura trovata per questo barcode nel magazzino selezionato." : "Nessuna attrezzatura associata a questo tag NFC nel magazzino selezionato.");
     }
@@ -509,6 +524,25 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   function stopNfcScan() {
     setSearchByNfcScanning(false);
     setMsg(null);
+  }
+
+  function resetScannedSelection() {
+    setScanResult(null);
+    setForm((prev) => ({ ...prev, equipment_id: "" }));
+    setAssetSearch("");
+    setAssetOpen(false);
+    setAssetActiveIndex(0);
+    setMsg(null);
+  }
+
+  async function confirmScannedSinglePickup() {
+    setScanResult(null);
+    await saveMovement();
+  }
+
+  function addScannedToCartQuick() {
+    setScanResult(null);
+    addSelectedToCart();
   }
 
   useEffect(() => {
@@ -1394,6 +1428,109 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 </button>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {scanResult && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+            zIndex: 1100,
+          }}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: 14,
+              padding: 24,
+              maxWidth: 520,
+              width: "100%",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.3)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: 16 }}>
+                  {scanResult.source === "barcode" ? "Scansione barcode" : "Scansione NFC"}
+                </div>
+                <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
+                  {scanResult.mode === "CART" ? "Aggiunta rapida al carrello" : "Conferma prelievo singolo"}
+                </div>
+              </div>
+              <span
+                title={scanResultCanPickup ? "Disponibile" : "Indisponibile"}
+                style={{
+                  width: 14,
+                  height: 14,
+                  borderRadius: "50%",
+                  backgroundColor: scanResultCanPickup ? "#22c55e" : "#ef4444",
+                  boxShadow: `0 0 8px ${scanResultCanPickup ? "#22c55e" : "#ef4444"}`,
+                  flexShrink: 0,
+                  marginTop: 4,
+                }}
+                aria-hidden
+              />
+            </div>
+
+            <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 12, color: "#64748b" }}>Attrezzatura</div>
+                <div style={{ fontWeight: 900, fontSize: 18 }}>
+                  {scanResult.asset.serial_number || scanResult.asset.asset_code}
+                </div>
+                <div style={{ marginTop: 4 }}>{scanResult.asset.name}</div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+                <div style={{ padding: 12, background: "#f8fafc", borderRadius: 10, border: "1px solid #e2e8f0" }}>
+                  <div style={{ fontSize: 12, color: "#64748b" }}>Magazzino</div>
+                  <div style={{ fontWeight: 800 }}>{scanResult.asset.warehouse || "—"}</div>
+                </div>
+                <div style={{ padding: 12, background: "#f8fafc", borderRadius: 10, border: "1px solid #e2e8f0" }}>
+                  <div style={{ fontSize: 12, color: "#64748b" }}>Stato</div>
+                  <div style={{ fontWeight: 800 }}>{EQUIPMENT_STATUS_LABELS[scanResult.asset.status]}</div>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: 12,
+                  borderRadius: 10,
+                  border: `1px solid ${scanResultCanPickup ? "rgba(34,197,94,0.25)" : "rgba(239,68,68,0.25)"}`,
+                  background: scanResultCanPickup ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)",
+                  fontWeight: 700,
+                  color: scanResultCanPickup ? "#166534" : "#991b1b",
+                }}
+              >
+                {scanResultCanPickup
+                  ? "Disponibile per il prelievo."
+                  : scanResultHasOpenMovement
+                    ? "Indisponibile: attrezzatura con movimento aperto."
+                    : "Indisponibile: attrezzatura non disponibile al prelievo."}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, marginTop: 18, flexWrap: "wrap" }}>
+              <button className="btn" type="button" onClick={resetScannedSelection}>
+                Indietro
+              </button>
+              {scanResult.mode === "CART" ? (
+                <button className="btn btnPrimary" type="button" onClick={addScannedToCartQuick} disabled={!scanResultCanPickup}>
+                  Aggiungi
+                </button>
+              ) : (
+                <button className="btn btnPrimary" type="button" onClick={confirmScannedSinglePickup} disabled={!scanResultCanPickup || saving}>
+                  {saving ? "Salvataggio..." : "Conferma prelievo"}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

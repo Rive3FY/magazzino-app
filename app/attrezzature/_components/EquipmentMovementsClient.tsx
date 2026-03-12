@@ -844,7 +844,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-          <div style={{ minWidth: 240 }}>
+          <div className="mobileInputFull" style={{ minWidth: 240 }}>
             <label className="label" htmlFor={`move-mode-${area}`}>Modalità uscita</label>
             <select
               id={`move-mode-${area}`}
@@ -1364,7 +1364,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                         Solo il creatore del movimento o l&apos;admin può chiudere questa uscita.
                       </div>
 
-                      <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
+                      <div className="mobileGrid1" style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
                         <div style={{ gridColumn: "span 4" }}>
                           <label className="label" htmlFor="equipmentCloseResolution">
                             Esito finale

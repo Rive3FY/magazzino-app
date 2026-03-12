@@ -74,7 +74,7 @@ a.btn, a.btnPrimary{ border: none !important; box-shadow: none; }
 ========================= */
 .app{
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 260px minmax(0, 1fr);
   grid-template-rows: var(--banner-height) 1fr;
   min-height: 100vh;
   margin: 0;
@@ -482,6 +482,8 @@ body:has(.appLogin) {
   padding: 0;
   grid-column: 2;
   grid-row: 2;
+  min-width: 0;
+  width: 100%;
 }
 
 /* Topbar - stesso stile banner */
@@ -788,6 +790,8 @@ body:has(.appLogin) {
   padding: 16px;
   background: var(--bg);
   margin: 0;
+  min-width: 0;
+  max-width: 100%;
 }
 
 
@@ -1777,6 +1781,11 @@ html, body {
     padding: 0;
   }
 
+  .main{
+    grid-column: 1;
+    grid-row: 2;
+  }
+
   /* Hamburger visibile su mobile */
   .hamburgerBtn{
     display: flex;
@@ -1869,6 +1878,11 @@ html, body {
     flex-shrink: 1;
   }
 
+  .topbarHomeBtn,
+  .userPillLink {
+    min-width: 0;
+  }
+
   /* Su schermi molto piccoli nascondi il testo "Home" per evitare overflow */
   @media (max-width: 380px) {
     .topbarHomeBtn span:last-of-type {
@@ -1944,6 +1958,7 @@ html, body {
   }
 
   .mobileGrid1 > * {
+    grid-column: 1 / -1 !important;
     min-width: 0;
     overflow: hidden;
     max-width: 100%;

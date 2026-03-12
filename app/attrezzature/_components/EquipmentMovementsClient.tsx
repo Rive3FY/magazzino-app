@@ -512,6 +512,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     setForm((prev) => ({ ...prev, equipment_id: "" }));
     setAssetSearch("");
     setAssetOpen(false);
+    setAssetActiveIndex(0);
     setScanMode("CART");
     setMsg("Attrezzatura aggiunta al carrello.");
   }
@@ -938,7 +939,9 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 {assetMatches.length === 0 ? (
                   <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
                 ) : (
-                  assetMatches.map((asset, idx) => (
+                  assetMatches.map((asset, idx) => {
+                    const ledColor = asset.status === "AVAILABLE" ? "#22c55e" : "#ef4444";
+                    return (
                     <div
                       key={asset.id}
                       onMouseEnter={() => setAssetActiveIndex(idx)}
@@ -951,15 +954,34 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                         cursor: "pointer",
                         background: idx === assetActiveIndex ? "#eef2ff" : "white",
                         borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 10,
                       }}
                     >
-                      <div style={{ fontWeight: 900, color: "#0f172a" }}>{asset.serial_number || asset.asset_code}</div>
-                      <div style={{ fontSize: 12, color: "#334155" }}>{asset.name}</div>
-                      {asset.notes && (
-                        <div style={{ fontSize: 11, color: "#64748b", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.notes}</div>
-                      )}
+                      <span
+                        title={EQUIPMENT_STATUS_LABELS[asset.status]}
+                        style={{
+                          width: 10,
+                          height: 10,
+                          borderRadius: "50%",
+                          backgroundColor: ledColor,
+                          boxShadow: `0 0 6px ${ledColor}`,
+                          flexShrink: 0,
+                          marginTop: 5,
+                        }}
+                        aria-hidden
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 900, color: "#0f172a" }}>{asset.serial_number || asset.asset_code}</div>
+                        <div style={{ fontSize: 12, color: "#334155" }}>{asset.name}</div>
+                        {asset.notes && (
+                          <div style={{ fontSize: 11, color: "#64748b", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.notes}</div>
+                        )}
+                      </div>
                     </div>
-                  ))
+                  );
+                  })
                 )}
               </div>
             )}
@@ -979,12 +1001,15 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
               }}
             >
               <option value="">Seleziona attrezzatura</option>
-              {filteredAssets.map((asset) => (
+              {filteredAssets.map((asset) => {
+                const led = asset.status === "AVAILABLE" ? "🟢" : "🔴";
+                return (
                 <option key={asset.id} value={asset.id}>
-                  {(asset.serial_number || asset.asset_code)} - {asset.name}
+                  {led} {(asset.serial_number || asset.asset_code)} - {asset.name}
                   {asset.notes ? ` · ${asset.notes}` : ""}
                 </option>
-              ))}
+              );
+              })}
             </select>
           </div>
 

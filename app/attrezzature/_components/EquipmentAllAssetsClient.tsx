@@ -57,6 +57,15 @@ function NfcIcon() {
   );
 }
 
+function PlusIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
 export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const { user, loading: authLoading, approved } = useAuth();
   const access = useIsAdmin();
@@ -75,7 +84,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const [msg, setMsg] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<EquipmentAssetRow | null>(null);
-  const [form, setForm] = useState<AssetFormState>(emptyForm);
+  const [formEntries, setFormEntries] = useState<AssetFormState[]>([emptyForm]);
   const [cameraScanning, setCameraScanning] = useState(false);
   const [searchByNfcScanning, setSearchByNfcScanning] = useState(false);
   const [isNfcSupported, setIsNfcSupported] = useState(false);
@@ -85,7 +94,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
-  const notesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (authLoading) return;
@@ -152,13 +160,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     setIsIOS(/iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
   }, []);
 
-  useEffect(() => {
-    if (modalOpen && notesTextareaRef.current) {
-      const ta = notesTextareaRef.current;
-      ta.style.height = "auto";
-      ta.style.height = `${Math.max(40, ta.scrollHeight)}px`;
-    }
-  }, [modalOpen, form.notes]);
 
   const categories = useMemo(() => {
     const set = new Set<string>();
@@ -431,27 +432,35 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     if (saving) return;
     setModalOpen(false);
     setEditingRow(null);
-    setForm(emptyForm);
+    setFormEntries([emptyForm]);
     setMsg(null);
   }
 
   function openCreate() {
     setEditingRow(null);
-    setForm(emptyForm);
+    setFormEntries([emptyForm]);
     setMsg(null);
     setModalOpen(true);
   }
 
   function openEdit(row: EquipmentAssetRow) {
     setEditingRow(row);
-    setForm({
+    setFormEntries([{
       serial_number: row.serial_number ?? "",
       name: row.name ?? "",
       category: row.category ?? "",
       notes: row.notes ?? "",
-    });
+    }]);
     setMsg(null);
     setModalOpen(true);
+  }
+
+  function addFormEntry() {
+    setFormEntries((prev) => [...prev, { ...emptyForm }]);
+  }
+
+  function removeFormEntry(idx: number) {
+    setFormEntries((prev) => prev.filter((_, i) => i !== idx));
   }
 
   async function saveAsset() {
@@ -460,39 +469,72 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
       return;
     }
 
-    const parsed = equipmentAssetSchema.safeParse(form);
-    if (!parsed.success) {
-      setMsg(parsed.error.issues[0]?.message ?? "Verifica i dati inseriti.");
+    if (editingRow) {
+      const form = formEntries[0];
+      const parsed = equipmentAssetSchema.safeParse(form);
+      if (!parsed.success) {
+        setMsg(parsed.error.issues[0]?.message ?? "Verifica i dati inseriti.");
+        return;
+      }
+      setSaving(true);
+      setMsg(null);
+      const serial = form.serial_number.trim();
+      const payload = {
+        asset_code: serial,
+        serial_number: serial,
+        name: form.name.trim(),
+        category: form.category.trim() || null,
+        notes: form.notes.trim() || null,
+        equipment_area: area,
+      };
+      const result = await supabase.from("equipment_assets").update(payload).eq("id", editingRow.id).eq("equipment_area", area).select("id").single();
+      if (result.error) {
+        setMsg("Salvataggio non riuscito: " + result.error.message);
+        setSaving(false);
+        return;
+      }
+      await writeAuditLog("EQUIPMENT_UPDATED", editingRow.id, payload);
+      toast.success("Attrezzatura aggiornata");
+      await loadAssets();
+      setSaving(false);
+      closeModal();
+      return;
+    }
+
+    const validEntries: AssetFormState[] = [];
+    for (const f of formEntries) {
+      const r = equipmentAssetSchema.safeParse(f);
+      if (r.success) validEntries.push(f);
+    }
+    if (validEntries.length === 0) {
+      const r = equipmentAssetSchema.safeParse(formEntries[0]);
+      setMsg(r.success ? "Inserisci almeno un'attrezzatura valida." : (r.error?.issues[0]?.message ?? "Verifica i dati inseriti."));
       return;
     }
 
     setSaving(true);
     setMsg(null);
-
-    const serial = form.serial_number.trim();
-    const payload = {
-      asset_code: serial,
-      serial_number: serial,
-      name: form.name.trim(),
-      category: form.category.trim() || null,
-      notes: form.notes.trim() || null,
-      equipment_area: area,
-    };
-
-    const result = editingRow
-      ? await supabase.from("equipment_assets").update(payload).eq("id", editingRow.id).eq("equipment_area", area).select("id").single()
-      : await supabase.from("equipment_assets").insert(payload).select("id").single();
-
-    if (result.error) {
-      console.error(result.error);
-      setMsg("Salvataggio non riuscito: " + result.error.message);
-      setSaving(false);
-      return;
+    let created = 0;
+    for (const form of validEntries) {
+      const serial = form.serial_number.trim();
+      const payload = {
+        asset_code: serial,
+        serial_number: serial,
+        name: form.name.trim(),
+        category: form.category.trim() || null,
+        notes: form.notes.trim() || null,
+        equipment_area: area,
+      };
+      const result = await supabase.from("equipment_assets").insert(payload).select("id").single();
+      if (result.error) {
+        setMsg(`Salvataggio non riuscito (${serial}): ${result.error.message}`);
+        setSaving(false);
+        return;
+      }
+      await writeAuditLog("EQUIPMENT_CREATED", result.data?.id ?? null, payload);
+      created++;
     }
-
-    const entityId = result.data?.id ?? editingRow?.id ?? null;
-    await writeAuditLog(editingRow ? "EQUIPMENT_UPDATED" : "EQUIPMENT_CREATED", entityId, payload);
-    toast.success(editingRow ? "Attrezzatura aggiornata" : "Attrezzatura creata");
+    toast.success(created === 1 ? "Attrezzatura creata" : `${created} attrezzature create`);
     await loadAssets();
     setSaving(false);
     closeModal();
@@ -562,7 +604,8 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <div className="equipmentAreaPill">Area fissa: {areaLabel}</div>
               {isAdmin && (
-                <button className="btn btnPrimary" onClick={openCreate}>
+                <button className="btn btnPrimary" onClick={openCreate} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <PlusIcon />
                   Nuova attrezzatura
                 </button>
               )}
@@ -860,41 +903,90 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
 
             {msg && <div className="equipmentInlineMessage" style={{ marginTop: 12 }}>{msg}</div>}
 
-            <div className="equipmentFormGrid mobileGrid1" style={{ marginTop: 12 }}>
-              <div style={{ minWidth: 0 }}>
-                <label className="label" htmlFor={`modal-asset-serial-${area}`}>Seriale / matricola</label>
-                <input id={`modal-asset-serial-${area}`} className="input" value={form.serial_number} onChange={(e) => setForm((prev) => ({ ...prev, serial_number: e.target.value }))} placeholder="Obbligatorio" />
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <label className="label" htmlFor={`modal-asset-name-${area}`}>Nome attrezzatura</label>
-                <input id={`modal-asset-name-${area}`} className="input" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Obbligatorio" />
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <label className="label" htmlFor={`modal-asset-category-${area}`}>Categoria / sottogruppo</label>
-                <input id={`modal-asset-category-${area}`} className="input" value={form.category} onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))} placeholder="Es. Braghe 1500kg" />
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <label className="label" htmlFor={`modal-asset-notes-${area}`}>Note</label>
-                <textarea
-                  ref={notesTextareaRef}
-                  id={`modal-asset-notes-${area}`}
-                  className="input"
-                  value={form.notes}
-                  onChange={(e) => {
-                    setForm((prev) => ({ ...prev, notes: e.target.value }));
-                    const ta = e.target;
-                    ta.style.height = "auto";
-                    ta.style.height = `${Math.max(40, ta.scrollHeight)}px`;
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 16 }}>
+              {formEntries.map((entry, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    padding: 14,
+                    border: "1px solid rgba(15,23,42,0.12)",
+                    borderRadius: 12,
+                    background: "rgba(248,250,252,0.8)",
+                    position: "relative",
                   }}
-                  onFocus={(e) => {
-                    const ta = e.target;
-                    ta.style.height = "auto";
-                    ta.style.height = `${Math.max(40, ta.scrollHeight)}px`;
-                  }}
-                  rows={1}
-                  style={{ resize: "none", overflow: "hidden", height: 40, minHeight: 40, width: "100%", boxSizing: "border-box" }}
-                />
-              </div>
+                >
+                  {!editingRow && formEntries.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeFormEntry(idx)}
+                    aria-label="Rimuovi"
+                    style={{
+                      position: "absolute",
+                      top: 10,
+                      right: 10,
+                      width: 28,
+                      height: 28,
+                      padding: 0,
+                      border: "none",
+                      background: "rgba(239,68,68,0.15)",
+                      color: "#991b1b",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      fontSize: 16,
+                      lineHeight: 1,
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+                  <div className="equipmentFormGrid mobileGrid1" style={{ display: "grid", gap: 10 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <label className="label" htmlFor={`modal-asset-serial-${area}-${idx}`}>Seriale / matricola</label>
+                      <input id={`modal-asset-serial-${area}-${idx}`} className="input" value={entry.serial_number} onChange={(e) => setFormEntries((prev) => { const n = [...prev]; n[idx] = { ...n[idx], serial_number: e.target.value }; return n; })} placeholder="Obbligatorio" />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <label className="label" htmlFor={`modal-asset-name-${area}-${idx}`}>Nome attrezzatura</label>
+                      <input id={`modal-asset-name-${area}-${idx}`} className="input" value={entry.name} onChange={(e) => setFormEntries((prev) => { const n = [...prev]; n[idx] = { ...n[idx], name: e.target.value }; return n; })} placeholder="Obbligatorio" />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <label className="label" htmlFor={`modal-asset-category-${area}-${idx}`}>Categoria / sottogruppo</label>
+                      <input id={`modal-asset-category-${area}-${idx}`} className="input" value={entry.category} onChange={(e) => setFormEntries((prev) => { const n = [...prev]; n[idx] = { ...n[idx], category: e.target.value }; return n; })} placeholder="Es. Braghe 1500kg" />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <label className="label" htmlFor={`modal-asset-notes-${area}-${idx}`}>Note</label>
+                      <textarea
+                        id={`modal-asset-notes-${area}-${idx}`}
+                        className="input"
+                        value={entry.notes}
+                        onChange={(e) => {
+                          setFormEntries((prev) => { const n = [...prev]; n[idx] = { ...n[idx], notes: e.target.value }; return n; });
+                          const ta = e.target;
+                          ta.style.height = "auto";
+                          ta.style.height = `${Math.max(40, ta.scrollHeight)}px`;
+                        }}
+                        onFocus={(e) => {
+                          const ta = e.target;
+                          ta.style.height = "auto";
+                          ta.style.height = `${Math.max(40, ta.scrollHeight)}px`;
+                        }}
+                        rows={1}
+                        style={{ resize: "none", overflow: "hidden", height: 40, minHeight: 40, width: "100%", boxSizing: "border-box" }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {!editingRow && (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={addFormEntry}
+                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, alignSelf: "flex-start" }}
+                >
+                  <PlusIcon />
+                  Aggiungi attrezzatura
+                </button>
+              )}
             </div>
           </div>
         </div>

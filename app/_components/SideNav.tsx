@@ -8,7 +8,8 @@ import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import { useUsersCount } from "../_lib/hooks/useUsersCount";
 import { useSidebar } from "../_lib/SidebarContext";
 
-export default function SideNav() {
+type Props = { hideSidebar?: boolean };
+export default function SideNav({ hideSidebar = false }: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
@@ -81,14 +82,15 @@ export default function SideNav() {
     };
   }, [pathname, router, supabase, checked]);
 
+  const hiddenClass = hideSidebar ? " sidebarHidden" : "";
   return (
     <>
       <div
-        className={`sidebarOverlay ${isOpen ? "sidebarOverlayOpen" : ""}`}
+        className={`sidebarOverlay ${isOpen ? "sidebarOverlayOpen" : ""}${hiddenClass}`}
         onClick={() => setIsOpen(false)}
         aria-hidden="true"
       />
-      <aside className={`sidebar ${isOpen ? "sidebarOpen" : ""}`} aria-label="Menu di navigazione">
+      <aside className={`sidebar ${isOpen ? "sidebarOpen" : ""}${hiddenClass}`} aria-label="Menu di navigazione">
         <button
           type="button"
           className="sidebarCloseBtn"

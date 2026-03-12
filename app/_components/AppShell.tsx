@@ -22,7 +22,7 @@ export default function AppShell({ hasUser, displayName, displayBadge, children 
   return (
     <div className={hasUser ? `app ${hideSidebar ? "appNoSidebar" : ""}`.trim() : "app appLogin"}>
       {hasUser && <TopBar displayName={displayName} displayBadge={displayBadge} />}
-      {hasUser && !hideSidebar && <SideNav />}
+      {hasUser && <SideNav hideSidebar={hideSidebar} />}
 
       <div className="main">
         <div className="content">

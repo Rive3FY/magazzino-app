@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import JSZip from "jszip";
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { createClient as createServerClient } from "../../../_lib/supabase/server";
 import {
   buildEquipmentRegisterRows,
@@ -13,19 +12,6 @@ import {
   type EquipmentRegisterAsset,
   type EquipmentRegisterMovement,
 } from "../../../_lib/equipment-register-docx";
-
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url || !serviceKey) {
-    throw new Error("Missing env NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
-  }
-
-  return createSupabaseClient(url, serviceKey, {
-    auth: { persistSession: false },
-  });
-}
 
 function isEquipmentArea(value: string): value is EquipmentRegisterArea {
   return value === "LINEE" || value === "STAZIONI";
@@ -41,10 +27,10 @@ function buildRegisterPersonName(firstName: string | null | undefined, lastName:
 
 export async function GET(request: Request) {
   try {
-    const serverSupabase = await createServerClient();
+    const supabase = await createServerClient();
     const {
       data: { user },
-    } = await serverSupabase.auth.getUser();
+    } = await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
@@ -55,8 +41,6 @@ export async function GET(request: Request) {
     if (!isEquipmentArea(areaParam)) {
       return NextResponse.json({ error: "Area non valida" }, { status: 400 });
     }
-
-    const supabase = getSupabaseAdmin();
     const [assetsRes, movementsRes] = await Promise.all([
       supabase
         .from("equipment_assets")

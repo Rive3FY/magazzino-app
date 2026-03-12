@@ -602,6 +602,10 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                 <div className="equipmentInfoValue">{quickSelected.name}</div>
               </div>
               <div>
+                <div className="equipmentInfoLabel">Note / caratteristiche</div>
+                <div className="equipmentInfoValue">{quickSelected.notes || "—"}</div>
+              </div>
+              <div>
                 <div className="equipmentInfoLabel">Stato</div>
                 <div style={{ marginTop: 4 }}>
                   <span style={equipmentStatusStyle(quickSelected.status)}>{EQUIPMENT_STATUS_LABELS[quickSelected.status]}</span>

@@ -404,6 +404,11 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     return history.some((row) => row.equipment_id === scanResult.asset.id && getMovementStatus(row) === "OPEN");
   }, [history, scanResult]);
 
+  const scanResultAlreadyInCart = useMemo(() => {
+    if (!scanResult) return false;
+    return cart.includes(scanResult.asset.id);
+  }, [cart, scanResult]);
+
   const scanResultCanPickup = !!scanResult && scanResult.asset.status === "AVAILABLE" && !scanResultHasOpenMovement;
 
   useEffect(() => {
@@ -526,13 +531,25 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     setMsg(null);
   }
 
+  function restartCartScanner(source: "barcode" | "nfc") {
+    setCartOpen(false);
+    if (source === "barcode") {
+      void startCameraScanForSearch();
+      return;
+    }
+    void searchByNfc();
+  }
+
   function resetScannedSelection() {
+    const nextSource = scanResult?.source ?? null;
+    const shouldResumeCartScan = scanResult?.mode === "CART";
     setScanResult(null);
     setForm((prev) => ({ ...prev, equipment_id: "" }));
     setAssetSearch("");
     setAssetOpen(false);
     setAssetActiveIndex(0);
     setMsg(null);
+    if (shouldResumeCartScan && nextSource) restartCartScanner(nextSource);
   }
 
   async function confirmScannedSinglePickup() {
@@ -541,8 +558,10 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   }
 
   function addScannedToCartQuick() {
+    const nextSource = scanResult?.source ?? null;
     setScanResult(null);
     addSelectedToCart();
+    if (nextSource) restartCartScanner(nextSource);
   }
 
   useEffect(() => {
@@ -1485,7 +1504,10 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 <div style={{ fontWeight: 900, fontSize: 18 }}>
                   {scanResult.asset.serial_number || scanResult.asset.asset_code}
                 </div>
-                <div style={{ marginTop: 4 }}>{scanResult.asset.name}</div>
+                <div style={{ marginTop: 4 }}>
+                  {scanResult.asset.name}
+                  {scanResult.asset.notes ? ` · ${scanResult.asset.notes}` : ""}
+                </div>
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
@@ -1503,13 +1525,29 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 style={{
                   padding: 12,
                   borderRadius: 10,
-                  border: `1px solid ${scanResultCanPickup ? "rgba(34,197,94,0.25)" : "rgba(239,68,68,0.25)"}`,
-                  background: scanResultCanPickup ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)",
+                  border: `1px solid ${
+                    scanResultAlreadyInCart
+                      ? "rgba(245,158,11,0.35)"
+                      : scanResultCanPickup
+                        ? "rgba(34,197,94,0.25)"
+                        : "rgba(239,68,68,0.25)"
+                  }`,
+                  background: scanResultAlreadyInCart
+                    ? "rgba(245,158,11,0.10)"
+                    : scanResultCanPickup
+                      ? "rgba(34,197,94,0.08)"
+                      : "rgba(239,68,68,0.08)",
                   fontWeight: 700,
-                  color: scanResultCanPickup ? "#166534" : "#991b1b",
+                  color: scanResultAlreadyInCart
+                    ? "#b45309"
+                    : scanResultCanPickup
+                      ? "#166534"
+                      : "#991b1b",
                 }}
               >
-                {scanResultCanPickup
+                {scanResultAlreadyInCart
+                  ? "Attrezzatura già aggiunta al carrello."
+                  : scanResultCanPickup
                   ? "Disponibile per il prelievo."
                   : scanResultHasOpenMovement
                     ? "Indisponibile: attrezzatura con movimento aperto."
@@ -1522,7 +1560,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 Indietro
               </button>
               {scanResult.mode === "CART" ? (
-                <button className="btn btnPrimary" type="button" onClick={addScannedToCartQuick} disabled={!scanResultCanPickup}>
+                <button className="btn btnPrimary" type="button" onClick={addScannedToCartQuick} disabled={!scanResultCanPickup || scanResultAlreadyInCart}>
                   Aggiungi
                 </button>
               ) : (

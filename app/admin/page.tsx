@@ -209,6 +209,13 @@ export default function AdminPage() {
   const [excelRequestsMsg, setExcelRequestsMsg] = useState<string | null>(null);
   const [excelRequestsWorking, setExcelRequestsWorking] = useState<string | null>(null);
 
+  // RESET TAG NFC
+  const [nfcResetModalOpen, setNfcResetModalOpen] = useState(false);
+  const [nfcTagIdInput, setNfcTagIdInput] = useState("");
+  const [nfcResetLoading, setNfcResetLoading] = useState(false);
+  const [nfcResetMsg, setNfcResetMsg] = useState<string | null>(null);
+  const [nfcScanning, setNfcScanning] = useState(false);
+
   async function guardAdmin() {
     const { data: u } = await supabase.auth.getUser();
     if (!u.user) {
@@ -329,6 +336,57 @@ export default function AdminPage() {
       alert("Errore reset magazzino: " + (e instanceof Error ? e.message : "sconosciuto"));
     } finally {
       setResetting(false);
+    }
+  }
+
+  async function handleResetNfcTag() {
+    const tagId = nfcTagIdInput.trim();
+    if (!tagId) {
+      setNfcResetMsg("Inserisci l'ID del tag NFC da resettare.");
+      return;
+    }
+    setNfcResetLoading(true);
+    setNfcResetMsg(null);
+    try {
+      const res = await fetch("/api/admin/reset-nfc-tag", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ nfcTagId: tagId }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || res.statusText);
+      setNfcResetMsg(json.message ?? "Tag NFC resettato.");
+      setNfcTagIdInput("");
+    } catch (e: unknown) {
+      setNfcResetMsg("Errore: " + (e instanceof Error ? e.message : "sconosciuto"));
+    } finally {
+      setNfcResetLoading(false);
+    }
+  }
+
+  async function scanNfcForReset() {
+    if (!("NDEFReader" in window)) {
+      setNfcResetMsg("NFC non disponibile su questo dispositivo (Chrome Android con HTTPS).");
+      return;
+    }
+    setNfcScanning(true);
+    setNfcResetMsg(null);
+    try {
+      const ndef = new NDEFReader();
+      await ndef.scan();
+      const handler = (event: NDEFReadingEvent) => {
+        ndef.removeEventListener("reading", handler);
+        const id = event.serialNumber ?? "";
+        setNfcTagIdInput(id);
+        setNfcScanning(false);
+        setNfcResetMsg("Tag letto. Clicca Reset per procedere.");
+      };
+      ndef.addEventListener("reading", handler);
+      setNfcResetMsg("Avvicina il dispositivo al tag NFC...");
+    } catch (e: unknown) {
+      setNfcResetMsg("Errore lettura NFC: " + (e instanceof Error ? e.message : "sconosciuto"));
+      setNfcScanning(false);
     }
   }
 
@@ -662,6 +720,13 @@ export default function AdminPage() {
                 >
                   {resetting ? "Reset…" : "Reset magazzino"}
                 </button>
+                <button
+                  className="btn"
+                  onClick={() => { setNfcResetModalOpen(true); setNfcResetMsg(null); setNfcTagIdInput(""); }}
+                  title="Rimuovi l'associazione di un tag NFC da attrezzature e scaffali"
+                >
+                  Reset tag NFC
+                </button>
               </div>
             </div>
             {msg && <div style={{ marginBottom: 10, fontWeight: 700 }}>{msg}</div>}
@@ -971,6 +1036,53 @@ export default function AdminPage() {
           </>
         )}
       </div>
+
+      {nfcResetModalOpen && (
+        <div
+          className="modalOverlay"
+          onClick={() => setNfcResetModalOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="nfc-reset-title"
+        >
+          <div className="modalWindow" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420, padding: 20 }}>
+            <div id="nfc-reset-title" style={{ fontWeight: 900, fontSize: 18, marginBottom: 12 }}>Reset tag NFC</div>
+            <p style={{ fontSize: 14, color: "#64748b", marginBottom: 16 }}>
+              Inserisci o scansiona l&apos;ID del tag NFC per rimuovere l&apos;associazione da attrezzature e scaffali.
+            </p>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+              <input
+                className="input"
+                type="text"
+                placeholder="ID tag NFC"
+                value={nfcTagIdInput}
+                onChange={(e) => setNfcTagIdInput(e.target.value)}
+                style={{ flex: 1, minWidth: 180 }}
+              />
+              <button
+                className="btn"
+                onClick={scanNfcForReset}
+                disabled={nfcScanning}
+              >
+                {nfcScanning ? "Scansione…" : "Scansiona NFC"}
+              </button>
+            </div>
+            {nfcResetMsg && (
+              <div style={{ marginBottom: 12, fontSize: 14, fontWeight: 600 }}>{nfcResetMsg}</div>
+            )}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="btn" onClick={() => setNfcResetModalOpen(false)}>Chiudi</button>
+              <button
+                className="btn btnPrimary"
+                onClick={handleResetNfcTag}
+                disabled={nfcResetLoading || !nfcTagIdInput.trim()}
+              >
+                {nfcResetLoading ? "Reset…" : "Reset tag"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

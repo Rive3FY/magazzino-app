@@ -25,6 +25,8 @@ type Props = {
 type AssetFormState = {
   serial_number: string;
   name: string;
+  category: string;
+  notes: string;
 };
 
 type NfcReassignState = {
@@ -39,6 +41,8 @@ const supabase = createClient();
 const emptyForm: AssetFormState = {
   serial_number: "",
   name: "",
+  category: "",
+  notes: "",
 };
 
 function NfcIcon() {
@@ -67,6 +71,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchActiveIndex, setSearchActiveIndex] = useState(0);
   const [statusFilter, setStatusFilter] = useState<"ALL" | EquipmentStatus>("ALL");
+  const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [msg, setMsg] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<EquipmentAssetRow | null>(null);
@@ -80,6 +85,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
+  const notesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (authLoading) return;
@@ -146,15 +152,34 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     setIsIOS(/iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
   }, []);
 
+  useEffect(() => {
+    if (modalOpen && notesTextareaRef.current) {
+      const ta = notesTextareaRef.current;
+      ta.style.height = "auto";
+      ta.style.height = `${Math.max(40, ta.scrollHeight)}px`;
+    }
+  }, [modalOpen, form.notes]);
+
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    for (const row of rows) {
+      const c = (row.category ?? "").trim();
+      if (c) set.add(c);
+    }
+    return Array.from(set).sort();
+  }, [rows]);
+
   const filtered = useMemo(() => {
     const search = q.trim().toLowerCase();
     return rows.filter((row) => {
       if (statusFilter !== "ALL" && row.status !== statusFilter) return false;
+      if (categoryFilter && (row.category ?? "").trim() !== categoryFilter) return false;
       if (!search) return true;
 
       return [
         row.serial_number,
         row.name,
+        row.category,
         row.assigned_to_name,
         row.assigned_to_badge,
         row.barcode,
@@ -163,7 +188,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(search));
     });
-  }, [q, rows, statusFilter]);
+  }, [q, rows, statusFilter, categoryFilter]);
 
   const stats = useMemo(() => {
     return EQUIPMENT_STATUS_OPTIONS.reduce<Record<EquipmentStatus, number>>(
@@ -182,12 +207,15 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
 
   const searchMatches = useMemo(() => {
     const search = q.trim().toLowerCase();
-    if (!search) return rows.slice(0, 12);
-    return rows
+    let base = rows;
+    if (categoryFilter) base = base.filter((row) => (row.category ?? "").trim() === categoryFilter);
+    if (!search) return base.slice(0, 12);
+    return base
       .filter((row) =>
         [
           row.serial_number,
           row.name,
+          row.category,
           row.assigned_to_name,
           row.assigned_to_badge,
           row.barcode,
@@ -197,7 +225,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
           .some((value) => String(value).toLowerCase().includes(search))
       )
       .slice(0, 12);
-  }, [q, rows]);
+  }, [q, rows, categoryFilter]);
 
   const searchActive = useMemo(() => searchMatches[searchActiveIndex] ?? null, [searchMatches, searchActiveIndex]);
 
@@ -419,6 +447,8 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     setForm({
       serial_number: row.serial_number ?? "",
       name: row.name ?? "",
+      category: row.category ?? "",
+      notes: row.notes ?? "",
     });
     setMsg(null);
     setModalOpen(true);
@@ -444,6 +474,8 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
       asset_code: serial,
       serial_number: serial,
       name: form.name.trim(),
+      category: form.category.trim() || null,
+      notes: form.notes.trim() || null,
       equipment_area: area,
     };
 
@@ -622,6 +654,20 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
             </div>
 
             <div style={{ minWidth: 0 }}>
+              <label className="label" htmlFor={`all-equipment-category-${area}`}>Categoria</label>
+              <select
+                id={`all-equipment-category-${area}`}
+                className="input"
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+              >
+                <option value="">Tutte le categorie</option>
+                {categories.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ minWidth: 0 }}>
               <label className="label" htmlFor={`all-equipment-status-${area}`}>Stato</label>
               <select
                 id={`all-equipment-status-${area}`}
@@ -666,6 +712,8 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
               <tr>
                 <th>Seriale</th>
                 <th>Nome</th>
+                <th>Categoria</th>
+                <th>Note</th>
                 <th>Stato</th>
                 <th>Ubicazione</th>
                 <th>Assegnata a</th>
@@ -678,12 +726,12 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
             <tbody>
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={9}>Nessuna attrezzatura trovata.</td>
+                  <td colSpan={11}>Nessuna attrezzatura trovata.</td>
                 </tr>
               )}
               {loading && (
                 <tr>
-                  <td colSpan={9}>Caricamento attrezzature...</td>
+                  <td colSpan={11}>Caricamento attrezzature...</td>
                 </tr>
               )}
               {filtered.map((row) => {
@@ -700,6 +748,8 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                       </div>
                     </td>
                     <td>{row.name}</td>
+                    <td>{row.category || "—"}</td>
+                    <td style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={row.notes ?? ""}>{row.notes || "—"}</td>
                     <td><span style={equipmentStatusStyle(row.status)}>{EQUIPMENT_STATUS_LABELS[row.status]}</span></td>
                     <td>{location}</td>
                     <td>{assignedTo}</td>
@@ -818,6 +868,32 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
               <div style={{ minWidth: 0 }}>
                 <label className="label" htmlFor={`modal-asset-name-${area}`}>Nome attrezzatura</label>
                 <input id={`modal-asset-name-${area}`} className="input" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Obbligatorio" />
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <label className="label" htmlFor={`modal-asset-category-${area}`}>Categoria / sottogruppo</label>
+                <input id={`modal-asset-category-${area}`} className="input" value={form.category} onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))} placeholder="Es. Braghe 1500kg" />
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <label className="label" htmlFor={`modal-asset-notes-${area}`}>Note</label>
+                <textarea
+                  ref={notesTextareaRef}
+                  id={`modal-asset-notes-${area}`}
+                  className="input"
+                  value={form.notes}
+                  onChange={(e) => {
+                    setForm((prev) => ({ ...prev, notes: e.target.value }));
+                    const ta = e.target;
+                    ta.style.height = "auto";
+                    ta.style.height = `${Math.max(40, ta.scrollHeight)}px`;
+                  }}
+                  onFocus={(e) => {
+                    const ta = e.target;
+                    ta.style.height = "auto";
+                    ta.style.height = `${Math.max(40, ta.scrollHeight)}px`;
+                  }}
+                  rows={1}
+                  style={{ resize: "none", overflow: "hidden", height: 40, minHeight: 40, width: "100%", boxSizing: "border-box" }}
+                />
               </div>
             </div>
           </div>

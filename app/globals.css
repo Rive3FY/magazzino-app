@@ -1279,6 +1279,13 @@ input[type="date"].input{
   padding-right:12px;
 }
 
+/* Textarea con stile input coerente */
+textarea.input{
+  padding: 0 12px;
+  line-height: 1.4;
+  vertical-align: top;
+}
+
 /* =========================
    ATTREZZATURE
 ========================= */

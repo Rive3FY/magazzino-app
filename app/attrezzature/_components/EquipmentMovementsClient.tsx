@@ -167,12 +167,14 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const [msg, setMsg] = useState<string | null>(null);
   const [scanMode, setScanMode] = useState<"NORMAL" | "CART">("NORMAL");
   const [assetSearch, setAssetSearch] = useState("");
+  const [assetCategoryFilter, setAssetCategoryFilter] = useState<string>("");
   const [assetOpen, setAssetOpen] = useState(false);
   const [assetActiveIndex, setAssetActiveIndex] = useState(0);
   const [cartOpen, setCartOpen] = useState(false);
   const [cart, setCart] = useState<string[]>([]);
   const [cartNote, setCartNote] = useState("");
   const [cartDestination, setCartDestination] = useState("");
+  const [cartInterventionPlanEnabled, setCartInterventionPlanEnabled] = useState(false);
   const [cartInterventionPlanNumber, setCartInterventionPlanNumber] = useState("");
   const [profileInfo, setProfileInfo] = useState<UserProfileInfo | null>(null);
   const [cameraScanning, setCameraScanning] = useState(false);
@@ -315,15 +317,26 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const selectedAsset = form.equipment_id ? assetMap.get(form.equipment_id) ?? null : null;
   const cartItems = useMemo(() => cart.map((id) => assetMap.get(id)).filter(Boolean) as EquipmentAssetRow[], [assetMap, cart]);
 
+  const assetCategories = useMemo(() => {
+    const set = new Set<string>();
+    for (const asset of assets) {
+      const c = (asset.category ?? "").trim();
+      if (c) set.add(c);
+    }
+    return Array.from(set).sort();
+  }, [assets]);
+
   const filteredAssets = useMemo(() => {
+    let base = assets;
+    if (assetCategoryFilter) base = base.filter((asset) => (asset.category ?? "").trim() === assetCategoryFilter);
     const search = assetSearch.trim().toLowerCase();
-    if (!search) return assets;
-    return assets.filter((asset) =>
-      [asset.serial_number, asset.name, asset.barcode, asset.nfc_tag_id, asset.assigned_to_name]
+    if (!search) return base;
+    return base.filter((asset) =>
+      [asset.serial_number, asset.name, asset.category, asset.barcode, asset.nfc_tag_id, asset.assigned_to_name]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(search))
     );
-  }, [assetSearch, assets]);
+  }, [assetSearch, assets, assetCategoryFilter]);
 
   const assetMatches = useMemo(() => filteredAssets.slice(0, 12), [filteredAssets]);
   const assetActive = useMemo(() => assetMatches[assetActiveIndex] ?? null, [assetActiveIndex, assetMatches]);
@@ -520,10 +533,6 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       setMsg("La destinazione è obbligatoria.");
       return;
     }
-    if (!cartInterventionPlanNumber.trim()) {
-      setMsg("Il numero piano d'intervento è obbligatorio nel prelievo multiplo.");
-      return;
-    }
     if (!profileInfo?.fullName || !profileInfo.badge) {
       setMsg("Completa nome, cognome e badge nel profilo prima di usare il carrello.");
       return;
@@ -556,7 +565,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           status: "OPEN",
           note: normalizeNullable(cartNote),
           destination: normalizeNullable(cartDestination),
-          intervention_plan_number: normalizeNullable(cartInterventionPlanNumber),
+          intervention_plan_number: cartInterventionPlanEnabled ? normalizeNullable(cartInterventionPlanNumber) : null,
           created_by: user.id,
           created_by_name: profileInfo.fullName,
           created_by_email: user.email ?? null,
@@ -581,6 +590,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       setCart([]);
       setCartNote("");
       setCartDestination("");
+      setCartInterventionPlanEnabled(false);
       setCartInterventionPlanNumber("");
       setCartOpen(false);
       setScanMode("NORMAL");
@@ -863,8 +873,22 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         </div>
 
         <div className="equipmentFilterGrid mobileGrid1">
+          <div style={{ minWidth: 0 }}>
+            <label className="label" htmlFor={`move-category-${area}`}>Categoria</label>
+            <select
+              id={`move-category-${area}`}
+              className="input"
+              value={assetCategoryFilter}
+              onChange={(e) => setAssetCategoryFilter(e.target.value)}
+            >
+              <option value="">Tutte</option>
+              {assetCategories.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
           <div ref={assetBoxRef} style={{ minWidth: 0, position: "relative" }}>
-            <label className="label" htmlFor={`move-search-${area}`}>Attrezzatura (seriale o nome)</label>
+            <label className="label" htmlFor={`move-search-${area}`}>Attrezzatura</label>
             <input
               id={`move-search-${area}`}
               className="input"
@@ -892,7 +916,6 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                   setAssetOpen(false);
                 }
               }}
-              placeholder="Filtra per seriale, nome, barcode, NFC..."
             />
             {assetOpen && assetSearch.trim() && (
               <div
@@ -932,6 +955,9 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                     >
                       <div style={{ fontWeight: 900, color: "#0f172a" }}>{asset.serial_number || asset.asset_code}</div>
                       <div style={{ fontSize: 12, color: "#334155" }}>{asset.name}</div>
+                      {asset.notes && (
+                        <div style={{ fontSize: 11, color: "#64748b", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.notes}</div>
+                      )}
                     </div>
                   ))
                 )}
@@ -956,6 +982,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
               {filteredAssets.map((asset) => (
                 <option key={asset.id} value={asset.id}>
                   {(asset.serial_number || asset.asset_code)} - {asset.name}
+                  {asset.notes ? ` · ${asset.notes}` : ""}
                 </option>
               ))}
             </select>
@@ -972,7 +999,6 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 if (scanMode === "CART") setCartNote(value);
                 else setForm((prev) => ({ ...prev, note: value }));
               }}
-              placeholder="Commessa / reparto / motivo uscita"
             />
           </div>
 
@@ -987,19 +1013,32 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 if (scanMode === "CART") setCartDestination(value);
                 else setForm((prev) => ({ ...prev, destination: value }));
               }}
-              placeholder="Reparto / linea / stazione di utilizzo"
             />
           </div>
 
           {scanMode === "CART" && (
-            <div style={{ minWidth: 0 }}>
-              <label className="label" htmlFor={`move-intervention-plan-${area}`}>Numero piano d&apos;intervento *</label>
+            <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 10 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", margin: 0 }}>
+                <input
+                  type="checkbox"
+                  checked={cartInterventionPlanEnabled}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setCartInterventionPlanEnabled(checked);
+                    if (!checked) setCartInterventionPlanNumber("");
+                  }}
+                  style={{ width: 18, height: 18, accentColor: "#0f172a" }}
+                  aria-label="Inserisci piano di intervento"
+                />
+                <span className="label" style={{ margin: 0 }}>Piano d&apos;intervento</span>
+              </label>
               <input
                 id={`move-intervention-plan-${area}`}
                 className="input"
                 value={cartInterventionPlanNumber}
                 onChange={(e) => setCartInterventionPlanNumber(e.target.value)}
-                placeholder="Numero piano d'intervento"
+                disabled={!cartInterventionPlanEnabled}
+                style={{ flex: 1, minWidth: 0, opacity: cartInterventionPlanEnabled ? 1 : 0.6 }}
               />
             </div>
           )}

@@ -63,6 +63,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   const [loading, setLoading] = useState(true);
   const [quickSearch, setQuickSearch] = useState("");
   const [quickSelectedId, setQuickSelectedId] = useState("");
+  const [quickCategoryFilter, setQuickCategoryFilter] = useState<string>("");
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickActiveIndex, setQuickActiveIndex] = useState(0);
   const [msg, setMsg] = useState<string | null>(null);
@@ -154,14 +155,26 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     );
   }, [rows]);
 
+  const quickCategories = useMemo(() => {
+    const set = new Set<string>();
+    for (const row of rows) {
+      const c = (row.category ?? "").trim();
+      if (c) set.add(c);
+    }
+    return Array.from(set).sort();
+  }, [rows]);
+
   const quickMatches = useMemo(() => {
+    let base = rows;
+    if (quickCategoryFilter) base = base.filter((row) => (row.category ?? "").trim() === quickCategoryFilter);
     const search = quickSearch.trim().toLowerCase();
-    if (!search) return rows.slice(0, 12);
-    return rows
+    if (!search) return base.slice(0, 12);
+    return base
       .filter((row) =>
         [
           row.serial_number,
           row.name,
+          row.category,
           row.barcode,
           row.nfc_tag_id,
           row.assigned_to_name,
@@ -171,7 +184,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
           .some((value) => String(value).toLowerCase().includes(search))
       )
       .slice(0, 12);
-  }, [quickSearch, rows]);
+  }, [quickSearch, rows, quickCategoryFilter]);
 
   const quickSelected = useMemo(() => {
     if (!quickSelectedId) return null;
@@ -414,6 +427,20 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
           </div>
 
           <div className="equipmentFilterGrid mobileGrid1">
+            <div style={{ minWidth: 0 }}>
+              <label className="label" htmlFor={`equipment-quick-category-${area}`}>Categoria</label>
+              <select
+                id={`equipment-quick-category-${area}`}
+                className="input"
+                value={quickCategoryFilter}
+                onChange={(e) => setQuickCategoryFilter(e.target.value)}
+              >
+                <option value="">Tutte</option>
+                {quickCategories.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
             <div ref={quickBoxRef} style={{ minWidth: 0, position: "relative" }}>
               <label className="label" htmlFor={`equipment-quick-search-${area}`}>
                 Controllo veloce
@@ -443,7 +470,6 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                     setQuickOpen(false);
                   }
                 }}
-                placeholder="Seriale, nome, barcode o NFC"
                 style={{ width: "100%" }}
               />
               {quickOpen && quickSearch.trim() && (

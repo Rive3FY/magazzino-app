@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import JsBarcode from "jsbarcode";
 import { createClient } from "../../_lib/supabase/client";
 import { useIsAdmin } from "../../_lib/hooks/useIsAdmin";
+import { useToast } from "../../_lib/ToastContext";
 import {
   EQUIPMENT_AREA_LABELS,
   EQUIPMENT_STATUS_LABELS,
@@ -50,6 +51,7 @@ function getBarcodeValue(row: EquipmentAssetRow) {
 
 export default function EquipmentLabelsClient({ area, basePath }: Props) {
   const access = useIsAdmin();
+  const toast = useToast();
   const isAdmin = area === "LINEE" ? access.canManageEquipmentLinee : access.canManageEquipmentStazioni;
   const adminLoading = access.loading;
 
@@ -168,7 +170,8 @@ export default function EquipmentLabelsClient({ area, basePath }: Props) {
         } catch {}
         const barcodeHtml = svg.outerHTML;
         tmp.removeChild(svg);
-        return `<div class="etichetta-label"><div class="etichetta-content"><div class="etichetta-text"><div class="etichetta-code">${esc(row.serial_number || row.asset_code)}</div><div class="etichetta-name">${esc(row.name)}</div><div class="etichetta-shelf">${esc(EQUIPMENT_AREA_LABELS[row.equipment_area])}</div><div class="etichetta-shelf">${esc(EQUIPMENT_STATUS_LABELS[row.status])}</div></div><div class="etichetta-barcode">${barcodeHtml}</div></div></div>`;
+        const shelfLine = [row.shelf, row.place].filter(Boolean).join(" · ");
+        return `<div class="etichetta-label"><div class="etichetta-content"><div class="etichetta-text"><div class="etichetta-code">${esc(row.serial_number || row.asset_code)}</div><div class="etichetta-name">${esc(row.name)}</div><div class="etichetta-shelf">${esc(EQUIPMENT_AREA_LABELS[row.equipment_area])}</div><div class="etichetta-shelf">${esc(EQUIPMENT_STATUS_LABELS[row.status])}</div>${shelfLine ? `<div class="etichetta-shelf">Scaffale: ${esc(shelfLine)}</div>` : ""}</div><div class="etichetta-barcode">${barcodeHtml}</div></div></div>`;
       })
       .join("");
 
@@ -210,6 +213,7 @@ body{margin:0;padding:0;background:#fff}
     a.download = `etichette-attrezzature-${area.toLowerCase()}-${new Date().toISOString().slice(0, 10)}.html`;
     a.click();
     URL.revokeObjectURL(url);
+    toast.success("Download avviato");
   }
 
   async function handlePrint() {
@@ -340,6 +344,7 @@ body{margin:0;padding:0;background:#fff}
                 </th>
                 <th>Seriale</th>
                 <th>Nome</th>
+                <th>Scaffale</th>
                 <th>Area</th>
                 <th>Stato</th>
                 <th>Barcode</th>
@@ -348,12 +353,12 @@ body{margin:0;padding:0;background:#fff}
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={6}>Caricamento attrezzature...</td>
+                  <td colSpan={7}>Caricamento attrezzature...</td>
                 </tr>
               )}
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={6}>Nessuna attrezzatura disponibile.</td>
+                  <td colSpan={7}>Nessuna attrezzatura disponibile.</td>
                 </tr>
               )}
               {filtered.map((row) => {
@@ -365,6 +370,7 @@ body{margin:0;padding:0;background:#fff}
                     </td>
                     <td>{row.serial_number || "—"}</td>
                     <td>{row.name}</td>
+                    <td>{[row.shelf, row.place].filter(Boolean).join(" · ") || "—"}</td>
                     <td>{EQUIPMENT_AREA_LABELS[row.equipment_area]}</td>
                     <td>{EQUIPMENT_STATUS_LABELS[row.status]}</td>
                     <td>{getBarcodeValue(row)}</td>

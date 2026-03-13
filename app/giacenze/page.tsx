@@ -11,6 +11,7 @@ import { DEFAULT_VISIBLE_EXCEL_COLS, EXCEL_COLS, type ExcelCol } from "../_lib/e
 import { n, toNumberLoose, sanitizeId, fmtDate } from "../_lib/utils";
 import { useAuth } from "../_lib/hooks/useAuth";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
+import { useToast } from "../_lib/ToastContext";
 import type { WarehouseView, SortDir } from "../_lib/types";
 
 const supabase = createClient();
@@ -109,6 +110,7 @@ export default function GiacenzePage() {
   const searchParams = useSearchParams();
   const { user, loading: authLoading, approved } = useAuth();
   const { canManageMaterials: isAdmin, loading: adminLoading } = useIsAdmin();
+  const toast = useToast();
 
   const urlCode = searchParams.get("code");
   const urlWarehouse = searchParams.get("warehouse") as "PRM" | "REALE" | null;
@@ -313,27 +315,28 @@ async function openHistory(code: string) {
     if (!historyCode || historyRows.length === 0) return;
     try {
       const pdf = new jsPDF("p", "mm", "a4");
-      const bannerDataUrl = await loadImageAsDataUrl("/logo.svg");
+      const bannerDataUrl = await loadImageAsDataUrl("/terna-logo.svg");
       const img = new Image();
       img.src = bannerDataUrl;
       await new Promise<void>((resolve, reject) => {
         img.onload = () => resolve();
         img.onerror = () => reject(new Error("Impossibile leggere il banner"));
       });
-      const imgWidth = 120;
+      const imgWidth = 55;
       const imgHeight = (img.height * imgWidth) / img.width;
-      pdf.addImage(bannerDataUrl, "PNG", 0, 6, imgWidth, imgHeight);
+      pdf.addImage(bannerDataUrl, "PNG", 10, 6, imgWidth, imgHeight);
+      const headerBottom = 8 + imgHeight;
       pdf.setTextColor(20, 20, 20);
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(12);
-      pdf.text("Storico materiale", 10, 45);
+      pdf.text("Storico materiale", 10, headerBottom + 10);
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(10);
-      pdf.text(`Materiale: ${historyCode}`, 10, 52);
+      pdf.text(`Materiale: ${historyCode}`, 10, headerBottom + 17);
       pdf.setDrawColor(180, 180, 180);
       pdf.setLineWidth(0.4);
-      pdf.line(10, 56, 200, 56);
-      let y = 64;
+      pdf.line(10, headerBottom + 22, 200, headerBottom + 22);
+      let y = headerBottom + 30;
       const drawTableHeader = () => {
         pdf.setFillColor(242, 242, 242);
         pdf.rect(10, y - 5, 190, 8, "F");
@@ -397,6 +400,7 @@ async function openHistory(code: string) {
       });
       drawFooter();
       pdf.save(`storico_${historyCode}.pdf`);
+      toast.success("PDF scaricato");
     } catch (e: any) {
       console.error("PDF error:", e);
       setMsg("Errore generazione PDF: " + (e?.message ?? "sconosciuto"));

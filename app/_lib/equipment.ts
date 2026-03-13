@@ -53,6 +53,40 @@ export const EQUIPMENT_RESOLUTION_LABELS: Record<EquipmentResolutionType, string
   DISMISS: "Dismissione",
 };
 
+export function buildEquipmentStatusUpdate(status: EquipmentStatus, maintenanceNote?: string): Record<string, unknown> {
+  const payload: Record<string, unknown> = { status };
+
+  if (status === "DISMISSED") {
+    payload.assigned_to_name = null;
+    payload.assigned_to_email = null;
+    payload.assigned_to_badge = null;
+    payload.assigned_at = null;
+    payload.maintenance_note = null;
+    payload.dismissed_at = new Date().toISOString();
+    return payload;
+  }
+
+  if (status === "MAINTENANCE") {
+    payload.assigned_to_name = null;
+    payload.assigned_to_email = null;
+    payload.assigned_to_badge = null;
+    payload.assigned_at = null;
+    payload.dismissed_at = null;
+    payload.maintenance_note = String(maintenanceNote ?? "").trim() || null;
+    return payload;
+  }
+
+  payload.dismissed_at = null;
+  payload.maintenance_note = null;
+  if (status === "AVAILABLE") {
+    payload.assigned_to_name = null;
+    payload.assigned_to_email = null;
+    payload.assigned_to_badge = null;
+    payload.assigned_at = null;
+  }
+  return payload;
+}
+
 export function equipmentStatusStyle(status: EquipmentStatus): CSSProperties {
   const base: CSSProperties = {
     display: "inline-flex",

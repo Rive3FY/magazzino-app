@@ -19,6 +19,7 @@ import {
   equipmentStatusStyle,
 } from "../../_lib/equipment";
 import { equipmentMovementSchema } from "../../_lib/validations";
+import ConfirmModal from "../../_components/ConfirmModal";
 import type {
   EquipmentArea,
   EquipmentAssetRow,
@@ -236,7 +237,6 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const [msg, setMsg] = useState<string | null>(null);
   const [scanMode, setScanMode] = useState<"NORMAL" | "CART">("NORMAL");
   const [warehouseFilter, setWarehouseFilter] = useState<string>("");
-  const [registerWarehouse, setRegisterWarehouse] = useState<string>("");
   const [assetSearch, setAssetSearch] = useState("");
   const [assetCategoryFilter, setAssetCategoryFilter] = useState<string>("");
   const [assetOpen, setAssetOpen] = useState(false);
@@ -833,17 +833,14 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   }
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<EquipmentMovementRow | null>(null);
 
-  async function deleteMovement(row: EquipmentMovementRow) {
+  function openDeleteConfirm(row: EquipmentMovementRow) {
     if (!isAdmin) return;
-    const asset = assetMap.get(row.equipment_id);
-    const label = row.movement_group_id
-      ? `Prelievo multiplo (${history.filter((m) => m.movement_group_id === row.movement_group_id).length} attrezzature)`
-      : asset
-        ? `${asset.serial_number || asset.asset_code} - ${asset.name}`
-        : row.equipment_id;
-    if (!window.confirm(`Eliminare il movimento "${label}"?\n\nLe attrezzature coinvolte torneranno disponibili.`)) return;
+    setDeleteConfirm(row);
+  }
 
+  async function executeDeleteMovement(row: EquipmentMovementRow) {
     setDeletingId(row.id);
     setMsg(null);
 
@@ -871,6 +868,13 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     } finally {
       setDeletingId(null);
     }
+  }
+
+  async function handleDeleteConfirm() {
+    if (!deleteConfirm) return;
+    await executeDeleteMovement(deleteConfirm);
+    if (closing?.id === deleteConfirm.id) closeModal();
+    setDeleteConfirm(null);
   }
 
   function closeModal() {
@@ -982,39 +986,10 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     );
   }
 
-  const registerDocxUrl = registerWarehouse
-    ? `/api/attrezzature/registro-docx?area=${area}&warehouse=${encodeURIComponent(registerWarehouse)}`
-    : "";
-
   return (
     <main className="panel" style={{ overflowX: "hidden" }}>
       <div className="pageBar">
         <div className="pageBarTitle">Attrezzature {areaLabel} - Movimenti</div>
-        <div className="pageBarActions" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <select
-            className="input"
-            value={registerWarehouse}
-            onChange={(e) => setRegisterWarehouse(e.target.value)}
-            style={{ minWidth: 220 }}
-            aria-label="Seleziona magazzino registro DOCX"
-          >
-            <option value="">Registro DOCX: scegli magazzino</option>
-            {warehouses.map((w) => (
-              <option key={w} value={w}>{w}</option>
-            ))}
-          </select>
-          <a
-            className="btn"
-            href={registerDocxUrl || "#"}
-            aria-disabled={!registerWarehouse}
-            onClick={(e) => {
-              if (!registerWarehouse) e.preventDefault();
-            }}
-            style={!registerWarehouse ? { opacity: 0.5, pointerEvents: "auto" } : undefined}
-          >
-            Scarica registro DOCX
-          </a>
-        </div>
       </div>
 
       <div className="card" style={{ padding: 12 }}>
@@ -1075,6 +1050,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 const nextMode = e.target.value as "NORMAL" | "CART";
                 setScanMode(nextMode);
                 if (nextMode === "CART") setCartOpen(true);
+                else setCartOpen(false);
               }}
               disabled={!warehouseSelected}
             >
@@ -1196,6 +1172,9 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 900, color: "#0f172a" }}>{asset.serial_number || asset.asset_code}</div>
                         <div style={{ fontSize: 12, color: "#334155" }}>{asset.name}</div>
+                        {(asset.shelf || asset.place) && (
+                          <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>Scaffale: {[asset.shelf, asset.place].filter(Boolean).join(" · ") || "—"}</div>
+                        )}
                         {asset.notes && (
                           <div style={{ fontSize: 11, color: "#64748b", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.notes}</div>
                         )}
@@ -1225,9 +1204,11 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
               <option value="">Seleziona attrezzatura</option>
               {filteredAssets.map((asset) => {
                 const led = asset.status === "AVAILABLE" ? "🟢" : "🔴";
+                const shelfInfo = [asset.shelf, asset.place].filter(Boolean).join(" · ");
                 return (
                 <option key={asset.id} value={asset.id}>
                   {led} {(asset.serial_number || asset.asset_code)} - {asset.name}
+                  {shelfInfo ? ` · Scaffale: ${shelfInfo}` : ""}
                   {asset.notes ? ` · ${asset.notes}` : ""}
                 </option>
               );
@@ -1312,6 +1293,12 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
               <div className="equipmentInfoValue">{selectedAsset.name}</div>
             </div>
             <div>
+              <div className="equipmentInfoLabel">Scaffale</div>
+              <div className="equipmentInfoValue">
+                {[selectedAsset.shelf, selectedAsset.place].filter(Boolean).join(" · ") || "—"}
+              </div>
+            </div>
+            <div>
               <div className="equipmentInfoLabel">Stato corrente</div>
               <div style={{ marginTop: 4 }}>
                 <span style={equipmentStatusStyle(selectedAsset.status)}>{EQUIPMENT_STATUS_LABELS[selectedAsset.status]}</span>
@@ -1331,7 +1318,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         {msg && <div style={{ marginTop: 12, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
       </div>
 
-      {(cartOpen || cart.length > 0) && (
+      {scanMode === "CART" && (cartOpen || cart.length > 0) && (
         <div className="card" style={{ padding: 12, marginTop: 12 }}>
           <div className="equipmentSectionHeader">
             <div>
@@ -1348,6 +1335,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 <tr>
                   <th>Seriale</th>
                   <th>Nome</th>
+                  <th>Scaffale</th>
                   <th>Stato</th>
                   <th>Azioni</th>
                 </tr>
@@ -1355,13 +1343,14 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
               <tbody>
                 {cartItems.length === 0 ? (
                   <tr>
-                    <td colSpan={4}>Carrello vuoto.</td>
+                    <td colSpan={5}>Carrello vuoto.</td>
                   </tr>
                 ) : (
                   cartItems.map((item) => (
                     <tr key={item.id}>
                       <td style={{ fontWeight: 900 }}>{item.serial_number || item.asset_code}</td>
                       <td>{item.name}</td>
+                      <td>{[item.shelf, item.place].filter(Boolean).join(" · ") || "—"}</td>
                       <td><span style={equipmentStatusStyle(item.status)}>{EQUIPMENT_STATUS_LABELS[item.status]}</span></td>
                       <td>
                         <button className="btn" onClick={() => removeCartItem(item.id)} disabled={cartBusy} type="button">
@@ -1466,7 +1455,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                           <button
                             className="btn"
                             disabled={busy}
-                            onClick={() => void deleteMovement(row)}
+                            onClick={() => openDeleteConfirm(row)}
                             style={{
                               borderColor: "rgba(239,68,68,0.5)",
                               background: "rgba(239,68,68,0.1)",
@@ -1696,10 +1685,9 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                     className="btn"
                     type="button"
                     disabled={saving}
-                    onClick={async () => {
+                    onClick={() => {
                       if (!closing) return;
-                      await deleteMovement(closing);
-                      closeModal();
+                      openDeleteConfirm(closing);
                     }}
                     style={{
                       borderColor: "rgba(239,68,68,0.5)",
@@ -1912,6 +1900,29 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
             {msg && <div style={{ marginTop: 10, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
           </div>
         </div>
+      )}
+
+      {deleteConfirm && (
+        <ConfirmModal
+          open={!!deleteConfirm}
+          title="Eliminare movimento"
+          message={
+            (() => {
+              const asset = assetMap.get(deleteConfirm.equipment_id);
+              const label = deleteConfirm.movement_group_id
+                ? `Prelievo multiplo (${history.filter((m) => m.movement_group_id === deleteConfirm.movement_group_id).length} attrezzature)`
+                : asset
+                  ? `${asset.serial_number || asset.asset_code} - ${asset.name}`
+                  : deleteConfirm.equipment_id;
+              return `Eliminare il movimento "${label}"?\n\nLe attrezzature coinvolte torneranno disponibili.`;
+            })()
+          }
+          confirmLabel="Elimina"
+          cancelLabel="Annulla"
+          danger
+          onConfirm={() => void handleDeleteConfirm()}
+          onCancel={() => setDeleteConfirm(null)}
+        />
       )}
     </main>
   );

@@ -39,6 +39,12 @@ export default function TopBar({ email, displayName, displayBadge }: Props) {
         </Link>
       </div>
 
+      <div className="topbarCenter">
+        <Link href="/" className="topbarLogo" aria-label="Terna - Torna alla home">
+          <img src="/terna-logo-white.svg" alt="Terna" width={118} height={36} />
+        </Link>
+      </div>
+
       <div className="userArea">
           <NotificationBell />
           <Link href="/profilo" className="userPill userPillLink" title={`${name || "Utente"} - Vai al profilo`}>

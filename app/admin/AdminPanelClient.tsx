@@ -3,6 +3,7 @@
 import * as XLSX from "xlsx";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
+import ConfirmModal from "../_components/ConfirmModal";
 
 type Row = {
   Materiale?: any;
@@ -93,6 +94,9 @@ export default function AdminPanelClient() {
 
   // DISCONNETTI TUTTI (temporaneo)
   const [disconnectingAll, setDisconnectingAll] = useState(false);
+
+  // CONFERMA ELIMINAZIONE MOVIMENTO
+  const [deleteMovId, setDeleteMovId] = useState<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -627,7 +631,7 @@ export default function AdminPanelClient() {
                     <td>{m.note ?? ""}</td>
                     <td>{m.created_by_email ?? "-"}</td>
                     <td>
-                      <button className="btn" onClick={() => deleteMovement(m.id)}>Elimina</button>
+                      <button className="btn" onClick={() => openDeleteMovementConfirm(m.id)}>Elimina</button>
                     </td>
                   </tr>
                 ))
@@ -726,6 +730,19 @@ export default function AdminPanelClient() {
             </div>
           </div>
         </div>
+      )}
+
+      {deleteMovId && (
+        <ConfirmModal
+          open={!!deleteMovId}
+          title="Eliminare movimento"
+          message="Eliminare questo movimento?"
+          confirmLabel="Elimina"
+          cancelLabel="Annulla"
+          danger
+          onConfirm={() => void handleDeleteMovementConfirm()}
+          onCancel={() => setDeleteMovId(null)}
+        />
       )}
     </main>
   );

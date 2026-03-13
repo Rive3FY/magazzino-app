@@ -9,6 +9,7 @@ import { useToast } from "../../_lib/ToastContext";
 import { fmtDateTime, toIsoEndOfDay, toIsoStartOfDay } from "../../_lib/utils";
 import {
   EQUIPMENT_AREA_LABELS,
+  buildEquipmentStatusUpdate,
   EQUIPMENT_MOVEMENT_LABELS,
   EQUIPMENT_MOVEMENT_STATUS_LABELS,
   EQUIPMENT_RESOLUTION_LABELS,
@@ -17,6 +18,8 @@ import {
   equipmentMovementPillStyle,
   equipmentStatusStyle,
 } from "../../_lib/equipment";
+import EquipmentStatusManager from "./EquipmentStatusManager";
+import ConfirmModal from "../../_components/ConfirmModal";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentMovementRow, EquipmentStatus } from "../../_lib/types";
 
 type Props = {
@@ -73,7 +76,6 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   const [quickSelectedId, setQuickSelectedId] = useState("");
   const [quickCategoryFilter, setQuickCategoryFilter] = useState<string>("");
   const [quickWarehouseFilter, setQuickWarehouseFilter] = useState<string>("ALL");
-  const [registroSede, setRegistroSede] = useState<string>("");
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickActiveIndex, setQuickActiveIndex] = useState(0);
   const [msg, setMsg] = useState<string | null>(null);
@@ -83,6 +85,8 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   const [searchByNfcScanning, setSearchByNfcScanning] = useState(false);
   const [isNfcSupported, setIsNfcSupported] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+  const [statusChanging, setStatusChanging] = useState(false);
+  const [statusModalOpen, setStatusModalOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const quickBoxRef = useRef<HTMLDivElement | null>(null);
@@ -143,6 +147,22 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [user, loadAssets]);
+
+  async function changeAssetStatus(row: EquipmentAssetRow, newStatus: EquipmentStatus, maintenanceNote?: string) {
+    if (!isAdmin) return;
+    setStatusChanging(true);
+    setMsg(null);
+    const payload = buildEquipmentStatusUpdate(newStatus, maintenanceNote);
+    const { error } = await supabase.from("equipment_assets").update(payload).eq("id", row.id).eq("equipment_area", area);
+    setStatusChanging(false);
+    if (error) {
+      setMsg("Errore aggiornamento stato: " + error.message);
+      return;
+    }
+    toast.success(`Stato aggiornato a ${EQUIPMENT_STATUS_LABELS[newStatus]}`);
+    await loadAssets();
+    setStatusModalOpen(false);
+  }
 
   useEffect(() => {
     setIsNfcSupported(typeof NDEFReader !== "undefined");
@@ -245,19 +265,14 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   }, [history, historyFrom, historyTo, quickWarehouseFilter, filteredAssetIds]);
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<EquipmentMovementRow | null>(null);
 
-  async function deleteMovement(row: EquipmentMovementRow) {
+  function openDeleteConfirm(row: EquipmentMovementRow) {
     if (!isAdmin) return;
-    const asset = rows.find((r) => r.id === row.equipment_id);
-    const groupCount = row.movement_group_id ? (historyGroupCountMap.get(row.movement_group_id) ?? 1) : 1;
-    const label =
-      groupCount > 1
-        ? `Prelievo multiplo (${groupCount} attrezzature)`
-        : asset
-          ? `${asset.serial_number || asset.asset_code} - ${asset.name}`
-          : row.equipment_id;
-    if (!window.confirm(`Eliminare il movimento "${label}"?\n\nLe attrezzature coinvolte torneranno disponibili.`)) return;
+    setDeleteConfirm(row);
+  }
 
+  async function executeDeleteMovement(row: EquipmentMovementRow) {
     setDeletingId(row.id);
     setMsg(null);
 
@@ -285,6 +300,12 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     } finally {
       setDeletingId(null);
     }
+  }
+
+  async function handleDeleteConfirm() {
+    if (!deleteConfirm) return;
+    await executeDeleteMovement(deleteConfirm);
+    setDeleteConfirm(null);
   }
 
   function applyQuickResult(value: string, mode: "barcode" | "nfc") {
@@ -426,31 +447,6 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     <main className="panel" style={{ overflowX: "hidden" }}>
       <div className="pageBar">
         <div className="pageBarTitle">Attrezzature {areaLabel} - Dashboard</div>
-        <div className="pageBarActions" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <select
-            className="input"
-            value={registroSede}
-            onChange={(e) => setRegistroSede(e.target.value)}
-            style={{ minWidth: 220 }}
-            aria-label="Seleziona magazzino registro DOCX"
-          >
-            <option value="">Registro DOCX: scegli magazzino</option>
-            {quickWarehouses.map((w) => (
-              <option key={w} value={w}>{w}</option>
-            ))}
-          </select>
-          <a
-            className="btn"
-            href={registroSede ? `/api/attrezzature/registro-docx?area=${area}&warehouse=${encodeURIComponent(registroSede)}` : "#"}
-            aria-disabled={!registroSede}
-            onClick={(e) => {
-              if (!registroSede) e.preventDefault();
-            }}
-            style={!registroSede ? { opacity: 0.5, pointerEvents: "auto" } : undefined}
-          >
-            Scarica registro Movimenti
-          </a>
-        </div>
       </div>
 
       <div className="card" style={{ padding: 12 }}>
@@ -628,8 +624,13 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
               </div>
               <div>
                 <div className="equipmentInfoLabel">Stato</div>
-                <div style={{ marginTop: 4 }}>
+                <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span style={equipmentStatusStyle(quickSelected.status)}>{EQUIPMENT_STATUS_LABELS[quickSelected.status]}</span>
+                  {isAdmin && (
+                    <button className="btn" onClick={() => setStatusModalOpen(true)} disabled={statusChanging}>
+                      Gestisci stato
+                    </button>
+                  )}
                 </div>
               </div>
               <div>
@@ -641,7 +642,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                 </div>
               </div>
               <div>
-                <div className="equipmentInfoLabel">Ubicazione</div>
+                <div className="equipmentInfoLabel">Scaffale</div>
                 <div className="equipmentInfoValue">
                   {[quickSelected.shelf, quickSelected.place].filter(Boolean).join(" · ") || "—"}
                 </div>
@@ -711,6 +712,14 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
           </div>
         </div>
       )}
+
+      <EquipmentStatusManager
+        asset={quickSelected}
+        isOpen={!!quickSelected && statusModalOpen}
+        isSaving={statusChanging}
+        onClose={() => setStatusModalOpen(false)}
+        onSubmit={(status, note) => quickSelected ? changeAssetStatus(quickSelected, status, note) : undefined}
+      />
 
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
         <div className="equipmentSectionHeader">
@@ -841,7 +850,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                           <button
                             className="btn"
                             disabled={busy}
-                            onClick={() => void deleteMovement(row)}
+                            onClick={() => openDeleteConfirm(row)}
                             style={{
                               borderColor: "rgba(239,68,68,0.5)",
                               background: "rgba(239,68,68,0.1)",
@@ -860,6 +869,31 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
           </table>
         </div>
       </div>
+
+      {deleteConfirm && (
+        <ConfirmModal
+          open={!!deleteConfirm}
+          title="Eliminare movimento"
+          message={
+            (() => {
+              const asset = rows.find((r) => r.id === deleteConfirm.equipment_id);
+              const groupCount = deleteConfirm.movement_group_id ? (historyGroupCountMap.get(deleteConfirm.movement_group_id) ?? 1) : 1;
+              const label =
+                groupCount > 1
+                  ? `Prelievo multiplo (${groupCount} attrezzature)`
+                  : asset
+                    ? `${asset.serial_number || asset.asset_code} - ${asset.name}`
+                    : deleteConfirm.equipment_id;
+              return `Eliminare il movimento "${label}"?\n\nLe attrezzature coinvolte torneranno disponibili.`;
+            })()
+          }
+          confirmLabel="Elimina"
+          cancelLabel="Annulla"
+          danger
+          onConfirm={() => void handleDeleteConfirm()}
+          onCancel={() => setDeleteConfirm(null)}
+        />
+      )}
     </main>
   );
 }

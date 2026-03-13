@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 import { useEffect, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
+import { useToast } from "../_lib/ToastContext";
 import { toNumberLoose } from "../_lib/utils";
 
 type WarehouseKind = "PRM" | "REALE";
@@ -59,6 +60,7 @@ export default function ImportPage() {
   const [realeUnlocked, setRealeUnlocked] = useState(false);
 
   const { canManageMaterials: isAdmin, loading: checking } = useIsAdmin();
+  const toast = useToast();
 
   async function loadCounts() {
     try {
@@ -268,6 +270,7 @@ export default function ImportPage() {
       }
 
       setMsg(`Import ${warehouseKind} completato ✅ (${payload.length} materiali)${backupMsg}`);
+      toast.success(`Import ${warehouseKind} completato (${payload.length} materiali)`);
       await loadCounts();
     } catch (e: any) {
       setMsg("Errore import: " + (e?.message ?? String(e)));
@@ -393,7 +396,10 @@ export default function ImportPage() {
           type="button"
           className="btn btnPrimary"
           style={{ marginTop: 10 }}
-          onClick={() => { window.location.href = "/api/excel-live/download"; }}
+          onClick={() => {
+            window.location.href = "/api/excel-live/download";
+            toast.success("Download avviato");
+          }}
           title="Scarica il file Excel LIVE (tutte le righe)"
         >
           Download Excel LIVE
@@ -449,6 +455,7 @@ export default function ImportPage() {
                         className="btn"
                         onClick={() => {
                           window.location.href = `/api/import-backups/download?id=${encodeURIComponent(row.id)}`;
+                          toast.success("Download avviato");
                         }}
                       >
                         Scarica

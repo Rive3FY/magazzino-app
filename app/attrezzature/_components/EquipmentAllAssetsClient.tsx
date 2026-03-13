@@ -1,7 +1,6 @@
 "use client";
 
 import { BrowserMultiFormatReader } from "@zxing/browser";
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../../_lib/supabase/client";
 import { useAuth } from "../../_lib/hooks/useAuth";
@@ -10,10 +9,13 @@ import { useToast } from "../../_lib/ToastContext";
 import { fmtDateTime } from "../../_lib/utils";
 import {
   EQUIPMENT_AREA_LABELS,
+  buildEquipmentStatusUpdate,
   EQUIPMENT_STATUS_LABELS,
   EQUIPMENT_STATUS_OPTIONS,
   equipmentStatusStyle,
 } from "../../_lib/equipment";
+import EquipmentStatusManager from "./EquipmentStatusManager";
+import ConfirmModal from "../../_components/ConfirmModal";
 import { equipmentAssetSchema } from "../../_lib/validations";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentStatus } from "../../_lib/types";
 
@@ -27,6 +29,7 @@ type AssetFormState = {
   name: string;
   category: string;
   warehouse: string;
+  shelf: string;
   notes: string;
 };
 
@@ -44,6 +47,7 @@ const emptyForm: AssetFormState = {
   name: "",
   category: "",
   warehouse: "",
+  shelf: "",
   notes: "",
 };
 
@@ -95,6 +99,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const [msg, setMsg] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<EquipmentAssetRow | null>(null);
+  const [statusModalRow, setStatusModalRow] = useState<EquipmentAssetRow | null>(null);
   const [formEntries, setFormEntries] = useState<AssetFormState[]>([emptyForm]);
   const [cameraScanning, setCameraScanning] = useState(false);
   const [searchByNfcScanning, setSearchByNfcScanning] = useState(false);
@@ -483,6 +488,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
       name: row.name ?? "",
       category: row.category ?? "",
       warehouse: row.warehouse ?? "",
+      shelf: [row.shelf, row.place].filter(Boolean).join(" · ") || "",
       notes: row.notes ?? "",
     }]);
     setMsg(null);
@@ -513,13 +519,15 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
       setSaving(true);
       setMsg(null);
       const serial = form.serial_number.trim();
-      const payload = {
+      const payload: Record<string, unknown> = {
         asset_code: serial,
         serial_number: serial,
         name: form.name.trim(),
         category: form.category.trim() || null,
         notes: form.notes.trim() || null,
         warehouse: form.warehouse.trim() || null,
+        shelf: form.shelf.trim() || null,
+        place: null,
         equipment_area: area,
       };
       const result = await supabase.from("equipment_assets").update(payload).eq("id", editingRow.id).eq("equipment_area", area).select("id").single();
@@ -559,6 +567,8 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
         category: form.category.trim() || null,
         notes: form.notes.trim() || null,
         warehouse: form.warehouse.trim() || null,
+        shelf: form.shelf.trim() || null,
+        place: null,
         equipment_area: area,
       };
       const result = await supabase.from("equipment_assets").insert(payload).select("id").single();
@@ -576,10 +586,31 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     closeModal();
   }
 
-  async function deleteAssetRow(row: EquipmentAssetRow) {
+  async function changeAssetStatus(row: EquipmentAssetRow, newStatus: EquipmentStatus, maintenanceNote?: string) {
     if (!isAdmin) return;
-    if (!window.confirm(`Eliminare l'attrezzatura ${row.serial_number || row.asset_code}?\n\nAnche lo storico collegato verrà rimosso.`)) return;
+    setSaving(true);
+    setMsg(null);
+    const payload = buildEquipmentStatusUpdate(newStatus, maintenanceNote);
+    const { error } = await supabase.from("equipment_assets").update(payload).eq("id", row.id).eq("equipment_area", area);
+    setSaving(false);
+    if (error) {
+      setMsg("Errore aggiornamento stato: " + error.message);
+      return;
+    }
+    await writeAuditLog("EQUIPMENT_STATUS_CHANGED", row.id, { status: newStatus });
+    toast.success(`Stato aggiornato a ${EQUIPMENT_STATUS_LABELS[newStatus]}`);
+    await loadAssets();
+    setStatusModalRow(null);
+  }
 
+  const [deleteConfirm, setDeleteConfirm] = useState<EquipmentAssetRow | null>(null);
+
+  function openDeleteAssetConfirm(row: EquipmentAssetRow) {
+    if (!isAdmin) return;
+    setDeleteConfirm(row);
+  }
+
+  async function executeDeleteAssetRow(row: EquipmentAssetRow) {
     const { error } = await supabase
       .from("equipment_assets")
       .delete()
@@ -604,9 +635,10 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     if (editingRow?.id === row.id) closeModal();
   }
 
-  async function deleteAsset() {
-    if (!editingRow) return;
-    await deleteAssetRow(editingRow);
+  async function handleDeleteAssetConfirm() {
+    if (!deleteConfirm) return;
+    await executeDeleteAssetRow(deleteConfirm);
+    setDeleteConfirm(null);
   }
 
   const areaLabel = EQUIPMENT_AREA_LABELS[area];
@@ -860,7 +892,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                 <th>Magazzino</th>
                 <th>Note</th>
                 <th>Stato</th>
-                <th>Ubicazione</th>
+                <th>Scaffale</th>
                 <th>Assegnata a</th>
                 <th>Barcode</th>
                 <th>NFC</th>
@@ -880,7 +912,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                 </tr>
               )}
               {filtered.map((row) => {
-                const location = [row.shelf, row.place].filter(Boolean).join(" · ") || "—";
                 const assignedTo = [row.assigned_to_name, row.assigned_to_badge ? `Badge ${row.assigned_to_badge}` : null]
                   .filter(Boolean)
                   .join(" · ") || "—";
@@ -897,14 +928,18 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                     <td>{row.warehouse || "—"}</td>
                     <td style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={row.notes ?? ""}>{row.notes || "—"}</td>
                     <td><span style={equipmentStatusStyle(row.status)}>{EQUIPMENT_STATUS_LABELS[row.status]}</span></td>
-                    <td>{location}</td>
+                    <td>{[row.shelf, row.place].filter(Boolean).join(" · ") || "—"}</td>
                     <td>{assignedTo}</td>
                     <td>{row.barcode || "Da generare"}</td>
                     <td>{row.nfc_tag_id || "Non associato"}</td>
                     <td>{fmtDateTime(row.updated_at)}</td>
                     <td>
                       <div className="equipmentActionGroup">
-                        <Link href={`${basePath}/movimenti?asset=${row.id}`} className="btn">Movimenti</Link>
+                        {isAdmin && (
+                          <button className="btn" onClick={() => setStatusModalRow(row)} disabled={saving}>
+                            Gestisci stato
+                          </button>
+                        )}
                         {isAdmin && (
                           <button
                             className="btn"
@@ -920,7 +955,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                         {isAdmin && (
                           <button
                             className="btn"
-                            onClick={() => void deleteAssetRow(row)}
+                            onClick={() => openDeleteAssetConfirm(row)}
                             style={{
                               borderColor: "rgba(239,68,68,0.5)",
                               background: "rgba(239,68,68,0.1)",
@@ -982,7 +1017,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                       color: "#991b1b",
                     }}
                     disabled={saving}
-                    onClick={deleteAsset}
+                    onClick={() => editingRow && openDeleteAssetConfirm(editingRow)}
                     title="Elimina attrezzatura"
                   >
                     Elimina
@@ -1073,6 +1108,10 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                       </datalist>
                     </div>
                     <div style={{ minWidth: 0 }}>
+                      <label className="label" htmlFor={`modal-asset-shelf-${area}-${idx}`}>Scaffale</label>
+                      <input id={`modal-asset-shelf-${area}-${idx}`} className="input" value={entry.shelf} onChange={(e) => setFormEntries((prev) => { const n = [...prev]; n[idx] = { ...n[idx], shelf: e.target.value }; return n; })} placeholder="Es. A1, B2 · Ripiano 3..." />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
                       <label className="label" htmlFor={`modal-asset-notes-${area}-${idx}`}>Note</label>
                       <textarea
                         id={`modal-asset-notes-${area}-${idx}`}
@@ -1136,6 +1175,27 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
             </button>
           </div>
         </div>
+      )}
+
+      <EquipmentStatusManager
+        asset={statusModalRow}
+        isOpen={!!statusModalRow}
+        isSaving={saving}
+        onClose={() => setStatusModalRow(null)}
+        onSubmit={(status, note) => statusModalRow ? changeAssetStatus(statusModalRow, status, note) : undefined}
+      />
+
+      {deleteConfirm && (
+        <ConfirmModal
+          open={!!deleteConfirm}
+          title="Eliminare attrezzatura"
+          message={`Eliminare l'attrezzatura ${deleteConfirm.serial_number || deleteConfirm.asset_code}?\n\nAnche lo storico collegato verrà rimosso.`}
+          confirmLabel="Elimina"
+          cancelLabel="Annulla"
+          danger
+          onConfirm={() => void handleDeleteAssetConfirm()}
+          onCancel={() => setDeleteConfirm(null)}
+        />
       )}
     </main>
   );

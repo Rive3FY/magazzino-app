@@ -86,7 +86,7 @@ a.btn, a.btnPrimary{ border: none !important; box-shadow: none; }
   grid-template-rows: var(--banner-height) 1fr;
 }
 
-/* Pagina login: nessuna sidebar/topbar, no scroll, sfondo gradient teal-blu */
+/* Pagina login: stesso stile del sito (banner-bg), logo Terna blu */
 .appLogin {
   grid-template-columns: 1fr;
   grid-template-rows: 1fr;
@@ -95,7 +95,7 @@ a.btn, a.btnPrimary{ border: none !important; box-shadow: none; }
   overflow: hidden;
   overscroll-behavior: none;
   touch-action: manipulation;
-  background: linear-gradient(160deg, #0f4c5c 0%, #1a3a4a 30%, #0d2137 70%, #081c2e 100%);
+  background: var(--banner-bg);
 }
 
 /* Body e html: no scroll in login (desktop + mobile) */
@@ -142,13 +142,25 @@ body:has(.appLogin) {
   overflow: hidden;
 }
 
-/* Card scura stile moderno */
+/* Card scura stile sito (banner) */
 .loginCardNew {
   width: 100%;
-  background: rgba(18, 28, 38, 0.95);
+  background: rgba(15, 23, 42, 0.95);
   border-radius: 16px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
   padding: 36px 32px 32px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.loginLogoWrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 24px;
+}
+
+.loginLogoWrap img {
+  height: 36px;
+  width: auto;
+  object-fit: contain;
 }
 
 .loginTitleNew {
@@ -164,6 +176,35 @@ body:has(.appLogin) {
   color: rgba(255, 255, 255, 0.8);
   text-align: center;
   padding: 20px 0;
+}
+
+/* Overlay durante reindirizzamento dopo login */
+.loginRedirectOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(15, 23, 42, 0.95);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  color: #fff;
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.loginRedirectSpinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: loginSpinner 0.8s linear infinite;
+}
+
+@keyframes loginSpinner {
+  to { transform: rotate(360deg); }
 }
 
 .loginFormNew {
@@ -221,7 +262,7 @@ body:has(.appLogin) {
 .loginCheckbox {
   width: 18px;
   height: 18px;
-  accent-color: #14b8a6;
+  accent-color: #295eb9;
 }
 
 .loginForgot {
@@ -231,14 +272,14 @@ body:has(.appLogin) {
 }
 
 .loginForgot:hover {
-  color: #14b8a6;
+  color: #295eb9;
   text-decoration: underline;
 }
 
 .loginBtnPrimary {
   width: 100%;
   padding: 16px 24px;
-  background: linear-gradient(135deg, #14b8a6 0%, #0d9488 100%);
+  background: linear-gradient(135deg, #295eb9 0%, #1e4a8f 100%);
   border: none;
   border-radius: 12px;
   font-size: 15px;
@@ -393,6 +434,16 @@ body:has(.appLogin) {
   margin-top: 8px;
 }
 
+.sideSectionHeader svg{
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.sideLinkIcon{
+  flex-shrink: 0;
+  opacity: 0.92;
+}
+
 .sideLink{
   display: flex;
   align-items: center;
@@ -446,6 +497,10 @@ body:has(.appLogin) {
 }
 
 .sidebarLogoutBtn{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   width: 100%;
   padding: 12px 16px;
   background: rgba(255,255,255,0.1);
@@ -507,6 +562,28 @@ body:has(.appLogin) {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.topbarCenter{
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.topbarLogo{
+  display: flex;
+  align-items: center;
+  color: inherit;
+  text-decoration: none;
+}
+
+.topbarLogo img{
+  height: 36px;
+  width: auto;
+  object-fit: contain;
 }
 
 .topbarHomeBtn{
@@ -1216,6 +1293,14 @@ a.btn.btnPrimary{
 
 .btnDanger:hover{
   background:rgba(239,68,68,0.08);
+}
+.btn.btnDanger.btnDangerSolid{
+  background:#dc2626;
+  color:#fff;
+  border-color:#dc2626;
+}
+.btn.btnDanger.btnDangerSolid:hover:not(:disabled){
+  background:#b91c1c;
 }
 /* =========================
    INPUT / SELECT AZIENDALI
@@ -2280,4 +2365,61 @@ html, body {
   .print-area {
     page-break-inside: avoid;
   }
+}
+
+/* Toast - animazione ingresso */
+/* Confirm modal - popup del sito */
+.confirmModalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 10001;
+}
+.confirmModalContent {
+  background: #fff;
+  border-radius: 14px;
+  padding: 24px;
+  max-width: 400px;
+  width: 100%;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+}
+.confirmModalTitle {
+  font-weight: 900;
+  font-size: 18px;
+  margin-bottom: 12px;
+  color: #0f172a;
+}
+.confirmModalMessage {
+  font-size: 15px;
+  color: #475569;
+  margin: 0 0 24px;
+  white-space: pre-line;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.confirmModalActions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+@keyframes toastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.toastItem {
+  animation: toastSlideIn 0.25s ease-out;
+  display: flex;
+  align-items: center;
 }

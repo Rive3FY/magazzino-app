@@ -9,6 +9,8 @@ import jsPDF from "jspdf";
 import { fmtDate, n, toNumber, toIsoStartOfDay, toIsoEndOfDay } from "../_lib/utils";
 import { useAuth } from "../_lib/hooks/useAuth";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
+import { useToast } from "../_lib/ToastContext";
+import ConfirmModal from "../_components/ConfirmModal";
 import { movementNoteSchema } from "../_lib/validations";
 import type { CartRow, QuickMaterialInfo, DbItem, MovementRow, ReferentRow, ExcelLiveRow } from "../_lib/types";
 
@@ -179,6 +181,7 @@ export default function MovimentiPage() {
   const supabase = createClient();
   const { user } = useAuth();
   const { canManageMaterials: isAdmin } = useIsAdmin();
+  const toast = useToast();
   const userId = user?.id ?? null;
   const userEmail = user?.email ?? null;
 
@@ -325,6 +328,8 @@ export default function MovimentiPage() {
   >([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "single" | "bulk"; id?: string; count?: number } | null>(null);
+
   function canEditRow(m: MovementRow) {
     const st = (m.status ?? (m.type === "OUT" ? "OPEN" : "CLOSED")) as "OPEN" | "CLOSED";
     if (m.type !== "OUT") return false;
@@ -437,7 +442,7 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
     try {
       const pdf = new jsPDF("p", "mm", "a4");
 
-      const bannerDataUrl = await loadImageAsDataUrl("/logo.svg");
+      const bannerDataUrl = await loadImageAsDataUrl("/terna-logo.svg");
 
       const img = new Image();
       img.src = bannerDataUrl;
@@ -447,15 +452,16 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
         img.onerror = () => reject(new Error("Impossibile leggere il banner"));
       });
 
-      const imgWidth = 120;
+      const imgWidth = 55;
       const imgHeight = (img.height * imgWidth) / img.width;
 
-      pdf.addImage(bannerDataUrl, "PNG", 0, 6, imgWidth, imgHeight);
+      pdf.addImage(bannerDataUrl, "PNG", 10, 6, imgWidth, imgHeight);
 
+      const headerBottom = 8 + imgHeight;
       pdf.setTextColor(20, 20, 20);
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(12);
-      pdf.text("Registro Movimenti Magazzino", 10, 45);
+      pdf.text("Registro Movimenti Magazzino", 10, headerBottom + 10);
 
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(10);
@@ -465,13 +471,13 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
           ? `Periodo: ${fFrom || "..."} - ${fTo || "..."}`
           : "Periodo: tutti i movimenti filtrati";
 
-      pdf.text(periodo, 10, 52);
+      pdf.text(periodo, 10, headerBottom + 17);
 
       pdf.setDrawColor(180, 180, 180);
       pdf.setLineWidth(0.4);
-      pdf.line(10, 56, 200, 56);
+      pdf.line(10, headerBottom + 22, 200, headerBottom + 22);
 
-      let y = 64;
+      let y = headerBottom + 30;
 
       const drawTableHeader = () => {
         pdf.setFillColor(242, 242, 242);
@@ -556,6 +562,7 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
 
       drawFooter();
       pdf.save("registro_movimenti.pdf");
+      toast.success("PDF scaricato");
     } catch (e: any) {
       console.error("PDF error:", e);
       setMsg("Errore generazione PDF: " + (e?.message ?? "sconosciuto"));
@@ -1167,6 +1174,7 @@ async function confirmCartPickup() {
     setCartOpen(false);
     setScanMode("NORMAL");
     setMsg("Prelievo multiplo salvato ✅");
+    toast.success("Prelievo multiplo salvato");
     await loadHistory();
   } catch (e: any) {
     console.error("confirmCartPickup error:", e);
@@ -1366,6 +1374,7 @@ async function confirmCartPickup() {
         setQty("");
         setNote("");
         setMsg(`Prelievo misto salvato ✅ (PRM: ${fromPRM}, REALE: ${fromREALE})`);
+        toast.success("Prelievo misto salvato");
         const shelfItems: { warehouse: "PRM" | "REALE"; shelf: string; place?: string | null }[] = [];
         if (fromPRM > 0) {
           const { data: prmRow } = await supabase.from("material_shelves").select("shelf,place").eq("code", picked.code).eq("warehouse", "PRM").maybeSingle();
@@ -1459,6 +1468,7 @@ async function confirmCartPickup() {
         ? "Movimento salvato ✅"
         : "Movimento salvato ✅\n\n⚠️ Giacenze (excel_live) non aggiornate: materiale non presente. Importa l'Excel o verifica il codice."
     );
+    toast.success("Movimento salvato");
 
     if (type === "OUT") {
       const { data: shelfRow } = await supabase.from("material_shelves").select("warehouse,shelf,place").eq("code", picked.code).eq("warehouse", wh).maybeSingle();
@@ -1502,8 +1512,8 @@ async function confirmCartPickup() {
     if (!isAdmin) return alert("Solo l'admin può eliminare i movimenti.");
 
     if (!skipConfirm) {
-      const ok = confirm("Eliminare questo movimento?");
-      if (!ok) return;
+      setDeleteConfirm({ type: "single", id });
+      return;
     }
 
     const { data: mov, error: readError } = await supabase
@@ -1564,6 +1574,7 @@ async function confirmCartPickup() {
       return alert("Non posso eliminare: " + deleteError.message);
     }
 
+    toast.success("Movimento eliminato");
     if (closing?.id === id) {
       setCloseOpen(false);
       setClosing(null);
@@ -1572,6 +1583,7 @@ async function confirmCartPickup() {
     }
 
     await loadHistory();
+    setDeleteConfirm(null);
   }
 
   function toggleSelect(id: string) {
@@ -1593,10 +1605,13 @@ async function confirmCartPickup() {
     }
   }
 
-  async function deleteSelectedMovements() {
+  function openDeleteBulkConfirm() {
     if (!isAdmin || selectedIds.size === 0) return;
-    const ok = confirm(`Eliminare ${selectedIds.size} movimento/i selezionato/i?`);
-    if (!ok) return;
+    setDeleteConfirm({ type: "bulk", count: selectedIds.size });
+  }
+
+  async function executeBulkDelete() {
+    if (!isAdmin || selectedIds.size === 0) return;
     setDeletingBulk(true);
     setMsg(null);
     const ids = Array.from(selectedIds);
@@ -1606,7 +1621,18 @@ async function confirmCartPickup() {
     setSelectedIds(new Set());
     setDeletingBulk(false);
     setMsg(`${ids.length} movimento/i eliminato/i.`);
+    toast.success(`${ids.length} movimento/i eliminato/i`);
+    setDeleteConfirm(null);
     await loadHistory();
+  }
+
+  async function handleDeleteConfirm() {
+    if (!deleteConfirm) return;
+    if (deleteConfirm.type === "single" && deleteConfirm.id) {
+      await deleteMovement(deleteConfirm.id, true);
+    } else if (deleteConfirm.type === "bulk") {
+      await executeBulkDelete();
+    }
   }
 
   async function loadItemMetaWithFallback(code: string, wh: "PRM" | "REALE" | null) {
@@ -1902,9 +1928,11 @@ async function confirmCartPickup() {
         } else {
           setMsg("Prelievo multiplo chiuso ✅");
         }
+        toast.success("Prelievo multiplo chiuso");
       } catch (e: any) {
         console.warn("Email non inviata:", e?.message ?? e);
         setMsg("Prelievo multiplo chiuso ✅ (email non inviata: " + (e?.message ?? "errore di rete") + ")");
+        toast.success("Prelievo multiplo chiuso");
       }
       setCloseOpen(false);
       setClosing(null);
@@ -2086,6 +2114,7 @@ async function confirmCartPickup() {
       successMsg += "\n\n⚠️ Giacenze (excel_live) non aggiornate: materiale non presente. Importa l'Excel o verifica il codice.";
     }
     setMsg(successMsg);
+    toast.success("Movimento chiuso");
 
     await loadHistory();
 
@@ -2585,6 +2614,22 @@ async function confirmCartPickup() {
         {msg && <div style={{ marginTop: 10, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
       </div>
 
+      <ConfirmModal
+        open={!!deleteConfirm}
+        title="Conferma eliminazione"
+        message={
+          deleteConfirm?.type === "single"
+            ? "Eliminare questo movimento?"
+            : deleteConfirm?.type === "bulk" && deleteConfirm?.count
+              ? `Eliminare ${deleteConfirm.count} movimento/i selezionato/i?`
+              : ""
+        }
+        confirmLabel="Elimina"
+        danger
+        onConfirm={() => void handleDeleteConfirm()}
+        onCancel={() => setDeleteConfirm(null)}
+      />
+
       {warehouseChoicePopup && (
         <div
           onMouseDown={() => {
@@ -2815,7 +2860,7 @@ async function confirmCartPickup() {
             {isAdmin && selectedIds.size > 0 && (
               <button
                 className="btn"
-                onClick={deleteSelectedMovements}
+                onClick={openDeleteBulkConfirm}
                 disabled={deletingBulk}
                 style={{ background: "rgba(239,68,68,0.12)", borderColor: "rgba(239,68,68,0.4)" }}
               >

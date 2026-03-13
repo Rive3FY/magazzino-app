@@ -62,6 +62,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           <div
             key={t.id}
             role="alert"
+            data-toast-type={t.type}
+            className="toastItem"
             style={{
               padding: "12px 20px",
               borderRadius: 10,
@@ -78,6 +80,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               maxWidth: "min(400px, 90vw)",
             }}
           >
+            {t.type === "success" && (
+              <span style={{ marginRight: 8 }} aria-hidden>✓</span>
+            )}
             {t.message}
           </div>
         ))}

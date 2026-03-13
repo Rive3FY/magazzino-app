@@ -157,6 +157,61 @@ function SpinnerIcon() {
   );
 }
 
+function ClearableInput(props: {
+  id?: string;
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+  style?: Record<string, string | number>;
+  onFocus?: () => void;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+}) {
+  const { id, value, onChange, disabled, placeholder, style, onFocus, onKeyDown } = props;
+  const showClear = !disabled && value.length > 0;
+
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        id={id}
+        className="input"
+        value={value}
+        disabled={disabled}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={onFocus}
+        onKeyDown={onKeyDown}
+        style={{
+          ...style,
+          paddingRight: showClear ? 36 : style?.paddingRight,
+        }}
+      />
+      {showClear && (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          aria-label="Cancella contenuto"
+          style={{
+            position: "absolute",
+            right: 8,
+            top: "50%",
+            transform: "translateY(-50%)",
+            border: "none",
+            background: "transparent",
+            color: "#64748b",
+            cursor: "pointer",
+            fontSize: 18,
+            lineHeight: 1,
+            padding: 4,
+          }}
+        >
+          ×
+        </button>
+      )}
+    </div>
+  );
+}
+
 function getMovementStatus(row: EquipmentMovementRow) {
   return row.status ?? "OPEN";
 }
@@ -181,6 +236,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const [msg, setMsg] = useState<string | null>(null);
   const [scanMode, setScanMode] = useState<"NORMAL" | "CART">("NORMAL");
   const [warehouseFilter, setWarehouseFilter] = useState<string>("");
+  const [registerWarehouse, setRegisterWarehouse] = useState<string>("");
   const [assetSearch, setAssetSearch] = useState("");
   const [assetCategoryFilter, setAssetCategoryFilter] = useState<string>("");
   const [assetOpen, setAssetOpen] = useState(false);
@@ -329,6 +385,23 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     }));
   }, [profileInfo]);
 
+  function resetPickupFields() {
+    setForm({ ...emptyForm });
+    setAssetSearch("");
+    setAssetCategoryFilter("");
+    setAssetOpen(false);
+    setAssetActiveIndex(0);
+    setCart([]);
+    setCartNote("");
+    setCartDestination("");
+    setCartInterventionPlanEnabled(false);
+    setCartInterventionPlanNumber("");
+    setCartOpen(false);
+    setScanMode("NORMAL");
+    setScanResult(null);
+    setMsg(null);
+  }
+
   const assetMap = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
   const selectedAsset = form.equipment_id ? assetMap.get(form.equipment_id) ?? null : null;
   const cartItems = useMemo(() => cart.map((id) => assetMap.get(id)).filter(Boolean) as EquipmentAssetRow[], [assetMap, cart]);
@@ -373,13 +446,9 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const assetMatches = useMemo(() => filteredAssets.slice(0, 12), [filteredAssets]);
   const assetActive = useMemo(() => assetMatches[assetActiveIndex] ?? null, [assetActiveIndex, assetMatches]);
 
-  const displayHistory = useMemo(() => {
-    const baseRows = form.equipment_id
-      ? history.filter((row) => row.equipment_id === form.equipment_id)
-      : history;
-
+  const uniqueHistoryRows = useMemo(() => {
     const seen = new Set<string>();
-    return baseRows.filter((row) => {
+    return history.filter((row) => {
       const gid = row.movement_group_id;
       if (gid) {
         if (seen.has(gid)) return false;
@@ -387,11 +456,11 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       }
       return true;
     });
-  }, [form.equipment_id, history]);
+  }, [history]);
 
   const openMovements = useMemo(
-    () => displayHistory.filter((row) => getMovementStatus(row) === "OPEN"),
-    [displayHistory]
+    () => uniqueHistoryRows.filter((row) => getMovementStatus(row) === "OPEN"),
+    [uniqueHistoryRows]
   );
 
   const selectedAssetHasOpenMovement = useMemo(() => {
@@ -680,13 +749,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         if (error) throw error;
       }
 
-      setCart([]);
-      setCartNote("");
-      setCartDestination("");
-      setCartInterventionPlanEnabled(false);
-      setCartInterventionPlanNumber("");
-      setCartOpen(false);
-      setScanMode("NORMAL");
+      resetPickupFields();
       toast.success("Prelievo multiplo registrato");
       await loadData();
     } catch (error: unknown) {
@@ -760,11 +823,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     }
 
     toast.success("Prelievo registrato");
-    setForm((prev) => ({
-      ...prev,
-      note: "",
-      destination: "",
-    }));
+    resetPickupFields();
     await loadData();
     setSaving(false);
   }
@@ -923,10 +982,39 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     );
   }
 
+  const registerDocxUrl = registerWarehouse
+    ? `/api/attrezzature/registro-docx?area=${area}&warehouse=${encodeURIComponent(registerWarehouse)}`
+    : "";
+
   return (
     <main className="panel" style={{ overflowX: "hidden" }}>
       <div className="pageBar">
         <div className="pageBarTitle">Attrezzature {areaLabel} - Movimenti</div>
+        <div className="pageBarActions" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <select
+            className="input"
+            value={registerWarehouse}
+            onChange={(e) => setRegisterWarehouse(e.target.value)}
+            style={{ minWidth: 220 }}
+            aria-label="Seleziona magazzino registro DOCX"
+          >
+            <option value="">Registro DOCX: scegli magazzino</option>
+            {warehouses.map((w) => (
+              <option key={w} value={w}>{w}</option>
+            ))}
+          </select>
+          <a
+            className="btn"
+            href={registerDocxUrl || "#"}
+            aria-disabled={!registerWarehouse}
+            onClick={(e) => {
+              if (!registerWarehouse) e.preventDefault();
+            }}
+            style={!registerWarehouse ? { opacity: 0.5, pointerEvents: "auto" } : undefined}
+          >
+            Scarica registro DOCX
+          </a>
+        </div>
       </div>
 
       <div className="card" style={{ padding: 12 }}>
@@ -1024,13 +1112,11 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           </div>
           <div ref={assetBoxRef} style={{ minWidth: 0, position: "relative" }}>
             <label className="label" htmlFor={`move-search-${area}`}>Attrezzatura</label>
-            <input
+            <ClearableInput
               id={`move-search-${area}`}
-              className="input"
               value={assetSearch}
               disabled={!warehouseSelected}
-              onChange={(e) => {
-                const value = e.target.value;
+              onChange={(value) => {
                 setAssetSearch(value);
                 setForm((prev) => ({ ...prev, equipment_id: "" }));
                 setAssetOpen(true);
@@ -1151,13 +1237,11 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
           <div style={{ minWidth: 0 }}>
             <label className="label" htmlFor={`move-note-${area}`}>Note</label>
-            <input
+            <ClearableInput
               id={`move-note-${area}`}
-              className="input"
               value={scanMode === "CART" ? cartNote : form.note}
               disabled={!warehouseSelected}
-              onChange={(e) => {
-                const value = e.target.value;
+              onChange={(value) => {
                 if (scanMode === "CART") setCartNote(value);
                 else setForm((prev) => ({ ...prev, note: value }));
               }}
@@ -1166,13 +1250,11 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
           <div style={{ minWidth: 0 }}>
             <label className="label" htmlFor={`move-destination-${area}`}>Destinazione *</label>
-            <input
+            <ClearableInput
               id={`move-destination-${area}`}
-              className="input"
               value={scanMode === "CART" ? cartDestination : form.destination}
               disabled={!warehouseSelected}
-              onChange={(e) => {
-                const value = e.target.value;
+              onChange={(value) => {
                 if (scanMode === "CART") setCartDestination(value);
                 else setForm((prev) => ({ ...prev, destination: value }));
               }}
@@ -1196,11 +1278,10 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 />
                 <span className="label" style={{ margin: 0 }}>Piano d&apos;intervento</span>
               </label>
-              <input
+              <ClearableInput
                 id={`move-intervention-plan-${area}`}
-                className="input"
                 value={cartInterventionPlanNumber}
-                onChange={(e) => setCartInterventionPlanNumber(e.target.value)}
+                onChange={setCartInterventionPlanNumber}
                 disabled={!cartInterventionPlanEnabled || !warehouseSelected}
                 style={{ flex: 1, minWidth: 0, opacity: cartInterventionPlanEnabled ? 1 : 0.6 }}
               />
@@ -1321,6 +1402,8 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 <th>Stato</th>
                 <th>Tipo</th>
                 <th>Attrezzatura</th>
+                <th>Da</th>
+                <th>A</th>
                 <th>Assegnatario</th>
                 <th>Note</th>
                 <th>Inserito da</th>
@@ -1330,11 +1413,11 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={isAdmin ? 8 : 7}>Caricamento...</td>
+                  <td colSpan={isAdmin ? 10 : 9}>Caricamento...</td>
                 </tr>
               ) : openMovements.length === 0 ? (
                 <tr>
-                  <td colSpan={isAdmin ? 8 : 7}>Nessun movimento aperto.</td>
+                  <td colSpan={isAdmin ? 10 : 9}>Nessun movimento aperto.</td>
                 </tr>
               ) : (
                 openMovements.map((row) => {
@@ -1369,6 +1452,8 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                             ? `${asset.serial_number || asset.asset_code} - ${asset.name}`
                             : row.equipment_id}
                       </td>
+                      <td>{asset?.warehouse || "—"}</td>
+                      <td>{row.destination || "—"}</td>
                       <td>
                         {[row.assigned_to_name, row.assigned_to_badge ? `Badge ${row.assigned_to_badge}` : null]
                           .filter(Boolean)
@@ -1710,11 +1795,10 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                           <label className="label" htmlFor="equipmentCloseNote">
                             Nota chiusura
                           </label>
-                          <input
+                          <ClearableInput
                             id="equipmentCloseNote"
-                            className="input"
                             value={closeNote}
-                            onChange={(e) => setCloseNote(e.target.value)}
+                            onChange={setCloseNote}
                             placeholder="Esito finale / nota rettifica"
                             disabled={!canEditRow(closing)}
                           />
@@ -1790,15 +1874,14 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                                 </select>
                               </td>
                               <td>
-                                <input
-                                  className="input"
+                                <ClearableInput
                                   value={state.closeNote}
-                                  onChange={(e) =>
+                                  onChange={(value) =>
                                     setGroupEditState((prev) => ({
                                       ...prev,
                                       [row.id]: {
                                         ...state,
-                                        closeNote: e.target.value,
+                                        closeNote: value,
                                       },
                                     }))
                                   }

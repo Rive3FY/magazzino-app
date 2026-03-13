@@ -73,6 +73,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   const [quickSelectedId, setQuickSelectedId] = useState("");
   const [quickCategoryFilter, setQuickCategoryFilter] = useState<string>("");
   const [quickWarehouseFilter, setQuickWarehouseFilter] = useState<string>("ALL");
+  const [registroSede, setRegistroSede] = useState<string>("");
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickActiveIndex, setQuickActiveIndex] = useState(0);
   const [msg, setMsg] = useState<string | null>(null);
@@ -425,8 +426,28 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     <main className="panel" style={{ overflowX: "hidden" }}>
       <div className="pageBar">
         <div className="pageBarTitle">Attrezzature {areaLabel} - Dashboard</div>
-        <div className="pageBarActions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <a className="btn" href={`/api/attrezzature/registro-docx?area=${area}`}>
+        <div className="pageBarActions" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <select
+            className="input"
+            value={registroSede}
+            onChange={(e) => setRegistroSede(e.target.value)}
+            style={{ minWidth: 220 }}
+            aria-label="Seleziona magazzino registro DOCX"
+          >
+            <option value="">Registro DOCX: scegli magazzino</option>
+            {quickWarehouses.map((w) => (
+              <option key={w} value={w}>{w}</option>
+            ))}
+          </select>
+          <a
+            className="btn"
+            href={registroSede ? `/api/attrezzature/registro-docx?area=${area}&warehouse=${encodeURIComponent(registroSede)}` : "#"}
+            aria-disabled={!registroSede}
+            onClick={(e) => {
+              if (!registroSede) e.preventDefault();
+            }}
+            style={!registroSede ? { opacity: 0.5, pointerEvents: "auto" } : undefined}
+          >
             Scarica registro Movimenti
           </a>
         </div>

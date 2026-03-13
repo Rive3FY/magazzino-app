@@ -38,31 +38,41 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const areaParam = String(searchParams.get("area") ?? "").trim().toUpperCase();
+    const warehouseParam = String(
+      searchParams.get("warehouse") ?? searchParams.get("sede") ?? ""
+    ).trim();
     if (!isEquipmentArea(areaParam)) {
       return NextResponse.json({ error: "Area non valida" }, { status: 400 });
     }
-    const [assetsRes, movementsRes] = await Promise.all([
-      supabase
-        .from("equipment_assets")
-        .select("id,asset_code,serial_number,name,equipment_area")
-        .eq("equipment_area", areaParam)
-        .order("serial_number", { ascending: true }),
-      supabase
-        .from("equipment_movements")
-        .select("id,created_at,equipment_id,equipment_area,status,note,destination,intervention_plan_number,created_by,created_by_name,assigned_to_name,resolution_type,close_note,closed_at,closed_by,movement_group_id")
-        .eq("equipment_area", areaParam)
-        .order("created_at", { ascending: true }),
-    ]);
+    let assetsQuery = supabase
+      .from("equipment_assets")
+      .select("id,asset_code,serial_number,name,equipment_area")
+      .eq("equipment_area", areaParam);
+    if (warehouseParam) {
+      assetsQuery = assetsQuery.eq("warehouse", warehouseParam);
+    }
+    const assetsRes = await assetsQuery.order("serial_number", { ascending: true });
 
     if (assetsRes.error) {
       return NextResponse.json({ error: assetsRes.error.message }, { status: 500 });
     }
-    if (movementsRes.error) {
-      return NextResponse.json({ error: movementsRes.error.message }, { status: 500 });
-    }
-
-    const movements = (movementsRes.data ?? []) as EquipmentRegisterMovement[];
     const assets = (assetsRes.data ?? []) as EquipmentRegisterAsset[];
+    const assetIds = assets.map((asset) => asset.id);
+
+    let movements: EquipmentRegisterMovement[] = [];
+    if (assetIds.length > 0) {
+      const { data: movementRows, error: movementsError } = await supabase
+        .from("equipment_movements")
+        .select("id,created_at,equipment_id,equipment_area,status,note,destination,intervention_plan_number,created_by,created_by_name,assigned_to_name,resolution_type,close_note,closed_at,closed_by,movement_group_id")
+        .eq("equipment_area", areaParam)
+        .in("equipment_id", assetIds)
+        .order("created_at", { ascending: true });
+
+      if (movementsError) {
+        return NextResponse.json({ error: movementsError.message }, { status: 500 });
+      }
+      movements = (movementRows ?? []) as EquipmentRegisterMovement[];
+    }
 
     const profileIds = Array.from(
       new Set(
@@ -129,6 +139,7 @@ export async function GET(request: Request) {
       documentXml,
       area: areaParam,
       rows: registerRows,
+      sedeDi: warehouseParam || undefined,
     });
     const updatedHeaderXml = fillEquipmentRegisterHeaderXml({
       headerXml,
@@ -140,7 +151,7 @@ export async function GET(request: Request) {
 
     const outputBuffer = await zip.generateAsync({ type: "nodebuffer" });
     const outputBytes = new Uint8Array(outputBuffer);
-    const filename = `registro_movimentazione_dotazioni_${safeFilePart(areaParam)}_${new Date().toISOString().slice(0, 10)}.docx`;
+    const filename = `registro_movimentazione_dotazioni_${safeFilePart(areaParam)}${warehouseParam ? `_${safeFilePart(warehouseParam)}` : ""}_${new Date().toISOString().slice(0, 10)}.docx`;
 
     return new NextResponse(outputBytes, {
       status: 200,

@@ -40,10 +40,10 @@ export type EquipmentRegisterRow = {
   riconsegnaData: string;
 };
 
-export function getEquipmentRegisterHeader(area: EquipmentRegisterArea) {
+export function getEquipmentRegisterHeader(area: EquipmentRegisterArea, sedeDi?: string) {
   return {
     unitaProduttiva: "U.I. Maddaloni",
-    sedeDi: "",
+    sedeDi: (sedeDi ?? "").trim(),
   };
 }
 
@@ -195,14 +195,15 @@ function fillRegisterTablePage(args: {
   table: Element;
   area: EquipmentRegisterArea;
   rows: EquipmentRegisterRow[];
+  sedeDi?: string;
 }) {
-  const { doc, table, area, rows } = args;
+  const { doc, table, area, rows, sedeDi } = args;
   const tableRows = getDirectTableRows(table);
   if (tableRows.length < 5) {
     throw new Error("Struttura tabella DOCX non valida.");
   }
 
-  const header = getEquipmentRegisterHeader(area);
+  const header = getEquipmentRegisterHeader(area, sedeDi);
   const headerCells = getRowCells(tableRows[0]!);
   if (headerCells[0]) setCellText(doc, headerCells[0], `Unità Produttiva: ${header.unitaProduttiva}`);
   if (headerCells[1]) setCellText(doc, headerCells[1], `Sede di: ${header.sedeDi}`);
@@ -257,6 +258,7 @@ export function fillEquipmentRegisterDocumentXml(args: {
   documentXml: string;
   area: EquipmentRegisterArea;
   rows: EquipmentRegisterRow[];
+  sedeDi?: string;
 }) {
   const doc = new DOMParser().parseFromString(args.documentXml, "application/xml");
   const serializer = new XMLSerializer();
@@ -286,6 +288,7 @@ export function fillEquipmentRegisterDocumentXml(args: {
       table: pageTable,
       area: args.area,
       rows: pageRows,
+      sedeDi: args.sedeDi,
     });
 
     if (pageIndex > 0) {

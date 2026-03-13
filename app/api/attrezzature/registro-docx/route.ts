@@ -182,7 +182,7 @@ export async function GET(request: Request) {
       const zipBuffer = await outZip.generateAsync({ type: "nodebuffer" });
       const zipFilename = `registro_movimentazione_dotazioni_${safeFilePart(areaParam)}_tutti_${dateStr}.zip`;
 
-      return new NextResponse(zipBuffer as Buffer, {
+      return new NextResponse(new Uint8Array(zipBuffer), {
         status: 200,
         headers: {
           "Content-Type": "application/zip",

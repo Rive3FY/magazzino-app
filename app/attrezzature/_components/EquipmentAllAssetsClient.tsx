@@ -15,7 +15,9 @@ import {
   equipmentStatusStyle,
 } from "../../_lib/equipment";
 import EquipmentStatusManager from "./EquipmentStatusManager";
+import EquipmentExcelImportClient from "./EquipmentExcelImportClient";
 import ConfirmModal from "../../_components/ConfirmModal";
+import RemoteNfcScanModal from "./RemoteNfcScanModal";
 import { equipmentAssetSchema } from "../../_lib/validations";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentStatus } from "../../_lib/types";
 
@@ -97,6 +99,8 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [warehouseFilter, setWarehouseFilter] = useState<string>("ALL");
   const [msg, setMsg] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageInput, setPageInput] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<EquipmentAssetRow | null>(null);
   const [statusModalRow, setStatusModalRow] = useState<EquipmentAssetRow | null>(null);
@@ -107,6 +111,8 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const [isIOS, setIsIOS] = useState(false);
   const [nfcAssociatingId, setNfcAssociatingId] = useState<string | null>(null);
   const [nfcTagReassign, setNfcTagReassign] = useState<NfcReassignState | null>(null);
+  const [remoteScanRow, setRemoteScanRow] = useState<EquipmentAssetRow | null>(null);
+  const [remoteScanRows, setRemoteScanRows] = useState<EquipmentAssetRow[] | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
@@ -217,6 +223,27 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
         .some((value) => String(value).toLowerCase().includes(search));
     });
   }, [q, rows, statusFilter, categoryFilter, warehouseFilter]);
+
+  const ROWS_PER_PAGE = 15;
+  const paginatedRows = useMemo(() => {
+    const start = (page - 1) * ROWS_PER_PAGE;
+    return filtered.slice(start, start + ROWS_PER_PAGE);
+  }, [filtered, page]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / ROWS_PER_PAGE));
+
+  function goToPage(p: number) {
+    const target = Math.max(1, Math.min(totalPages, p));
+    setPage(target);
+    setPageInput("");
+  }
+
+  useEffect(() => {
+    setPage(1);
+  }, [q, statusFilter, categoryFilter, warehouseFilter]);
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [q, statusFilter, categoryFilter, warehouseFilter]);
 
   const stats = useMemo(() => {
     return EQUIPMENT_STATUS_OPTIONS.reduce<Record<EquipmentStatus, number>>(
@@ -603,14 +630,45 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     setStatusModalRow(null);
   }
 
-  const [deleteConfirm, setDeleteConfirm] = useState<EquipmentAssetRow | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "single" | "bulk"; row?: EquipmentAssetRow; count?: number } | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deletingBulk, setDeletingBulk] = useState(false);
+  const [excelImportOpen, setExcelImportOpen] = useState(false);
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    const onPage = paginatedRows.map((r) => r.id);
+    const allSelected = onPage.length > 0 && onPage.every((id) => selectedIds.has(id));
+    if (allSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        onPage.forEach((id) => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => new Set([...prev, ...onPage]));
+    }
+  }
 
   function openDeleteAssetConfirm(row: EquipmentAssetRow) {
     if (!isAdmin) return;
-    setDeleteConfirm(row);
+    setDeleteConfirm({ type: "single", row });
   }
 
-  async function executeDeleteAssetRow(row: EquipmentAssetRow) {
+  function openDeleteBulkConfirm() {
+    if (!isAdmin || selectedIds.size === 0) return;
+    setDeleteConfirm({ type: "bulk", count: selectedIds.size });
+  }
+
+  async function executeDeleteAssetRow(row: EquipmentAssetRow, silent?: boolean) {
     const { error } = await supabase
       .from("equipment_assets")
       .delete()
@@ -630,14 +688,35 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
       serial_number: row.serial_number,
       status: row.status,
     });
-    toast.success("Attrezzatura eliminata");
+    if (!silent) {
+      toast.success("Attrezzatura eliminata");
+      await loadAssets();
+      if (editingRow?.id === row.id) closeModal();
+    }
+  }
+
+  async function executeBulkDelete() {
+    if (!isAdmin || selectedIds.size === 0) return;
+    setDeletingBulk(true);
+    setMsg(null);
+    const ids = Array.from(selectedIds);
+    for (const id of ids) {
+      const row = rows.find((r) => r.id === id);
+      if (row) await executeDeleteAssetRow(row, true);
+    }
+    setSelectedIds(new Set());
+    setDeletingBulk(false);
     await loadAssets();
-    if (editingRow?.id === row.id) closeModal();
+    toast.success(`${ids.length} attrezzature eliminate`);
   }
 
   async function handleDeleteAssetConfirm() {
     if (!deleteConfirm) return;
-    await executeDeleteAssetRow(deleteConfirm);
+    if (deleteConfirm.type === "single" && deleteConfirm.row) {
+      await executeDeleteAssetRow(deleteConfirm.row);
+    } else if (deleteConfirm.type === "bulk") {
+      await executeBulkDelete();
+    }
     setDeleteConfirm(null);
   }
 
@@ -655,7 +734,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   }
 
   return (
-    <main className="panel" style={{ overflowX: "hidden" }}>
+    <main className="panel">
       <div className="pageBar">
         <div className="pageBarTitle">Attrezzature {areaLabel} - Tutte le attrezzature</div>
       </div>
@@ -672,10 +751,15 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <div className="equipmentAreaPill">Area fissa: {areaLabel}</div>
               {isAdmin && (
-                <button className="btn btnPrimary" onClick={openCreate} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                  <PlusIcon />
-                  Nuova attrezzatura
-                </button>
+                <>
+                  <button className="btn btnPrimary" onClick={openCreate} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                    <PlusIcon />
+                    Nuova attrezzatura
+                  </button>
+                  <button className="btn" onClick={() => setExcelImportOpen(true)} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                    Importa da Excel
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -875,17 +959,108 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
       )}
 
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
-        <div className="equipmentSectionHeader">
+        <div className="equipmentSectionHeader" style={{ flexDirection: "column", alignItems: "stretch", gap: 10 }}>
           <div>
             <div className="equipmentSectionTitle">Elenco completo {areaLabel}</div>
-            <div className="equipmentSectionHint">{filtered.length} risultati visibili</div>
+            <div className="equipmentSectionHint">{filtered.length} risultati · Pagina {page} di {totalPages}</div>
           </div>
+          {(totalPages > 1 || (isAdmin && selectedIds.size > 0)) && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
+              {isAdmin && selectedIds.size > 0 && (
+                <>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setRemoteScanRows(paginatedRows.filter((r) => selectedIds.has(r.id)))}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                  >
+                    📱 Associa NFC (ordine)
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={deletingBulk}
+                    onClick={openDeleteBulkConfirm}
+                    style={{
+                      borderColor: "rgba(239,68,68,0.5)",
+                      background: "rgba(239,68,68,0.1)",
+                      color: "#991b1b",
+                    }}
+                  >
+                    {deletingBulk ? "Eliminazione…" : `Elimina ${selectedIds.size} selezionate`}
+                  </button>
+                </>
+              )}
+              {totalPages > 1 && (
+                <>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    ← Prec
+                  </button>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>Pagina {page} di {totalPages}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <input
+                      type="number"
+                      min={1}
+                      max={totalPages}
+                      value={pageInput}
+                      onChange={(e) => setPageInput(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && goToPage(parseInt(pageInput, 10) || 1)}
+                      placeholder="n°"
+                      className="input"
+                      style={{ width: 52, padding: "6px 8px", fontSize: 13 }}
+                    />
+                    <button type="button" className="btn" onClick={() => goToPage(parseInt(pageInput, 10) || 1)}>
+                      Vai
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={page >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    Succ →
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
-        <div className="tableWrap">
-          <table className="table">
+        <div className="tableWrap" style={{ overflowX: "auto", maxWidth: "100%" }}>
+          <table className="table equipmentTableCompact" style={{ width: "100%", tableLayout: "fixed" }}>
+            <colgroup>
+              <col style={{ width: "3%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "14%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "6%" }} />
+              <col style={{ width: "12%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "6%" }} />
+              <col style={{ width: "10%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "9%" }} />
+              <col style={{ width: "16%" }} />
+            </colgroup>
             <thead>
               <tr>
+                <th>
+                  {isAdmin && paginatedRows.length > 0 && (
+                    <input
+                      type="checkbox"
+                      checked={paginatedRows.length > 0 && paginatedRows.every((r) => selectedIds.has(r.id))}
+                      onChange={toggleSelectAll}
+                      title="Seleziona pagina"
+                    />
+                  )}
+                </th>
                 <th>Seriale</th>
                 <th>Nome</th>
                 <th>Categoria</th>
@@ -896,28 +1071,39 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                 <th>Assegnata a</th>
                 <th>Barcode</th>
                 <th>NFC</th>
-                <th>Ultimo aggiornamento</th>
+                <th>Ultimo agg.</th>
                 <th>Azioni</th>
               </tr>
             </thead>
             <tbody>
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={12}>Nessuna attrezzatura trovata.</td>
+                  <td colSpan={13}>Nessuna attrezzatura trovata.</td>
                 </tr>
               )}
               {loading && (
                 <tr>
-                  <td colSpan={12}>Caricamento attrezzature...</td>
+                  <td colSpan={13}>Caricamento attrezzature...</td>
                 </tr>
               )}
-              {filtered.map((row) => {
+              {paginatedRows.map((row) => {
                 const assignedTo = [row.assigned_to_name, row.assigned_to_badge ? `Badge ${row.assigned_to_badge}` : null]
                   .filter(Boolean)
                   .join(" · ") || "—";
 
                 return (
                   <tr key={row.id}>
+                    <td>
+                      {isAdmin && (
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(row.id)}
+                          onChange={() => toggleSelect(row.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          title="Seleziona"
+                        />
+                      )}
+                    </td>
                     <td>
                       <div style={{ display: "grid", gap: 4 }}>
                         <strong>{row.serial_number || row.asset_code}</strong>
@@ -926,7 +1112,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                     <td>{row.name}</td>
                     <td>{row.category || "—"}</td>
                     <td>{row.warehouse || "—"}</td>
-                    <td style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={row.notes ?? ""}>{row.notes || "—"}</td>
+                    <td title={row.notes ?? ""}>{row.notes || "—"}</td>
                     <td><span style={equipmentStatusStyle(row.status)}>{EQUIPMENT_STATUS_LABELS[row.status]}</span></td>
                     <td>{[row.shelf, row.place].filter(Boolean).join(" · ") || "—"}</td>
                     <td>{assignedTo}</td>
@@ -941,30 +1127,27 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                           </button>
                         )}
                         {isAdmin && (
-                          <button
-                            className="btn"
-                            onClick={() => void doAssociateNfc(row)}
-                            disabled={nfcAssociatingId === row.id}
-                            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-                          >
-                            <NfcIcon />
-                            {nfcAssociatingId === row.id ? "NFC..." : row.nfc_tag_id ? "Riassegna NFC" : "Associa NFC"}
-                          </button>
+                          <>
+                            <button
+                              className="btn"
+                              onClick={() => void doAssociateNfc(row)}
+                              disabled={nfcAssociatingId === row.id}
+                              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                            >
+                              <NfcIcon />
+                              {nfcAssociatingId === row.id ? "NFC..." : row.nfc_tag_id ? "Riassegna NFC" : "Associa NFC"}
+                            </button>
+                            <button
+                              className="btn"
+                              onClick={() => setRemoteScanRow(row)}
+                              title="Usa telefono come lettore NFC"
+                              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                            >
+                              📱 Telefono
+                            </button>
+                          </>
                         )}
                         {isAdmin && <button className="btn" onClick={() => openEdit(row)}>Modifica</button>}
-                        {isAdmin && (
-                          <button
-                            className="btn"
-                            onClick={() => openDeleteAssetConfirm(row)}
-                            style={{
-                              borderColor: "rgba(239,68,68,0.5)",
-                              background: "rgba(239,68,68,0.1)",
-                              color: "#991b1b",
-                            }}
-                          >
-                            Elimina
-                          </button>
-                        )}
                       </div>
                     </td>
                   </tr>
@@ -973,6 +1156,73 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
             </tbody>
           </table>
         </div>
+
+        {(totalPages > 1 || (isAdmin && selectedIds.size > 0)) && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(15,23,42,0.08)" }}>
+            {isAdmin && selectedIds.size > 0 && (
+              <>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setRemoteScanRows(paginatedRows.filter((r) => selectedIds.has(r.id)))}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                >
+                  📱 Associa NFC (ordine)
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={deletingBulk}
+                  onClick={openDeleteBulkConfirm}
+                  style={{
+                    borderColor: "rgba(239,68,68,0.5)",
+                    background: "rgba(239,68,68,0.1)",
+                    color: "#991b1b",
+                  }}
+                >
+                  {deletingBulk ? "Eliminazione…" : `Elimina ${selectedIds.size} selezionate`}
+                </button>
+              </>
+            )}
+            {totalPages > 1 && (
+              <>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  ← Prec
+                </button>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>Pagina {page} di {totalPages}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <input
+                    type="number"
+                    min={1}
+                    max={totalPages}
+                    value={pageInput}
+                    onChange={(e) => setPageInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && goToPage(parseInt(pageInput, 10) || 1)}
+                    placeholder="n°"
+                    className="input"
+                    style={{ width: 52, padding: "6px 8px", fontSize: 13 }}
+                  />
+                  <button type="button" className="btn" onClick={() => goToPage(parseInt(pageInput, 10) || 1)}>
+                    Vai
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  Succ →
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {modalOpen && (
@@ -1188,8 +1438,14 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
       {deleteConfirm && (
         <ConfirmModal
           open={!!deleteConfirm}
-          title="Eliminare attrezzatura"
-          message={`Eliminare l'attrezzatura ${deleteConfirm.serial_number || deleteConfirm.asset_code}?\n\nAnche lo storico collegato verrà rimosso.`}
+          title="Eliminare attrezzatura/e"
+          message={
+            deleteConfirm.type === "single" && deleteConfirm.row
+              ? `Eliminare l'attrezzatura ${deleteConfirm.row.serial_number || deleteConfirm.row.asset_code}?\n\nAnche lo storico collegato verrà rimosso.`
+              : deleteConfirm.type === "bulk" && deleteConfirm.count
+                ? `Eliminare ${deleteConfirm.count} attrezzatura/e selezionate?\n\nAnche lo storico collegato verrà rimosso.`
+                : ""
+          }
           confirmLabel="Elimina"
           cancelLabel="Annulla"
           danger
@@ -1197,6 +1453,48 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
           onCancel={() => setDeleteConfirm(null)}
         />
       )}
+
+      {excelImportOpen && (
+        <EquipmentExcelImportClient
+          area={area}
+          onClose={() => setExcelImportOpen(false)}
+          onSuccess={() => loadAssets()}
+        />
+      )}
+
+      <RemoteNfcScanModal
+        open={!!remoteScanRow || !!(remoteScanRows && remoteScanRows.length > 0)}
+        onClose={() => {
+          setRemoteScanRow(null);
+          setRemoteScanRows(null);
+        }}
+        context="equipment_associate"
+        equipmentId={remoteScanRow?.id}
+        equipmentIds={remoteScanRows?.map((r) => r.id)}
+        area={area}
+        allowMultiple={!!remoteScanRows?.length}
+        title={
+          remoteScanRows?.length
+            ? `Associa NFC a ${remoteScanRows.length} attrezzature (nell'ordine della tabella)`
+            : remoteScanRow
+              ? `Associa NFC a ${remoteScanRow.serial_number || remoteScanRow.asset_code}`
+              : "Usa telefono come lettore NFC"
+        }
+        onTagReceived={async (nfcTagId, ctx) => {
+          const row = ctx?.equipmentId
+            ? remoteScanRows?.find((r) => r.id === ctx.equipmentId)
+            : remoteScanRow;
+          if (row) {
+            try {
+              await saveNfcAssociation(row, nfcTagId);
+              toast.success("NFC associato");
+              await loadAssets();
+            } catch (e) {
+              toast.error(e instanceof Error ? e.message : "Errore associazione");
+            }
+          }
+        }}
+      />
     </main>
   );
 }

@@ -1476,6 +1476,29 @@ textarea.input{
   align-self:center;
 }
 
+/* Tabella attrezzature compatta: larghezza piena, max 15 righe con paginazione */
+.equipmentTableCompact {
+  width: 100% !important;
+  min-width: 0 !important;
+  table-layout: fixed;
+  font-size: 12px;
+}
+.equipmentTableCompact thead th,
+.equipmentTableCompact tbody td {
+  white-space: normal;
+  word-break: break-word;
+  padding: 8px 6px !important;
+  overflow-wrap: break-word;
+}
+.equipmentTableCompact .equipmentActionGroup {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.equipmentTableCompact .equipmentActionGroup .btn {
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
 .equipmentActionGroup{
   display:flex;
   gap:8px;

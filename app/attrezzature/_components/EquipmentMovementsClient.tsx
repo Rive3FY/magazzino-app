@@ -20,6 +20,7 @@ import {
 } from "../../_lib/equipment";
 import { equipmentMovementSchema } from "../../_lib/validations";
 import ConfirmModal from "../../_components/ConfirmModal";
+import RemoteNfcScanModal from "./RemoteNfcScanModal";
 import type {
   EquipmentArea,
   EquipmentAssetRow,
@@ -251,6 +252,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const [cameraScanning, setCameraScanning] = useState(false);
   const [searchByNfcScanning, setSearchByNfcScanning] = useState(false);
   const [scanResult, setScanResult] = useState<ScanResultState | null>(null);
+  const [remoteScanOpen, setRemoteScanOpen] = useState(false);
   const [isNfcSupported, setIsNfcSupported] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [form, setForm] = useState<MovementFormState>(() => ({
@@ -674,6 +676,39 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     setMsg("Attrezzatura aggiunta al carrello.");
   }
 
+  function addAssetByNfcToCart(nfcTagId: string) {
+    if (!warehouseSelected) return;
+    const normalized = nfcTagId.trim().toLowerCase();
+    if (!normalized) return;
+    const matched = assetsByWarehouse.find(
+      (a) => String(a.nfc_tag_id ?? "").trim().toLowerCase() === normalized
+    );
+    if (!matched) {
+      setMsg("Nessuna attrezzatura associata a questo tag NFC nel magazzino selezionato.");
+      return;
+    }
+    if (matched.status !== "AVAILABLE") {
+      setMsg("L'attrezzatura non è disponibile.");
+      return;
+    }
+    const hasOpen = history.some(
+      (row) => row.equipment_id === matched.id && getMovementStatus(row) === "OPEN"
+    );
+    if (hasOpen) {
+      setMsg("Questa attrezzatura ha già un movimento aperto.");
+      return;
+    }
+    if (cart.includes(matched.id)) {
+      setMsg("Attrezzatura già nel carrello.");
+      setCartOpen(true);
+      return;
+    }
+    setCart((prev) => [...prev, matched.id]);
+    setCartOpen(true);
+    setScanMode("CART");
+    setMsg("Aggiunta al carrello.");
+  }
+
   function removeCartItem(id: string) {
     setCart((prev) => prev.filter((item) => item !== id));
   }
@@ -1066,6 +1101,9 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
             <button className="btn" onClick={searchByNfc} disabled={searchByNfcScanning || !warehouseSelected} type="button" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <NfcIcon />
               {searchByNfcScanning ? "NFC..." : "NFC"}
+            </button>
+            <button className="btn" onClick={() => setRemoteScanOpen(true)} disabled={!warehouseSelected} type="button" title="Usa telefono come lettore NFC" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              📱 Telefono
             </button>
           </div>
         </div>
@@ -1924,6 +1962,18 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           onCancel={() => setDeleteConfirm(null)}
         />
       )}
+
+      <RemoteNfcScanModal
+        open={remoteScanOpen}
+        onClose={() => setRemoteScanOpen(false)}
+        context="movement_select"
+        area={area}
+        allowMultiple
+        title="Aggiungi attrezzature con telefono"
+        onTagReceived={(nfcTagId) => {
+          addAssetByNfcToCart(nfcTagId);
+        }}
+      />
     </main>
   );
 }

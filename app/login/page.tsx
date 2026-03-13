@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "../_lib/supabase/client";
 import { deriveAdminAccess } from "../_lib/admin-access";
 
 export default function LoginPage() {
+  const searchParams = useSearchParams();
+  const redirectTo = searchParams.get("redirect") ?? "/";
   const supabase = createClient();
 
   const [email, setEmail] = useState("");
@@ -50,8 +53,12 @@ export default function LoginPage() {
             isEquipmentLineeAdmin: !!profile?.is_equipment_linee_admin,
             isEquipmentStazioniAdmin: !!profile?.is_equipment_stazioni_admin,
           });
-          if (access.approved || access.isAdmin) window.location.href = "/";
-          else window.location.href = "/pending";
+          if (access.approved || access.isAdmin) {
+            const target = redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/";
+            window.location.href = target;
+          } else {
+            window.location.href = "/pending";
+          }
           return;
         } catch (e2) {
           try {
@@ -68,8 +75,12 @@ export default function LoginPage() {
               legacyAdmin: !!legacyProfile?.is_admin,
               isSuperAdmin: !!legacyProfile?.is_admin,
             });
-            if (access.approved || access.isAdmin) window.location.href = "/";
-            else window.location.href = "/pending";
+            if (access.approved || access.isAdmin) {
+              const target = redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/";
+              window.location.href = target;
+            } else {
+              window.location.href = "/pending";
+            }
             return;
           } catch {
             console.error("profiles read error:", e2);
@@ -161,7 +172,8 @@ export default function LoginPage() {
       return;
     }
 
-    window.location.href = "/";
+    const target = redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/";
+    window.location.href = target;
   }
 
   async function signUp() {

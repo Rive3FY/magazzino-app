@@ -183,6 +183,7 @@ export default function AdminPage() {
   const [workingId, setWorkingId] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [resettingAttrezzature, setResettingAttrezzature] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // REFERENTI
@@ -347,6 +348,30 @@ export default function AdminPage() {
       alert("Errore reset magazzino: " + (e instanceof Error ? e.message : "sconosciuto"));
     } finally {
       setResetting(false);
+    }
+  }
+
+  async function handleResetAttrezzature() {
+    const ok1 = window.confirm(
+      "ATTENZIONE:\n\nQuesta operazione cancellerà TUTTE le attrezzature (Linee e Stazioni) e TUTTI i movimenti collegati.\n\nL'operazione è irreversibile.\n\nVuoi continuare?"
+    );
+    if (!ok1) return;
+    const text = window.prompt('Per confermare davvero il reset, scrivi esattamente: RESET ATTREZZATURE');
+    if (text !== "RESET ATTREZZATURE") {
+      alert("Conferma non valida. Reset annullato.");
+      return;
+    }
+    try {
+      setResettingAttrezzature(true);
+      const res = await fetch("/api/admin/reset-attrezzature", { method: "POST", credentials: "include" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || res.statusText);
+      alert("Reset attrezzature completato con successo.");
+      window.location.reload();
+    } catch (e: unknown) {
+      alert("Errore reset attrezzature: " + (e instanceof Error ? e.message : "sconosciuto"));
+    } finally {
+      setResettingAttrezzature(false);
     }
   }
 
@@ -752,10 +777,18 @@ export default function AdminPage() {
                 <button
                   className="btn"
                   onClick={handleResetMagazzino}
-                  disabled={resetting}
+                  disabled={resetting || resettingAttrezzature}
                   style={{ borderColor: "rgba(239,68,68,0.5)", background: "rgba(239,68,68,0.10)", color: "#991b1b" }}
                 >
                   {resetting ? "Reset…" : "Reset magazzino"}
+                </button>
+                <button
+                  className="btn"
+                  onClick={handleResetAttrezzature}
+                  disabled={resetting || resettingAttrezzature}
+                  style={{ borderColor: "rgba(239,68,68,0.5)", background: "rgba(239,68,68,0.10)", color: "#991b1b" }}
+                >
+                  {resettingAttrezzature ? "Reset…" : "Reset attrezzature"}
                 </button>
                 <button
                   className="btn"

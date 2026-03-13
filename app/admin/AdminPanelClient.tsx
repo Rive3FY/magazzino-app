@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import ConfirmModal from "../_components/ConfirmModal";
+import ConfirmWithInputModal from "../_components/ConfirmWithInputModal";
 
 type Row = {
   Materiale?: any;
@@ -91,6 +92,7 @@ export default function AdminPanelClient() {
 
   // RESET MAGAZZINO
   const [resetting, setResetting] = useState(false);
+  const [resetMagazzinoModalOpen, setResetMagazzinoModalOpen] = useState(false);
 
   // DISCONNETTI TUTTI (temporaneo)
   const [disconnectingAll, setDisconnectingAll] = useState(false);
@@ -300,23 +302,10 @@ export default function AdminPanelClient() {
     }
   }
 
-  async function handleResetMagazzino() {
-    const ok1 = window.confirm(
-      "ATTENZIONE:\n\nQuesta operazione cancellerà TUTTI i movimenti, TUTTE le giacenze live e TUTTO l'import Excel originale.\n\nL'operazione è irreversibile.\n\nVuoi continuare?"
-    );
-    if (!ok1) return;
-
-    const text = window.prompt(
-      'Per confermare davvero il reset, scrivi esattamente: RESET MAGAZZINO'
-    );
-
-    if (text !== "RESET MAGAZZINO") {
-      alert("Conferma non valida. Reset annullato.");
-      return;
-    }
-
+  async function executeResetMagazzino() {
     try {
       setResetting(true);
+      setResetMagazzinoModalOpen(false);
 
       const res = await fetch("/api/admin/reset-magazzino", { method: "POST", credentials: "include" });
       const json = await res.json().catch(() => ({}));
@@ -427,7 +416,7 @@ export default function AdminPanelClient() {
           </button>
           <button
             className="btn"
-            onClick={handleResetMagazzino}
+            onClick={() => setResetMagazzinoModalOpen(true)}
             disabled={resetting}
             style={{
               borderColor: "rgba(239,68,68,0.5)",
@@ -751,6 +740,19 @@ export default function AdminPanelClient() {
           onCancel={() => setDeleteMovId(null)}
         />
       )}
+
+      <ConfirmWithInputModal
+        open={resetMagazzinoModalOpen}
+        title="Reset magazzino"
+        message="ATTENZIONE: Questa operazione cancellerà TUTTI i movimenti, TUTTE le giacenze live e TUTTO l'import Excel originale. L'operazione è irreversibile."
+        inputLabel="Scrivi esattamente per confermare:"
+        confirmPhrase="RESET MAGAZZINO"
+        confirmLabel="Esegui reset"
+        cancelLabel="Annulla"
+        danger
+        onConfirm={() => void executeResetMagazzino()}
+        onCancel={() => setResetMagazzinoModalOpen(false)}
+      />
     </main>
   );
 }

@@ -160,10 +160,11 @@ export default function AdminPanelClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function deleteMovement(id: string) {
-    const ok = confirm("Eliminare questo movimento?");
-    if (!ok) return;
+  function openDeleteMovementConfirm(id: string) {
+    setDeleteMovId(id);
+  }
 
+  async function executeDeleteMovement(id: string) {
     const { error } = await supabase.from("movements").delete().eq("id", id);
 
     if (error) {
@@ -173,6 +174,12 @@ export default function AdminPanelClient() {
 
     setMovMsg("Movimento eliminato ✅");
     await loadMovements();
+  }
+
+  async function handleDeleteMovementConfirm() {
+    if (!deleteMovId) return;
+    await executeDeleteMovement(deleteMovId);
+    setDeleteMovId(null);
   }
 
   async function grantAdmin(userId: string) {

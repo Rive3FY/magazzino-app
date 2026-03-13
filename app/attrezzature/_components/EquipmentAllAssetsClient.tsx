@@ -65,6 +65,28 @@ function NfcIcon() {
   );
 }
 
+function PhoneIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="7" y="2" width="10" height="20" rx="2" />
+      <path d="M11 18h2" />
+      <path d="M10 5h4" />
+    </svg>
+  );
+}
+
+function FileTextIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6" />
+      <path d="M16 13H8" />
+      <path d="M16 17H8" />
+      <path d="M10 9H8" />
+    </svg>
+  );
+}
+
 function SpinnerIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 1s linear infinite", transformOrigin: "center" }}>
@@ -88,6 +110,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const isAdmin = area === "LINEE" ? access.canManageEquipmentLinee : access.canManageEquipmentStazioni;
   const adminLoading = access.loading;
   const toast = useToast();
+  const [isMobile, setIsMobile] = useState(false);
 
   const [rows, setRows] = useState<EquipmentAssetRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,6 +126,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const [pageInput, setPageInput] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<EquipmentAssetRow | null>(null);
+  const [mobileEditMode, setMobileEditMode] = useState(false);
   const [statusModalRow, setStatusModalRow] = useState<EquipmentAssetRow | null>(null);
   const [formEntries, setFormEntries] = useState<AssetFormState[]>([emptyForm]);
   const [cameraScanning, setCameraScanning] = useState(false);
@@ -113,9 +137,12 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const [nfcTagReassign, setNfcTagReassign] = useState<NfcReassignState | null>(null);
   const [remoteScanRow, setRemoteScanRow] = useState<EquipmentAssetRow | null>(null);
   const [remoteScanRows, setRemoteScanRows] = useState<EquipmentAssetRow[] | null>(null);
+  const [techSheetBusyId, setTechSheetBusyId] = useState<string | null>(null);
+  const [techSheetTargetRow, setTechSheetTargetRow] = useState<EquipmentAssetRow | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
+  const techSheetInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (authLoading) return;
@@ -128,6 +155,15 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
       window.location.href = "/pending";
     }
   }, [user, approved, authLoading]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia("(max-width: 780px)");
+    const sync = () => setIsMobile(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
 
   async function writeAuditLog(action: string, entityId: string | null, details: Record<string, unknown>) {
     try {
@@ -497,12 +533,14 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     if (saving) return;
     setModalOpen(false);
     setEditingRow(null);
+    setMobileEditMode(false);
     setFormEntries([emptyForm]);
     setMsg(null);
   }
 
   function openCreate() {
     setEditingRow(null);
+    setMobileEditMode(true);
     setFormEntries([emptyForm]);
     setMsg(null);
     setModalOpen(true);
@@ -510,6 +548,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
 
   function openEdit(row: EquipmentAssetRow) {
     setEditingRow(row);
+    setMobileEditMode(!isMobile);
     setFormEntries([{
       serial_number: row.serial_number ?? "",
       name: row.name ?? "",
@@ -520,6 +559,68 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     }]);
     setMsg(null);
     setModalOpen(true);
+  }
+
+  function applyUpdatedRow(updatedRow: EquipmentAssetRow) {
+    setRows((prev) => prev.map((row) => (row.id === updatedRow.id ? updatedRow : row)));
+    setEditingRow((prev) => (prev?.id === updatedRow.id ? updatedRow : prev));
+  }
+
+  function openTechnicalSheet(row: EquipmentAssetRow) {
+    if (!row.technical_sheet_path) {
+      toast.error("Nessuna scheda tecnica associata");
+      return;
+    }
+    window.open(`/api/attrezzature/technical-sheet?id=${encodeURIComponent(row.id)}`, "_blank", "noopener,noreferrer");
+  }
+
+  function triggerTechnicalSheetUpload(row: EquipmentAssetRow) {
+    if (!isAdmin) return;
+    setTechSheetTargetRow(row);
+    techSheetInputRef.current?.click();
+  }
+
+  async function handleTechnicalSheetFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    const row = techSheetTargetRow;
+    event.target.value = "";
+    setTechSheetTargetRow(null);
+
+    if (!file || !row) return;
+
+    if (file.type !== "application/pdf") {
+      toast.error("La scheda tecnica deve essere un PDF");
+      return;
+    }
+
+    setTechSheetBusyId(row.id);
+    try {
+      const formData = new FormData();
+      formData.set("equipmentId", row.id);
+      formData.set("file", file);
+
+      const res = await fetch("/api/attrezzature/technical-sheet", {
+        method: "POST",
+        body: formData,
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.error ?? "Errore caricamento scheda tecnica");
+      }
+
+      if (json.row) {
+        applyUpdatedRow(json.row as EquipmentAssetRow);
+      } else {
+        await loadAssets();
+      }
+
+      toast.success(row.technical_sheet_path ? "Scheda tecnica aggiornata" : "Scheda tecnica caricata");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Errore caricamento scheda tecnica");
+    } finally {
+      setTechSheetBusyId(null);
+    }
   }
 
   function addFormEntry() {
@@ -1032,7 +1133,17 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
           )}
         </div>
 
-        <div className="tableWrap" style={{ overflowX: "auto", maxWidth: "100%" }}>
+        <div
+          className="tableWrap"
+          style={{
+            overflowX: "auto",
+            overflowY: "hidden",
+            width: "100%",
+            maxWidth: "100%",
+            marginTop: 10,
+            WebkitOverflowScrolling: "touch",
+          }}
+        >
           <table className="table equipmentTableCompact" style={{ width: "100%", tableLayout: "fixed" }}>
             <colgroup>
               <col style={{ width: "3%" }} />
@@ -1092,8 +1203,15 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                   .join(" · ") || "—";
 
                 return (
-                  <tr key={row.id}>
-                    <td>
+                  <tr
+                    key={row.id}
+                    onClick={() => {
+                      if (isMobile) openEdit(row);
+                    }}
+                    style={isMobile ? { cursor: "pointer" } : undefined}
+                    title={isMobile ? "Tocca per aprire il dettaglio" : undefined}
+                  >
+                    <td onClick={(e) => e.stopPropagation()}>
                       {isAdmin && (
                         <input
                           type="checkbox"
@@ -1119,36 +1237,58 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                     <td>{row.barcode || "Da generare"}</td>
                     <td>{row.nfc_tag_id || "Non associato"}</td>
                     <td>{fmtDateTime(row.updated_at)}</td>
-                    <td>
-                      <div className="equipmentActionGroup">
-                        {isAdmin && (
-                          <button className="btn" onClick={() => setStatusModalRow(row)} disabled={saving}>
-                            Gestisci stato
+                    <td onClick={(e) => e.stopPropagation()}>
+                      {!isMobile && (
+                        <div className="equipmentActionGroup">
+                          <button
+                            className="btn"
+                            onClick={() => openTechnicalSheet(row)}
+                            disabled={!row.technical_sheet_path || techSheetBusyId === row.id}
+                            title={row.technical_sheet_path ? "Apri scheda tecnica" : "Nessuna scheda tecnica associata"}
+                          >
+                            <FileTextIcon />
+                            Scheda tecnica
                           </button>
-                        )}
-                        {isAdmin && (
-                          <>
+                          {isAdmin && (
                             <button
                               className="btn"
-                              onClick={() => void doAssociateNfc(row)}
-                              disabled={nfcAssociatingId === row.id}
-                              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                              onClick={() => triggerTechnicalSheetUpload(row)}
+                              disabled={techSheetBusyId === row.id}
                             >
-                              <NfcIcon />
-                              {nfcAssociatingId === row.id ? "NFC..." : row.nfc_tag_id ? "Riassegna NFC" : "Associa NFC"}
+                              <FileTextIcon />
+                              {techSheetBusyId === row.id ? "Caricamento..." : row.technical_sheet_path ? "Aggiorna scheda" : "Carica scheda"}
                             </button>
-                            <button
-                              className="btn"
-                              onClick={() => setRemoteScanRow(row)}
-                              title="Usa telefono come lettore NFC"
-                              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-                            >
-                              📱 Telefono
+                          )}
+                          {isAdmin && (
+                            <button className="btn" onClick={() => setStatusModalRow(row)} disabled={saving}>
+                              Gestisci stato
                             </button>
-                          </>
-                        )}
-                        {isAdmin && <button className="btn" onClick={() => openEdit(row)}>Modifica</button>}
-                      </div>
+                          )}
+                          {isAdmin && (
+                            <>
+                              <button
+                                className="btn"
+                                onClick={() => void doAssociateNfc(row)}
+                                disabled={nfcAssociatingId === row.id}
+                                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                              >
+                                <NfcIcon />
+                                {nfcAssociatingId === row.id ? "NFC..." : row.nfc_tag_id ? "Riassegna NFC" : "Associa NFC"}
+                              </button>
+                              <button
+                                className="btn"
+                                onClick={() => setRemoteScanRow(row)}
+                                title="Usa telefono come lettore NFC"
+                                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                              >
+                                <PhoneIcon />
+                                Telefono
+                              </button>
+                            </>
+                          )}
+                          {isAdmin && <button className="btn" onClick={() => openEdit(row)}>Modifica</button>}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );
@@ -1225,6 +1365,14 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
         )}
       </div>
 
+      <input
+        ref={techSheetInputRef}
+        type="file"
+        accept="application/pdf"
+        style={{ display: "none" }}
+        onChange={handleTechnicalSheetFileChange}
+      />
+
       {modalOpen && (
         <div
           onMouseDown={closeModal}
@@ -1252,46 +1400,188 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
               padding: 12,
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            {(() => {
+              const showCompactMobileDetail = isMobile && !!editingRow && !mobileEditMode;
+              return (
+                <>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
               <div style={{ fontWeight: 900 }}>
-                {editingRow ? "Modifica attrezzatura" : "Nuova attrezzatura"} · <span style={{ opacity: 0.75 }}>{areaLabel}</span>
+                {editingRow
+                  ? showCompactMobileDetail
+                    ? "Dettaglio attrezzatura"
+                    : isAdmin
+                      ? "Modifica attrezzatura"
+                      : "Dettaglio attrezzatura"
+                  : "Nuova attrezzatura"} · <span style={{ opacity: 0.75 }}>{areaLabel}</span>
               </div>
+              {editingRow && (
+                <span style={equipmentStatusStyle(editingRow.status)}>
+                  {EQUIPMENT_STATUS_LABELS[editingRow.status]}
+                </span>
+              )}
+            </div>
 
-              <div style={{ display: "flex", gap: 10 }}>
-                {isAdmin && editingRow && (
-                  <button
-                    className="btn"
-                    style={{
-                      borderColor: "rgba(239,68,68,0.5)",
-                      background: "rgba(239,68,68,0.1)",
-                      color: "#991b1b",
-                    }}
-                    disabled={saving}
-                    onClick={() => editingRow && openDeleteAssetConfirm(editingRow)}
-                    title="Elimina attrezzatura"
-                  >
-                    Elimina
-                  </button>
-                )}
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", marginTop: 10 }}>
+              <button className="btn" disabled={saving} onClick={closeModal}>
+                Chiudi
+              </button>
 
-                <button className="btn" disabled={saving} onClick={closeModal}>
-                  Chiudi
+              {isAdmin && showCompactMobileDetail && editingRow && (
+                <button className="btn btnPrimary" disabled={saving} onClick={() => setMobileEditMode(true)}>
+                  Modifica
                 </button>
+              )}
 
+              {isAdmin && (!showCompactMobileDetail || !editingRow) && (
                 <button className="btn btnPrimary" disabled={saving} onClick={saveAsset}>
                   {saving ? "Salvataggio..." : "Salva"}
                 </button>
-              </div>
+              )}
             </div>
 
             <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-              L&apos;attrezzatura restera vincolata in modo permanente all&apos;area {areaLabel}. Il seriale
-              viene usato come identificativo principale; barcode e NFC si gestiscono dopo.
+              {showCompactMobileDetail
+                ? `Dettaglio rapido dell'attrezzatura nell'area ${areaLabel}.`
+                : isAdmin
+                ? `L'attrezzatura restera vincolata in modo permanente all'area ${areaLabel}. Il seriale viene usato come identificativo principale; barcode e NFC si gestiscono dopo.`
+                : `Vista di sola lettura dell'attrezzatura nell'area ${areaLabel}.`}
             </div>
+
+            {showCompactMobileDetail && editingRow && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 12,
+                  border: "1px solid rgba(15,23,42,0.12)",
+                  borderRadius: 12,
+                  background: "rgba(248,250,252,0.8)",
+                  display: "grid",
+                  gap: 12,
+                }}
+              >
+                <div>
+                  <div className="equipmentInfoLabel">Seriale / matricola</div>
+                  <div className="equipmentInfoValue">{editingRow.serial_number || editingRow.asset_code}</div>
+                </div>
+                <div>
+                  <div className="equipmentInfoLabel">Nome attrezzatura</div>
+                  <div className="equipmentInfoValue">{editingRow.name || "—"}</div>
+                </div>
+                <div>
+                  <div className="equipmentInfoLabel">Categoria</div>
+                  <div className="equipmentInfoValue">{editingRow.category || "—"}</div>
+                </div>
+                <div>
+                  <div className="equipmentInfoLabel">Magazzino</div>
+                  <div className="equipmentInfoValue">{editingRow.warehouse || "—"}</div>
+                </div>
+                <div>
+                  <div className="equipmentInfoLabel">Scaffale</div>
+                  <div className="equipmentInfoValue">{[editingRow.shelf, editingRow.place].filter(Boolean).join(" · ") || "—"}</div>
+                </div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button
+                    className="btn"
+                    onClick={() => openTechnicalSheet(editingRow)}
+                    disabled={!editingRow.technical_sheet_path || techSheetBusyId === editingRow.id}
+                    title={editingRow.technical_sheet_path ? "Apri scheda tecnica" : "Nessuna scheda tecnica associata"}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                  >
+                    <FileTextIcon />
+                    Scheda tecnica
+                  </button>
+                  {isAdmin && (
+                    <button
+                      className="btn"
+                      onClick={() => triggerTechnicalSheetUpload(editingRow)}
+                      disabled={techSheetBusyId === editingRow.id}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                    >
+                      <FileTextIcon />
+                      {techSheetBusyId === editingRow.id ? "Caricamento..." : editingRow.technical_sheet_path ? "Aggiorna scheda" : "Carica scheda"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {isMobile && isAdmin && editingRow && mobileEditMode && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 12,
+                  border: "1px solid rgba(15,23,42,0.12)",
+                  borderRadius: 12,
+                  background: "rgba(248,250,252,0.8)",
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 800, color: "#475569", marginBottom: 10 }}>
+                  Azioni rapide
+                </div>
+                <div className="equipmentActionGroup">
+                  <button
+                    className="btn"
+                    onClick={() => openTechnicalSheet(editingRow)}
+                    disabled={!editingRow.technical_sheet_path || techSheetBusyId === editingRow.id}
+                    title={editingRow.technical_sheet_path ? "Apri scheda tecnica" : "Nessuna scheda tecnica associata"}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                  >
+                    <FileTextIcon />
+                    Scheda tecnica
+                  </button>
+                  {isAdmin && (
+                    <button
+                      className="btn"
+                      onClick={() => triggerTechnicalSheetUpload(editingRow)}
+                      disabled={techSheetBusyId === editingRow.id}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                    >
+                      <FileTextIcon />
+                      {techSheetBusyId === editingRow.id ? "Caricamento..." : editingRow.technical_sheet_path ? "Aggiorna scheda" : "Carica scheda"}
+                    </button>
+                  )}
+                  {isAdmin && (
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        setModalOpen(false);
+                        setStatusModalRow(editingRow);
+                      }}
+                      disabled={saving}
+                    >
+                      Gestisci stato
+                    </button>
+                  )}
+                  {isAdmin && (
+                    <button
+                      className="btn"
+                      onClick={() => void doAssociateNfc(editingRow)}
+                      disabled={nfcAssociatingId === editingRow.id}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                    >
+                      <NfcIcon />
+                      {nfcAssociatingId === editingRow.id ? "NFC..." : editingRow.nfc_tag_id ? "Riassegna NFC" : "Associa NFC"}
+                    </button>
+                  )}
+                  {isAdmin && (
+                    <button
+                      className="btn"
+                      onClick={() => setRemoteScanRow(editingRow)}
+                      title="Usa telefono come lettore NFC"
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                    >
+                      <PhoneIcon />
+                      Telefono
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {msg && <div className="equipmentInlineMessage" style={{ marginTop: 12 }}>{msg}</div>}
 
-            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 16 }}>
+            {(!showCompactMobileDetail || !editingRow) && (
+              <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 16 }}>
               {formEntries.map((entry, idx) => (
                 <div
                   key={idx}
@@ -1330,15 +1620,15 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                   <div className="equipmentFormGrid mobileGrid1" style={{ display: "grid", gap: 10 }}>
                     <div style={{ minWidth: 0 }}>
                       <label className="label" htmlFor={`modal-asset-serial-${area}-${idx}`}>Seriale / matricola</label>
-                      <input id={`modal-asset-serial-${area}-${idx}`} className="input" value={entry.serial_number} onChange={(e) => setFormEntries((prev) => { const n = [...prev]; n[idx] = { ...n[idx], serial_number: e.target.value }; return n; })} placeholder="Obbligatorio" />
+                      <input id={`modal-asset-serial-${area}-${idx}`} className="input" value={entry.serial_number} onChange={(e) => setFormEntries((prev) => { const n = [...prev]; n[idx] = { ...n[idx], serial_number: e.target.value }; return n; })} placeholder="Obbligatorio" disabled={!isAdmin || saving} />
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <label className="label" htmlFor={`modal-asset-name-${area}-${idx}`}>Nome attrezzatura</label>
-                      <input id={`modal-asset-name-${area}-${idx}`} className="input" value={entry.name} onChange={(e) => setFormEntries((prev) => { const n = [...prev]; n[idx] = { ...n[idx], name: e.target.value }; return n; })} placeholder="Obbligatorio" />
+                      <input id={`modal-asset-name-${area}-${idx}`} className="input" value={entry.name} onChange={(e) => setFormEntries((prev) => { const n = [...prev]; n[idx] = { ...n[idx], name: e.target.value }; return n; })} placeholder="Obbligatorio" disabled={!isAdmin || saving} />
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <label className="label" htmlFor={`modal-asset-category-${area}-${idx}`}>Categoria / sottogruppo</label>
-                      <input id={`modal-asset-category-${area}-${idx}`} className="input" value={entry.category} onChange={(e) => setFormEntries((prev) => { const n = [...prev]; n[idx] = { ...n[idx], category: e.target.value }; return n; })} placeholder="Es. Braghe 1500kg" />
+                      <input id={`modal-asset-category-${area}-${idx}`} className="input" value={entry.category} onChange={(e) => setFormEntries((prev) => { const n = [...prev]; n[idx] = { ...n[idx], category: e.target.value }; return n; })} placeholder="Es. Braghe 1500kg" disabled={!isAdmin || saving} />
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <label className="label" htmlFor={`modal-asset-warehouse-${area}-${idx}`}>Magazzino</label>
@@ -1350,6 +1640,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                         value={entry.warehouse}
                         onChange={(e) => setFormEntries((prev) => { const n = [...prev]; n[idx] = { ...n[idx], warehouse: e.target.value }; return n; })}
                         placeholder="Es. Magazzino A, Reparto X..."
+                        disabled={!isAdmin || saving}
                       />
                       <datalist id={`modal-asset-warehouse-list-${area}-${idx}`}>
                         {warehouses.map((w) => (
@@ -1359,7 +1650,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <label className="label" htmlFor={`modal-asset-shelf-${area}-${idx}`}>Scaffale</label>
-                      <input id={`modal-asset-shelf-${area}-${idx}`} className="input" value={entry.shelf} onChange={(e) => setFormEntries((prev) => { const n = [...prev]; n[idx] = { ...n[idx], shelf: e.target.value }; return n; })} placeholder="Es. A1, B2 · Ripiano 3..." />
+                      <input id={`modal-asset-shelf-${area}-${idx}`} className="input" value={entry.shelf} onChange={(e) => setFormEntries((prev) => { const n = [...prev]; n[idx] = { ...n[idx], shelf: e.target.value }; return n; })} placeholder="Es. A1, B2 · Ripiano 3..." disabled={!isAdmin || saving} />
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <label className="label" htmlFor={`modal-asset-notes-${area}-${idx}`}>Note</label>
@@ -1379,6 +1670,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                           ta.style.height = `${Math.max(40, ta.scrollHeight)}px`;
                         }}
                         rows={1}
+                        disabled={!isAdmin || saving}
                         style={{ resize: "none", overflow: "hidden", height: 40, minHeight: 40, width: "100%", boxSizing: "border-box" }}
                       />
                     </div>
@@ -1396,7 +1688,37 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                   Aggiungi attrezzatura
                 </button>
               )}
-            </div>
+              </div>
+            )}
+
+            {isAdmin && editingRow && !showCompactMobileDetail && (
+              <div
+                style={{
+                  marginTop: 16,
+                  paddingTop: 16,
+                  borderTop: "1px solid rgba(15,23,42,0.08)",
+                  display: "flex",
+                  justifyContent: "flex-end",
+                }}
+              >
+                <button
+                  className="btn"
+                  style={{
+                    borderColor: "rgba(239,68,68,0.5)",
+                    background: "rgba(239,68,68,0.1)",
+                    color: "#991b1b",
+                  }}
+                  disabled={saving}
+                  onClick={() => editingRow && openDeleteAssetConfirm(editingRow)}
+                  title="Elimina attrezzatura"
+                >
+                  Elimina
+                </button>
+              </div>
+            )}
+                </>
+              );
+            })()}
           </div>
         </div>
       )}

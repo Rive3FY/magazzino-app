@@ -3,7 +3,6 @@ import { createClient } from "./_lib/supabase/server";
 import { ToastProvider } from "./_lib/ToastContext";
 import { SidebarProvider } from "./_lib/SidebarContext";
 import ForceLogoutListener from "./_components/ForceLogoutListener";
-import OnlinePresenceTracker from "./_components/OnlinePresenceTracker";
 import { Inter } from "next/font/google";
 import AppShell from "./_components/AppShell";
 
@@ -48,7 +47,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className={inter.className}>
         <ToastProvider>
           {hasUser && <ForceLogoutListener />}
-          {hasUser && user && <OnlinePresenceTracker userId={user.id} />}
           <SidebarProvider>
             <AppShell hasUser={hasUser} displayName={displayName} displayBadge={displayBadge}>
               {children}

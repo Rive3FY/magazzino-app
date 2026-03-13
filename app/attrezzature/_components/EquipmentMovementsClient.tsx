@@ -388,7 +388,14 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   }, [profileInfo]);
 
   function resetPickupFields() {
-    setForm({ ...emptyForm });
+    setForm({
+      ...emptyForm,
+      ...(profileInfo && {
+        assigned_to_name: profileInfo.fullName,
+        assigned_to_email: profileInfo.email,
+        assigned_to_badge: profileInfo.badge,
+      }),
+    });
     setAssetSearch("");
     setAssetCategoryFilter("");
     setAssetOpen(false);

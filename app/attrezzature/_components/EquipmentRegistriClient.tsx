@@ -65,9 +65,12 @@ export default function EquipmentRegistriClient({ area }: Props) {
   }, [user, approved, area]);
 
   const areaLabel = EQUIPMENT_AREA_LABELS[area];
-  const docxUrl = registroWarehouse
-    ? `/api/attrezzature/registro-docx?area=${area}&warehouse=${encodeURIComponent(registroWarehouse)}`
-    : "";
+  const docxUrl =
+    registroWarehouse === "__ALL__"
+      ? `/api/attrezzature/registro-docx?area=${area}&warehouse=__ALL__`
+      : registroWarehouse
+        ? `/api/attrezzature/registro-docx?area=${area}&warehouse=${encodeURIComponent(registroWarehouse)}`
+        : "";
 
   if (authLoading || loading) {
     return (
@@ -92,6 +95,7 @@ export default function EquipmentRegistriClient({ area }: Props) {
             <div className="equipmentSectionTitle">Registro movimenti DOCX</div>
             <div className="equipmentSectionHint">
               Scarica il registro dei movimenti delle attrezzature in formato Word (DOCX) per il magazzino selezionato.
+              Con &quot;Tutti i magazzini&quot; viene scaricato un file ZIP contenente un DOCX per ogni magazzino (con contatore pagine corretto).
             </div>
           </div>
           <div className="equipmentAreaPill">Area: {areaLabel}</div>
@@ -111,6 +115,7 @@ export default function EquipmentRegistriClient({ area }: Props) {
               aria-label="Seleziona magazzino registro DOCX"
             >
               <option value="">— Seleziona magazzino —</option>
+              <option value="__ALL__">Tutti i magazzini</option>
               {warehouses.map((w) => (
                 <option key={w} value={w}>{w}</option>
               ))}

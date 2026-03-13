@@ -164,11 +164,7 @@ export default function RemoteNfcScanModal({
         )}
 
         <div className="mt-6 flex justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-          >
+          <button type="button" className="btn" onClick={onClose}>
             Chiudi
           </button>
         </div>

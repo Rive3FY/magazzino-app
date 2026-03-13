@@ -527,6 +527,45 @@ body:has(.appLogin) {
   .sidebarOverlay.sidebarHidden {
     display: none !important;
   }
+
+  /* Hamburger visibile su desktop quando la sidebar è presente (collassabile) */
+  .topbarWithSidebar .hamburgerBtn {
+    display: flex;
+  }
+
+  /* Desktop con sidebar collassabile: layout animato */
+  .app.appWithSidebar {
+    grid-template-columns: 1fr;
+  }
+  .app.appWithSidebar .sidebar {
+    position: fixed;
+    left: 0;
+    top: var(--banner-height);
+    bottom: 0;
+    width: 260px;
+    z-index: 9998;
+    grid-column: unset;
+    grid-row: unset;
+    transition: transform 0.25s ease;
+  }
+  .app.appWithSidebar .main {
+    grid-column: 1;
+    transition: margin-left 0.25s ease, width 0.25s ease;
+  }
+  .app.appWithSidebar:not(.appSidebarCollapsed) .sidebar {
+    transform: translateX(0);
+  }
+  .app.appWithSidebar.appSidebarCollapsed .sidebar {
+    transform: translateX(-100%);
+  }
+  .app.appWithSidebar:not(.appSidebarCollapsed) .main {
+    margin-left: 260px;
+    width: calc(100% - 260px);
+  }
+  .app.appWithSidebar.appSidebarCollapsed .main {
+    margin-left: 0;
+    width: 100%;
+  }
 }
 
 /* Area destra */
@@ -1497,6 +1536,20 @@ textarea.input{
 .equipmentTableCompact .equipmentActionGroup .btn {
   font-size: 11px;
   padding: 4px 8px;
+}
+
+@media (max-width: 780px) {
+  .equipmentTableCompact {
+    width: max-content !important;
+    min-width: 1180px !important;
+  }
+
+  .equipmentTableCompact thead th,
+  .equipmentTableCompact tbody td {
+    white-space: nowrap;
+    word-break: normal;
+    overflow-wrap: normal;
+  }
 }
 
 .equipmentActionGroup{

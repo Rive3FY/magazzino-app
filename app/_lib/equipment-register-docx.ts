@@ -215,7 +215,8 @@ function fillRegisterTablePage(args: {
     table.removeChild(tableRows[index]!);
   }
 
-  const pageRows = Array.from({ length: pageCapacity }, (_, index) => rows[index] ?? emptyRegisterRow());
+  const pageRows =
+    rows.length > 0 ? rows.slice(0, pageCapacity) : [emptyRegisterRow()];
   for (const rowValues of pageRows) {
     const row = templateRow.cloneNode(true) as Element;
     setRowValues(doc, row, rowValues);
@@ -295,6 +296,77 @@ export function fillEquipmentRegisterDocumentXml(args: {
       parent.insertBefore(createPageBreakParagraph(doc), table);
     }
     parent.insertBefore(pageTable, table);
+  }
+
+  parent.removeChild(table);
+
+  return serializer.serializeToString(doc);
+}
+
+export type WarehouseSection = {
+  warehouse: string;
+  rows: EquipmentRegisterRow[];
+};
+
+export function getEquipmentRegisterPageCountMultiWarehouse(args: {
+  documentXml: string;
+  sections: WarehouseSection[];
+}) {
+  let total = 0;
+  for (const section of args.sections) {
+    total += getEquipmentRegisterPageCount({
+      documentXml: args.documentXml,
+      rowCount: section.rows.length,
+    });
+  }
+  return Math.max(1, total);
+}
+
+export function fillEquipmentRegisterDocumentXmlMultiWarehouse(args: {
+  documentXml: string;
+  area: EquipmentRegisterArea;
+  sections: WarehouseSection[];
+}) {
+  const doc = new DOMParser().parseFromString(args.documentXml, "application/xml");
+  const serializer = new XMLSerializer();
+  const table = doc.getElementsByTagName("w:tbl")[0];
+  if (!table) {
+    throw new Error("Tabella registro non trovata nel template DOCX.");
+  }
+  const parent = table.parentNode;
+  if (!parent) {
+    throw new Error("Nodo tabella DOCX non valido.");
+  }
+
+  const templatePageRows = getDirectTableRows(table);
+  if (templatePageRows.length < 5) {
+    throw new Error("Struttura tabella DOCX non valida.");
+  }
+
+  const pageCapacity = templatePageRows.length - 4;
+  let isFirst = true;
+
+  for (const section of args.sections) {
+    const effectiveRows = section.rows.length > 0 ? section.rows : [emptyRegisterRow()];
+    const pageCount = Math.max(1, Math.ceil(effectiveRows.length / pageCapacity));
+
+    for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
+      const pageTable = table.cloneNode(true) as Element;
+      const pageRows = effectiveRows.slice(pageIndex * pageCapacity, (pageIndex + 1) * pageCapacity);
+      fillRegisterTablePage({
+        doc,
+        table: pageTable,
+        area: args.area,
+        rows: pageRows,
+        sedeDi: section.warehouse,
+      });
+
+      if (!isFirst || pageIndex > 0) {
+        parent.insertBefore(createPageBreakParagraph(doc), table);
+      }
+      parent.insertBefore(pageTable, table);
+      isFirst = false;
+    }
   }
 
   parent.removeChild(table);

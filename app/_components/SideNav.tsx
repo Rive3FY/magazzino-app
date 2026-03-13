@@ -5,7 +5,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
-import { useUsersCount } from "../_lib/hooks/useUsersCount";
 import { useSidebar } from "../_lib/SidebarContext";
 
 type Props = { hideSidebar?: boolean };
@@ -138,14 +137,12 @@ function NavLabel({ icon, label }: { icon: NavIconName; label: string }) {
 export default function SideNav({ hideSidebar = false }: Props) {
   const pathname = usePathname();
   const router = useRouter();
-  const supabase = createClient();
   const {
     canManageMaterials,
     canManageEquipmentLinee,
     canManageEquipmentStazioni,
     loading,
   } = useIsAdmin();
-  const usersCount = useUsersCount();
   const { isOpen, setIsOpen } = useSidebar();
   const checked = !loading;
 
@@ -157,7 +154,11 @@ export default function SideNav({ hideSidebar = false }: Props) {
   const cls = (href: string) => `sideLink ${isActive(href) ? "active" : ""}`;
   const clsExact = (href: string) => `sideLink ${isExactActive(href) ? "active" : ""}`;
 
-  const handleLinkClick = () => setIsOpen(false);
+  const handleLinkClick = () => {
+    if (typeof window !== "undefined" && window.innerWidth < 901) {
+      setIsOpen(false);
+    }
+  };
 
   const inLinee = pathname.startsWith("/attrezzature/linee");
   const inStazioni = pathname.startsWith("/attrezzature/stazioni");
@@ -177,6 +178,7 @@ export default function SideNav({ hideSidebar = false }: Props) {
   useEffect(() => {
     if (checked) return;
     let alive = true;
+    const supabase = createClient();
 
     (async () => {
       const { data: u } = await supabase.auth.getUser();
@@ -205,7 +207,7 @@ export default function SideNav({ hideSidebar = false }: Props) {
     return () => {
       alive = false;
     };
-  }, [pathname, router, supabase, checked]);
+  }, [pathname, router, checked]);
 
   const hiddenClass = hideSidebar ? " sidebarHidden" : "";
   return (
@@ -236,13 +238,13 @@ export default function SideNav({ hideSidebar = false }: Props) {
                 </svg>
                 Materiali
               </div>
-              <Link className={clsExact("/materiali")} href="/materiali" onClick={handleLinkClick}><NavLabel icon="dashboard" label="Dashboard" /></Link>
-              <Link className={cls("/movimenti")} href="/movimenti" onClick={handleLinkClick}><NavLabel icon="movimenti" label="Movimenti" /></Link>
-              <Link className={cls("/giacenze")} href="/giacenze" onClick={handleLinkClick}><NavLabel icon="giacenze" label="Giacenze" /></Link>
-              {canManageMaterials && <Link className={cls("/scaffali")} href="/scaffali" onClick={handleLinkClick}><NavLabel icon="scaffali" label="Scaffali" /></Link>}
-              {canManageMaterials && <Link className={cls("/etichette")} href="/etichette" onClick={handleLinkClick}><NavLabel icon="etichette" label="Etichette" /></Link>}
-              {canManageMaterials && <Link className={cls("/import")} href="/import" onClick={handleLinkClick}><NavLabel icon="importExport" label="Import & Export" /></Link>}
-              {canManageMaterials && <Link className={cls("/materiali/admin")} href="/materiali/admin" onClick={handleLinkClick}><NavLabel icon="admin" label="Gestione Admin" /></Link>}
+              <Link className={clsExact("/materiali")} href="/materiali" onClick={handleLinkClick} prefetch={false}><NavLabel icon="dashboard" label="Dashboard" /></Link>
+              <Link className={cls("/movimenti")} href="/movimenti" onClick={handleLinkClick} prefetch={false}><NavLabel icon="movimenti" label="Movimenti" /></Link>
+              <Link className={cls("/giacenze")} href="/giacenze" onClick={handleLinkClick} prefetch={false}><NavLabel icon="giacenze" label="Giacenze" /></Link>
+              {canManageMaterials && <Link className={cls("/scaffali")} href="/scaffali" onClick={handleLinkClick} prefetch={false}><NavLabel icon="scaffali" label="Scaffali" /></Link>}
+              {canManageMaterials && <Link className={cls("/etichette")} href="/etichette" onClick={handleLinkClick} prefetch={false}><NavLabel icon="etichette" label="Etichette" /></Link>}
+              {canManageMaterials && <Link className={cls("/import")} href="/import" onClick={handleLinkClick} prefetch={false}><NavLabel icon="importExport" label="Import & Export" /></Link>}
+              {canManageMaterials && <Link className={cls("/materiali/admin")} href="/materiali/admin" onClick={handleLinkClick} prefetch={false}><NavLabel icon="admin" label="Gestione Admin" /></Link>}
             </>
           )}
 
@@ -259,13 +261,13 @@ export default function SideNav({ hideSidebar = false }: Props) {
                 </svg>
                 Attrezzature Linee
               </div>
-              <Link className={clsExact("/attrezzature/linee")} href="/attrezzature/linee" onClick={handleLinkClick}><NavLabel icon="dashboard" label="Dashboard" /></Link>
-              <Link className={cls("/attrezzature/linee/movimenti")} href="/attrezzature/linee/movimenti" onClick={handleLinkClick}><NavLabel icon="movimenti" label="Movimenti" /></Link>
-              <Link className={cls("/attrezzature/linee/registri")} href="/attrezzature/linee/registri" onClick={handleLinkClick}><NavLabel icon="registri" label="Registri" /></Link>
-              <Link className={cls("/attrezzature/linee/assegnatari")} href="/attrezzature/linee/assegnatari" onClick={handleLinkClick}><NavLabel icon="assegnatari" label="Assegnatari" /></Link>
-              {canManageEquipmentLinee && <Link className={cls("/attrezzature/linee/etichette")} href="/attrezzature/linee/etichette" onClick={handleLinkClick}><NavLabel icon="etichette" label="Etichette" /></Link>}
-              <Link className={cls("/attrezzature/linee/tutte-attrezzature")} href="/attrezzature/linee/tutte-attrezzature" onClick={handleLinkClick}><NavLabel icon="tutteAttrezzature" label="Tutte le attrezzature" /></Link>
-              {canManageEquipmentLinee && <Link className={cls("/attrezzature/linee/admin")} href="/attrezzature/linee/admin" onClick={handleLinkClick}><NavLabel icon="admin" label="Gestione Admin" /></Link>}
+              <Link className={clsExact("/attrezzature/linee")} href="/attrezzature/linee" onClick={handleLinkClick} prefetch={false}><NavLabel icon="dashboard" label="Dashboard" /></Link>
+              <Link className={cls("/attrezzature/linee/movimenti")} href="/attrezzature/linee/movimenti" onClick={handleLinkClick} prefetch={false}><NavLabel icon="movimenti" label="Movimenti" /></Link>
+              <Link className={cls("/attrezzature/linee/registri")} href="/attrezzature/linee/registri" onClick={handleLinkClick} prefetch={false}><NavLabel icon="registri" label="Registri" /></Link>
+              <Link className={cls("/attrezzature/linee/assegnatari")} href="/attrezzature/linee/assegnatari" onClick={handleLinkClick} prefetch={false}><NavLabel icon="assegnatari" label="Assegnatari" /></Link>
+              {canManageEquipmentLinee && <Link className={cls("/attrezzature/linee/etichette")} href="/attrezzature/linee/etichette" onClick={handleLinkClick} prefetch={false}><NavLabel icon="etichette" label="Etichette" /></Link>}
+              <Link className={cls("/attrezzature/linee/tutte-attrezzature")} href="/attrezzature/linee/tutte-attrezzature" onClick={handleLinkClick} prefetch={false}><NavLabel icon="tutteAttrezzature" label="Tutte le attrezzature" /></Link>
+              {canManageEquipmentLinee && <Link className={cls("/attrezzature/linee/admin")} href="/attrezzature/linee/admin" onClick={handleLinkClick} prefetch={false}><NavLabel icon="admin" label="Gestione Admin" /></Link>}
             </>
           )}
 
@@ -282,27 +284,16 @@ export default function SideNav({ hideSidebar = false }: Props) {
                 </svg>
                 Attrezzature Stazioni
               </div>
-              <Link className={clsExact("/attrezzature/stazioni")} href="/attrezzature/stazioni" onClick={handleLinkClick}><NavLabel icon="dashboard" label="Dashboard" /></Link>
-              <Link className={cls("/attrezzature/stazioni/movimenti")} href="/attrezzature/stazioni/movimenti" onClick={handleLinkClick}><NavLabel icon="movimenti" label="Movimenti" /></Link>
-              <Link className={cls("/attrezzature/stazioni/registri")} href="/attrezzature/stazioni/registri" onClick={handleLinkClick}><NavLabel icon="registri" label="Registri" /></Link>
-              <Link className={cls("/attrezzature/stazioni/assegnatari")} href="/attrezzature/stazioni/assegnatari" onClick={handleLinkClick}><NavLabel icon="assegnatari" label="Assegnatari" /></Link>
-              {canManageEquipmentStazioni && <Link className={cls("/attrezzature/stazioni/etichette")} href="/attrezzature/stazioni/etichette" onClick={handleLinkClick}><NavLabel icon="etichette" label="Etichette" /></Link>}
-              <Link className={cls("/attrezzature/stazioni/tutte-attrezzature")} href="/attrezzature/stazioni/tutte-attrezzature" onClick={handleLinkClick}><NavLabel icon="tutteAttrezzature" label="Tutte le attrezzature" /></Link>
-              {canManageEquipmentStazioni && <Link className={cls("/attrezzature/stazioni/admin")} href="/attrezzature/stazioni/admin" onClick={handleLinkClick}><NavLabel icon="admin" label="Gestione Admin" /></Link>}
+              <Link className={clsExact("/attrezzature/stazioni")} href="/attrezzature/stazioni" onClick={handleLinkClick} prefetch={false}><NavLabel icon="dashboard" label="Dashboard" /></Link>
+              <Link className={cls("/attrezzature/stazioni/movimenti")} href="/attrezzature/stazioni/movimenti" onClick={handleLinkClick} prefetch={false}><NavLabel icon="movimenti" label="Movimenti" /></Link>
+              <Link className={cls("/attrezzature/stazioni/registri")} href="/attrezzature/stazioni/registri" onClick={handleLinkClick} prefetch={false}><NavLabel icon="registri" label="Registri" /></Link>
+              <Link className={cls("/attrezzature/stazioni/assegnatari")} href="/attrezzature/stazioni/assegnatari" onClick={handleLinkClick} prefetch={false}><NavLabel icon="assegnatari" label="Assegnatari" /></Link>
+              {canManageEquipmentStazioni && <Link className={cls("/attrezzature/stazioni/etichette")} href="/attrezzature/stazioni/etichette" onClick={handleLinkClick} prefetch={false}><NavLabel icon="etichette" label="Etichette" /></Link>}
+              <Link className={cls("/attrezzature/stazioni/tutte-attrezzature")} href="/attrezzature/stazioni/tutte-attrezzature" onClick={handleLinkClick} prefetch={false}><NavLabel icon="tutteAttrezzature" label="Tutte le attrezzature" /></Link>
+              {canManageEquipmentStazioni && <Link className={cls("/attrezzature/stazioni/admin")} href="/attrezzature/stazioni/admin" onClick={handleLinkClick} prefetch={false}><NavLabel icon="admin" label="Gestione Admin" /></Link>}
             </>
           )}
 
-          {usersCount !== null && (
-            <div className="sideNavUsersCount" title={`${usersCount} persone online`}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-              </svg>
-              <span>{usersCount} persone online</span>
-            </div>
-          )}
           {!checked && (
             <div className="sideLink" style={{ opacity: 0.6, pointerEvents: "none" }}>
               …

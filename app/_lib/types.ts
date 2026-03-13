@@ -93,6 +93,11 @@ export type EquipmentAssetRow = {
   assigned_at: string | null;
   maintenance_note: string | null;
   dismissed_at: string | null;
+  technical_sheet_path: string | null;
+  technical_sheet_filename: string | null;
+  technical_sheet_content_type: string | null;
+  technical_sheet_uploaded_at: string | null;
+  technical_sheet_uploaded_by: string | null;
 };
 
 export type EquipmentMovementRow = {

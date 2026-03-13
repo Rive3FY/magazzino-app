@@ -4,9 +4,11 @@ import { useState } from "react";
 import ScopedRoleAdminUsersClient from "../../../_components/ScopedRoleAdminUsersClient";
 import ConfirmWithInputModal from "../../../_components/ConfirmWithInputModal";
 import { useIsAdmin } from "../../../_lib/hooks/useIsAdmin";
+import { useToast } from "../../../_lib/ToastContext";
 
 export default function StazioniAdminPage() {
   const { isSuperAdmin } = useIsAdmin();
+  const toast = useToast();
   const [resetting, setResetting] = useState(false);
   const [resetModalOpen, setResetModalOpen] = useState(false);
 
@@ -17,10 +19,10 @@ export default function StazioniAdminPage() {
       const res = await fetch("/api/admin/reset-attrezzature", { method: "POST", credentials: "include" });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || res.statusText);
-      alert("Reset attrezzature completato con successo.");
+      toast.success("Reset attrezzature completato con successo.");
       window.location.reload();
     } catch (e: unknown) {
-      alert("Errore reset attrezzature: " + (e instanceof Error ? e.message : "sconosciuto"));
+      toast.error("Errore reset attrezzature: " + (e instanceof Error ? e.message : "sconosciuto"));
     } finally {
       setResetting(false);
     }

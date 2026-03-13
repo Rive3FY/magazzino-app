@@ -8,35 +8,30 @@ type Props = {
   email?: string | null;
   displayName?: string;
   displayBadge?: string;
+  showHamburger?: boolean;
 };
 
-export default function TopBar({ email, displayName, displayBadge }: Props) {
+export default function TopBar({ email, displayName, displayBadge, showHamburger = false }: Props) {
   const name = displayName ?? (email ?? "");
   const badge = displayBadge ?? "";
   const { isOpen, toggle } = useSidebar();
 
   return (
-    <header className="topbar">
+    <header className={`topbar ${showHamburger ? "topbarWithSidebar" : ""}`.trim()}>
       <div className="topbarLeft">
-        <button
-          type="button"
-          className="hamburgerBtn"
-          onClick={toggle}
-          aria-label={isOpen ? "Chiudi menu" : "Apri menu di navigazione"}
-          aria-expanded={isOpen}
-        >
-          <span className="hamburgerLine" />
-          <span className="hamburgerLine" />
-          <span className="hamburgerLine" />
-        </button>
-        <Link href="/" className="topbarHomeBtn" aria-label="Torna all'hub principale" title="Torna all'hub principale">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M3 10.5 12 3l9 7.5" />
-            <path d="M5 9.8V21h14V9.8" />
-            <path d="M9 21v-6h6v6" />
-          </svg>
-          <span>Home</span>
-        </Link>
+        {showHamburger && (
+          <button
+            type="button"
+            className="hamburgerBtn"
+            onClick={toggle}
+            aria-label={isOpen ? "Chiudi menu" : "Apri menu di navigazione"}
+            aria-expanded={isOpen}
+          >
+            <span className="hamburgerLine" />
+            <span className="hamburgerLine" />
+            <span className="hamburgerLine" />
+          </button>
+        )}
       </div>
 
       <div className="topbarCenter">
@@ -46,7 +41,9 @@ export default function TopBar({ email, displayName, displayBadge }: Props) {
       </div>
 
       <div className="userArea">
-          <NotificationBell />
+          <div className="hideOnMobile">
+            <NotificationBell />
+          </div>
           <Link href="/profilo" className="userPill userPillLink" title={`${name || "Utente"} - Vai al profilo`}>
             <span className="userPillIcon" aria-hidden="true">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

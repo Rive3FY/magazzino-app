@@ -521,6 +521,11 @@ body:has(.appLogin) {
   display: none;
 }
 
+/* Elementi visibili solo su mobile (nascosti su desktop) */
+.showOnMobileOnly {
+  display: none;
+}
+
 /* Su pagine senza sidebar (home, attrezzature, profilo): nascondi sidebar/overlay su desktop; su mobile restano come drawer */
 @media (min-width: 901px) {
   .sidebar.sidebarHidden,
@@ -605,11 +610,16 @@ body:has(.appLogin) {
 
 .topbarCenter{
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  inset: 0;
+  left: 0;
+  right: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  pointer-events: none;
+}
+.topbarCenter > *{
+  pointer-events: auto;
 }
 
 .topbarLogo{
@@ -672,6 +682,54 @@ body:has(.appLogin) {
 .hamburgerBtn:hover{
   background: rgba(255,255,255,0.15);
 }
+
+.topbarBackBtn{
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #fff !important;
+  cursor: pointer;
+  transition: background 0.2s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent !important;
+  tap-highlight-color: transparent;
+  line-height: 0;
+  outline: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.topbarBackBtn *{
+  -webkit-tap-highlight-color: transparent !important;
+}
+.topbarBackBtn::selection,
+.topbarBackBtn *::selection{
+  background: transparent;
+}
+.topbarBackBtn:focus,
+.topbarBackBtn:focus-visible{
+  outline: none;
+}
+.topbarBackBtn:active{
+  background: rgba(255,255,255,0.15);
+}
+.topbarBackBtn svg{
+  display: block;
+  flex-shrink: 0;
+}
+.topbarBackBtn:hover{
+  background: rgba(255,255,255,0.15);
+  color: #fff !important;
+}
+
 .hamburgerLine{
   display: block;
   width: 24px;
@@ -1943,6 +2001,11 @@ html, body {
     display: none !important;
   }
 
+  /* Mostra solo su mobile (es. logout sull'hub) */
+  .showOnMobileOnly {
+    display: block;
+  }
+
   /* layout principale: sidebar nascosta, solo main */
   .app{
     grid-template-columns: 1fr;
@@ -2045,6 +2108,16 @@ html, body {
   .userArea {
     min-width: 0;
     flex-shrink: 1;
+  }
+
+  .topbarLeft {
+    align-items: center;
+    min-height: var(--banner-height);
+  }
+
+  .topbarBackBtn {
+    align-self: center;
+    margin-top: 24px;
   }
 
   .topbarHomeBtn,

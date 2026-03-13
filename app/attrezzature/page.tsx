@@ -63,6 +63,12 @@ export default function AttrezzaturePage() {
             </div>
           </Link>
         </div>
+
+        <div className="showOnMobileOnly" style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
+          <Link href="/" className="btn" style={{ width: "100%", display: "block", textAlign: "center", textDecoration: "none" }} prefetch={false}>
+            Indietro
+          </Link>
+        </div>
       </div>
     </main>
   );

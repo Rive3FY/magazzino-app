@@ -102,6 +102,14 @@ export default function HubLauncher() {
           </Link>
         )}
       </div>
+
+      <div className="showOnMobileOnly" style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
+        <form action="/logout" method="POST" style={{ margin: 0 }}>
+          <button type="submit" className="btn" style={{ width: "100%" }}>
+            Esci
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

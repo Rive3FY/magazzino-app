@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import ScopedRoleAdminUsersClient from "../../../_components/ScopedRoleAdminUsersClient";
+import EquipmentNfcCategoryTagsClient from "../../_components/EquipmentNfcCategoryTagsClient";
 import ConfirmWithInputModal from "../../../_components/ConfirmWithInputModal";
 import { useIsAdmin } from "../../../_lib/hooks/useIsAdmin";
 import { useToast } from "../../../_lib/ToastContext";
@@ -46,6 +47,7 @@ export default function LineeAdminPage() {
             </button>
           </div>
         )}
+        <EquipmentNfcCategoryTagsClient area="LINEE" />
         <ScopedRoleAdminUsersClient
           scope="LINEE"
           intro="Da qui puoi scegliere chi gestisce le funzioni admin dell'area Attrezzature Linee."

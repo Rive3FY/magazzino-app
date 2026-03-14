@@ -494,12 +494,36 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     setAssetSearch(`${selectedAsset.serial_number || selectedAsset.asset_code} - ${selectedAsset.name}`);
   }, [selectedAsset, assetSearch]);
 
-  function applySearchResult(value: string, mode: "barcode" | "nfc") {
+  async function checkNfcCategoryTag(nfcTagId: string): Promise<string | null> {
+    const normalized = nfcTagId.trim().toLowerCase();
+    if (!normalized) return null;
+    const { data } = await supabase
+      .from("equipment_nfc_category_tags")
+      .select("category")
+      .eq("equipment_area", area)
+      .ilike("nfc_tag_id", normalized)
+      .maybeSingle();
+    return (data as { category: string } | null)?.category ?? null;
+  }
+
+  async function applySearchResult(value: string, mode: "barcode" | "nfc") {
     const normalized = value.trim().toLowerCase();
     if (!normalized) return;
     if (!warehouseSelected) {
       setMsg("Seleziona prima il magazzino da cui prelevare.");
       return;
+    }
+    if (mode === "nfc") {
+      const category = await checkNfcCategoryTag(value);
+      if (category) {
+        setAssetCategoryFilter(category);
+        setAssetOpen(true);
+        setAssetSearch("");
+        setForm((prev) => ({ ...prev, equipment_id: "" }));
+        setMsg(`Gruppo "${category}" selezionato. Scegli l'attrezzatura dalla lista.`);
+        setScanResult(null);
+        return;
+      }
     }
     setAssetSearch(value.trim());
     const searchBase = warehouseSelected ? assetsByWarehouse : [];
@@ -596,7 +620,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         ndef.addEventListener("reading", handler);
         setTimeout(() => reject(new Error("Timeout: avvicina il telefono al tag entro 30 secondi")), 30000);
       });
-      applySearchResult(serialNumber, "nfc");
+      await applySearchResult(serialNumber, "nfc");
     } catch (error) {
       setMsg(error instanceof Error ? error.message : "Errore lettura NFC");
     } finally {
@@ -683,10 +707,20 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     setMsg("Attrezzatura aggiunta al carrello.");
   }
 
-  function addAssetByNfcToCart(nfcTagId: string) {
+  async function addAssetByNfcToCart(nfcTagId: string) {
     if (!warehouseSelected) return;
     const normalized = nfcTagId.trim().toLowerCase();
     if (!normalized) return;
+    const category = await checkNfcCategoryTag(nfcTagId);
+    if (category) {
+      setAssetCategoryFilter(category);
+      setAssetOpen(true);
+      setAssetSearch("");
+      setForm((prev) => ({ ...prev, equipment_id: "" }));
+      setMsg(`Gruppo "${category}" selezionato. Scegli l'attrezzatura dalla lista.`);
+      setRemoteScanOpen(false);
+      return;
+    }
     const matched = assetsByWarehouse.find(
       (a) => String(a.nfc_tag_id ?? "").trim().toLowerCase() === normalized
     );
@@ -1114,6 +1148,44 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
             </button>
           </div>
         </div>
+
+        {assetCategories.length > 0 && warehouseSelected && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setAssetCategoryFilter("")}
+              style={{
+                padding: "8px 14px",
+                fontSize: 13,
+                fontWeight: 600,
+                ...(assetCategoryFilter === "" ? { background: "var(--primary)", color: "#fff", borderColor: "var(--primary)" } : {}),
+              }}
+            >
+              Tutte
+            </button>
+            {assetCategories.map((c) => (
+              <button
+                key={c}
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setAssetCategoryFilter(c);
+                  setAssetOpen(true);
+                  setMsg(null);
+                }}
+                style={{
+                  padding: "8px 14px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  ...(assetCategoryFilter === c ? { background: "var(--primary)", color: "#fff", borderColor: "var(--primary)" } : {}),
+                }}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="equipmentFilterGrid mobileGrid1" style={{ opacity: warehouseSelected ? 1 : 0.5, pointerEvents: warehouseSelected ? "auto" : "none" }}>
           <div style={{ minWidth: 0 }}>
@@ -1978,7 +2050,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         allowMultiple
         title="Aggiungi attrezzature con telefono"
         onTagReceived={(nfcTagId) => {
-          addAssetByNfcToCart(nfcTagId);
+          void addAssetByNfcToCart(nfcTagId);
         }}
       />
     </main>

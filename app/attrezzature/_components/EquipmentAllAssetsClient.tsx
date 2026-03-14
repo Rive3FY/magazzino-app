@@ -139,6 +139,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const [remoteScanRows, setRemoteScanRows] = useState<EquipmentAssetRow[] | null>(null);
   const [techSheetBusyId, setTechSheetBusyId] = useState<string | null>(null);
   const [techSheetTargetRow, setTechSheetTargetRow] = useState<EquipmentAssetRow | null>(null);
+  const [actionMenuOpenRowId, setActionMenuOpenRowId] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
@@ -164,6 +165,16 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
   }, []);
+
+  useEffect(() => {
+    if (!actionMenuOpenRowId) return;
+    function onDocClick(e: MouseEvent) {
+      const t = e.target as HTMLElement;
+      if (!t.closest("[data-action-menu]")) setActionMenuOpenRowId(null);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [actionMenuOpenRowId]);
 
   async function writeAuditLog(action: string, entityId: string | null, details: Record<string, unknown>) {
     try {
@@ -1158,7 +1169,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
               <col style={{ width: "7%" }} />
               <col style={{ width: "7%" }} />
               <col style={{ width: "9%" }} />
-              <col style={{ width: "16%" }} />
+              <col style={{ width: "5%" }} />
             </colgroup>
             <thead>
               <tr>
@@ -1237,56 +1248,122 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                     <td>{row.barcode || "Da generare"}</td>
                     <td>{row.nfc_tag_id || "Non associato"}</td>
                     <td>{fmtDateTime(row.updated_at)}</td>
-                    <td onClick={(e) => e.stopPropagation()}>
+                    <td onClick={(e) => e.stopPropagation()} data-action-menu>
                       {!isMobile && (
-                        <div className="equipmentActionGroup">
+                        <div style={{ position: "relative" }}>
                           <button
+                            type="button"
                             className="btn"
-                            onClick={() => openTechnicalSheet(row)}
-                            disabled={!row.technical_sheet_path || techSheetBusyId === row.id}
-                            title={row.technical_sheet_path ? "Apri scheda tecnica" : "Nessuna scheda tecnica associata"}
+                            onClick={() => setActionMenuOpenRowId((id) => (id === row.id ? null : row.id))}
+                            title="Azioni"
+                            style={{ padding: "6px 10px", minWidth: 36 }}
                           >
-                            <FileTextIcon />
-                            Scheda tecnica
+                            ⋮
                           </button>
-                          {isAdmin && (
-                            <button
-                              className="btn"
-                              onClick={() => triggerTechnicalSheetUpload(row)}
-                              disabled={techSheetBusyId === row.id}
+                          {actionMenuOpenRowId === row.id && (
+                            <div
+                              style={{
+                                position: "absolute",
+                                right: 0,
+                                top: "100%",
+                                marginTop: 4,
+                                background: "#fff",
+                                border: "1px solid rgba(15,23,42,0.12)",
+                                borderRadius: 8,
+                                boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                                zIndex: 60,
+                                minWidth: 180,
+                                overflow: "hidden",
+                              }}
                             >
-                              <FileTextIcon />
-                              {techSheetBusyId === row.id ? "Caricamento..." : row.technical_sheet_path ? "Aggiorna scheda" : "Carica scheda"}
-                            </button>
-                          )}
-                          {isAdmin && (
-                            <button className="btn" onClick={() => setStatusModalRow(row)} disabled={saving}>
-                              Gestisci stato
-                            </button>
-                          )}
-                          {isAdmin && (
-                            <>
                               <button
+                                type="button"
                                 className="btn"
-                                onClick={() => void doAssociateNfc(row)}
-                                disabled={nfcAssociatingId === row.id}
-                                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                                style={{ width: "100%", justifyContent: "flex-start", borderRadius: 0, display: "flex", alignItems: "center", gap: 8 }}
+                                onClick={() => {
+                                  setActionMenuOpenRowId(null);
+                                  openTechnicalSheet(row);
+                                }}
+                                disabled={!row.technical_sheet_path || techSheetBusyId === row.id}
+                                title={row.technical_sheet_path ? "Apri scheda tecnica" : "Nessuna scheda tecnica associata"}
                               >
-                                <NfcIcon />
-                                {nfcAssociatingId === row.id ? "NFC..." : row.nfc_tag_id ? "Riassegna NFC" : "Associa NFC"}
+                                <FileTextIcon />
+                                Scheda tecnica
                               </button>
-                              <button
-                                className="btn"
-                                onClick={() => setRemoteScanRow(row)}
-                                title="Usa telefono come lettore NFC"
-                                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-                              >
-                                <PhoneIcon />
-                                Telefono
-                              </button>
-                            </>
+                              {isAdmin && (
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  style={{ width: "100%", justifyContent: "flex-start", borderRadius: 0, display: "flex", alignItems: "center", gap: 8 }}
+                                  onClick={() => {
+                                    setActionMenuOpenRowId(null);
+                                    triggerTechnicalSheetUpload(row);
+                                  }}
+                                  disabled={techSheetBusyId === row.id}
+                                >
+                                  <FileTextIcon />
+                                  {techSheetBusyId === row.id ? "Caricamento..." : row.technical_sheet_path ? "Aggiorna scheda" : "Carica scheda"}
+                                </button>
+                              )}
+                              {isAdmin && (
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  style={{ width: "100%", justifyContent: "flex-start", borderRadius: 0 }}
+                                  onClick={() => {
+                                    setActionMenuOpenRowId(null);
+                                    setStatusModalRow(row);
+                                  }}
+                                  disabled={saving}
+                                >
+                                  Gestisci stato
+                                </button>
+                              )}
+                              {isAdmin && (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="btn"
+                                    style={{ width: "100%", justifyContent: "flex-start", borderRadius: 0, display: "flex", alignItems: "center", gap: 8 }}
+                                    onClick={() => {
+                                      setActionMenuOpenRowId(null);
+                                      void doAssociateNfc(row);
+                                    }}
+                                    disabled={nfcAssociatingId === row.id}
+                                  >
+                                    <NfcIcon />
+                                    {nfcAssociatingId === row.id ? "NFC..." : row.nfc_tag_id ? "Riassegna NFC" : "Associa NFC"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn"
+                                    style={{ width: "100%", justifyContent: "flex-start", borderRadius: 0, display: "flex", alignItems: "center", gap: 8 }}
+                                    onClick={() => {
+                                      setActionMenuOpenRowId(null);
+                                      setRemoteScanRow(row);
+                                    }}
+                                    title="Usa telefono come lettore NFC"
+                                  >
+                                    <PhoneIcon />
+                                    Telefono
+                                  </button>
+                                </>
+                              )}
+                              {isAdmin && (
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  style={{ width: "100%", justifyContent: "flex-start", borderRadius: 0 }}
+                                  onClick={() => {
+                                    setActionMenuOpenRowId(null);
+                                    openEdit(row);
+                                  }}
+                                >
+                                  Modifica
+                                </button>
+                              )}
+                            </div>
                           )}
-                          {isAdmin && <button className="btn" onClick={() => openEdit(row)}>Modifica</button>}
                         </div>
                       )}
                     </td>

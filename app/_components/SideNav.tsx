@@ -262,11 +262,11 @@ export default function SideNav({ hideSidebar = false }: Props) {
                 Attrezzature Linee
               </div>
               <Link className={clsExact("/attrezzature/linee")} href="/attrezzature/linee" onClick={handleLinkClick} prefetch={false}><NavLabel icon="dashboard" label="Dashboard" /></Link>
+              <Link className={cls("/attrezzature/linee/tutte-attrezzature")} href="/attrezzature/linee/tutte-attrezzature" onClick={handleLinkClick} prefetch={false}><NavLabel icon="tutteAttrezzature" label="Tutte le attrezzature" /></Link>
               <Link className={cls("/attrezzature/linee/movimenti")} href="/attrezzature/linee/movimenti" onClick={handleLinkClick} prefetch={false}><NavLabel icon="movimenti" label="Movimenti" /></Link>
-              <Link className={cls("/attrezzature/linee/registri")} href="/attrezzature/linee/registri" onClick={handleLinkClick} prefetch={false}><NavLabel icon="registri" label="Registri" /></Link>
               <Link className={cls("/attrezzature/linee/assegnatari")} href="/attrezzature/linee/assegnatari" onClick={handleLinkClick} prefetch={false}><NavLabel icon="assegnatari" label="Assegnatari" /></Link>
               {canManageEquipmentLinee && <Link className={cls("/attrezzature/linee/etichette")} href="/attrezzature/linee/etichette" onClick={handleLinkClick} prefetch={false}><NavLabel icon="etichette" label="Etichette" /></Link>}
-              <Link className={cls("/attrezzature/linee/tutte-attrezzature")} href="/attrezzature/linee/tutte-attrezzature" onClick={handleLinkClick} prefetch={false}><NavLabel icon="tutteAttrezzature" label="Tutte le attrezzature" /></Link>
+              <Link className={cls("/attrezzature/linee/registri")} href="/attrezzature/linee/registri" onClick={handleLinkClick} prefetch={false}><NavLabel icon="registri" label="Registri" /></Link>
               {canManageEquipmentLinee && <Link className={cls("/attrezzature/linee/admin")} href="/attrezzature/linee/admin" onClick={handleLinkClick} prefetch={false}><NavLabel icon="admin" label="Gestione Admin" /></Link>}
             </>
           )}
@@ -285,11 +285,11 @@ export default function SideNav({ hideSidebar = false }: Props) {
                 Attrezzature Stazioni
               </div>
               <Link className={clsExact("/attrezzature/stazioni")} href="/attrezzature/stazioni" onClick={handleLinkClick} prefetch={false}><NavLabel icon="dashboard" label="Dashboard" /></Link>
+              <Link className={cls("/attrezzature/stazioni/tutte-attrezzature")} href="/attrezzature/stazioni/tutte-attrezzature" onClick={handleLinkClick} prefetch={false}><NavLabel icon="tutteAttrezzature" label="Tutte le attrezzature" /></Link>
               <Link className={cls("/attrezzature/stazioni/movimenti")} href="/attrezzature/stazioni/movimenti" onClick={handleLinkClick} prefetch={false}><NavLabel icon="movimenti" label="Movimenti" /></Link>
-              <Link className={cls("/attrezzature/stazioni/registri")} href="/attrezzature/stazioni/registri" onClick={handleLinkClick} prefetch={false}><NavLabel icon="registri" label="Registri" /></Link>
               <Link className={cls("/attrezzature/stazioni/assegnatari")} href="/attrezzature/stazioni/assegnatari" onClick={handleLinkClick} prefetch={false}><NavLabel icon="assegnatari" label="Assegnatari" /></Link>
               {canManageEquipmentStazioni && <Link className={cls("/attrezzature/stazioni/etichette")} href="/attrezzature/stazioni/etichette" onClick={handleLinkClick} prefetch={false}><NavLabel icon="etichette" label="Etichette" /></Link>}
-              <Link className={cls("/attrezzature/stazioni/tutte-attrezzature")} href="/attrezzature/stazioni/tutte-attrezzature" onClick={handleLinkClick} prefetch={false}><NavLabel icon="tutteAttrezzature" label="Tutte le attrezzature" /></Link>
+              <Link className={cls("/attrezzature/stazioni/registri")} href="/attrezzature/stazioni/registri" onClick={handleLinkClick} prefetch={false}><NavLabel icon="registri" label="Registri" /></Link>
               {canManageEquipmentStazioni && <Link className={cls("/attrezzature/stazioni/admin")} href="/attrezzature/stazioni/admin" onClick={handleLinkClick} prefetch={false}><NavLabel icon="admin" label="Gestione Admin" /></Link>}
             </>
           )}

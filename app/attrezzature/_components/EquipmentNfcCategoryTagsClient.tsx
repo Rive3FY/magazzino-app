@@ -30,6 +30,7 @@ export default function EquipmentNfcCategoryTagsClient({ area }: Props) {
   const [customCategory, setCustomCategory] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -146,60 +147,93 @@ export default function EquipmentNfcCategoryTagsClient({ area }: Props) {
   const effectiveCategory = selectedCategory || customCategory;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Tag NFC per gruppo/categoria</h3>
-        <button
-          type="button"
-          className="btn"
-          onClick={() => void startNfcScan()}
-          disabled={scanning}
-          style={{ padding: "8px 14px", fontSize: 13 }}
-        >
-          {scanning ? "Scansiona…" : "Aggiungi tag NFC"}
-        </button>
-      </div>
-      <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>
-        Associa un tag NFC a una categoria (es. 380kV, 150kV, 60kV). Scansionando il tag sul rack si filtra la lista attrezzature per quella categoria.
-      </p>
-
-      {loading ? (
-        <div style={{ padding: 16, textAlign: "center", color: "var(--muted)" }}>Caricamento…</div>
-      ) : rows.length === 0 ? (
-        <div style={{ padding: 16, border: "1px dashed var(--border)", borderRadius: 8, color: "var(--muted)", fontSize: 13 }}>
-          Nessun tag registrato. Clicca &quot;Aggiungi tag NFC&quot; e scansiona un tag sul rack.
-        </div>
-      ) : (
-        <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
-          {rows.map((r) => (
-            <li
-              key={r.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "10px 12px",
-                background: "var(--panel)",
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-              }}
+    <div
+      style={{
+        border: "1px solid var(--border)",
+        borderRadius: 12,
+        overflow: "hidden",
+        background: "var(--panel)",
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "12px 16px",
+          border: "none",
+          background: "transparent",
+          cursor: "pointer",
+          textAlign: "left",
+          fontSize: 15,
+          fontWeight: 600,
+          color: "var(--text)",
+        }}
+      >
+        <span>Tag NFC per gruppo/categoria</span>
+        <span style={{ fontSize: 18, color: "var(--muted)", transition: "transform 0.2s", transform: collapsed ? "rotate(0deg)" : "rotate(180deg)" }}>
+          ▼
+        </span>
+      </button>
+      {!collapsed && (
+        <div style={{ padding: "0 16px 16px", borderTop: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+            <p style={{ margin: 0, fontSize: 13, color: "var(--muted)", flex: 1, minWidth: 200 }}>
+              Associa un tag NFC a una categoria (es. 380kV, 150kV, 60kV). Scansionando il tag sul rack si filtra la lista attrezzature.
+            </p>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void startNfcScan()}
+              disabled={scanning}
+              style={{ padding: "8px 14px", fontSize: 13 }}
             >
-              <div>
-                <span style={{ fontWeight: 600, marginRight: 8 }}>{r.category}</span>
-                <span style={{ fontSize: 12, color: "var(--muted)", fontFamily: "monospace" }}>{r.nfc_tag_id}</span>
-              </div>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => void deleteTag(r.id)}
-                disabled={deleting === r.id}
-                style={{ padding: "4px 10px", fontSize: 12, borderColor: "rgba(239,68,68,0.5)", color: "#991b1b", background: "rgba(239,68,68,0.08)" }}
-              >
-                {deleting === r.id ? "…" : "Elimina"}
-              </button>
-            </li>
-          ))}
-        </ul>
+              {scanning ? "Scansiona…" : "Aggiungi tag NFC"}
+            </button>
+          </div>
+
+          {loading ? (
+            <div style={{ padding: 16, textAlign: "center", color: "var(--muted)" }}>Caricamento…</div>
+          ) : rows.length === 0 ? (
+            <div style={{ padding: 16, border: "1px dashed var(--border)", borderRadius: 8, color: "var(--muted)", fontSize: 13 }}>
+              Nessun tag registrato. Clicca &quot;Aggiungi tag NFC&quot; e scansiona un tag sul rack.
+            </div>
+          ) : (
+            <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
+              {rows.map((r) => (
+                <li
+                  key={r.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "10px 12px",
+                    background: "var(--panel)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 8,
+                  }}
+                >
+                  <div>
+                    <span style={{ fontWeight: 600, marginRight: 8 }}>{r.category}</span>
+                    <span style={{ fontSize: 12, color: "var(--muted)", fontFamily: "monospace" }}>{r.nfc_tag_id}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => void deleteTag(r.id)}
+                    disabled={deleting === r.id}
+                    style={{ padding: "4px 10px", fontSize: 12, borderColor: "rgba(239,68,68,0.5)", color: "#991b1b", background: "rgba(239,68,68,0.08)" }}
+                  >
+                    {deleting === r.id ? "…" : "Elimina"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       {modalOpen && scannedTagId && (
@@ -211,7 +245,7 @@ export default function EquipmentNfcCategoryTagsClient({ area }: Props) {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            zIndex: 1000,
+            zIndex: 10050,
             padding: 16,
           }}
           onClick={() => !saving && setModalOpen(false)}

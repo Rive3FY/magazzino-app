@@ -589,7 +589,7 @@ export default function Home() {
                 alignItems: "center",
                 justifyContent: "center",
                 padding: 20,
-                zIndex: 1100,
+                zIndex: 10050,
               }}
             >
               <div

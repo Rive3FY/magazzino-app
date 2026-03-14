@@ -47,11 +47,11 @@ export default function LineeAdminPage() {
             </button>
           </div>
         )}
-        <EquipmentNfcCategoryTagsClient area="LINEE" />
         <ScopedRoleAdminUsersClient
           scope="LINEE"
           intro="Da qui puoi scegliere chi gestisce le funzioni admin dell'area Attrezzature Linee."
         />
+        <EquipmentNfcCategoryTagsClient area="LINEE" />
       </div>
 
       <ConfirmWithInputModal

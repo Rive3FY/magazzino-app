@@ -124,7 +124,7 @@ export default function RemoteNfcScanModal({
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 1100,
+        zIndex: 10050,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",

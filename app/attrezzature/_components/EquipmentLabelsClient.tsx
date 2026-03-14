@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import JsBarcode from "jsbarcode";
 import { createClient } from "../../_lib/supabase/client";
+import { useAuth } from "../../_lib/hooks/useAuth";
 import { useIsAdmin } from "../../_lib/hooks/useIsAdmin";
 import { useToast } from "../../_lib/ToastContext";
 import {
@@ -11,6 +12,13 @@ import {
   EQUIPMENT_STATUS_OPTIONS,
 } from "../../_lib/equipment";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentStatus } from "../../_lib/types";
+
+type NfcReassignState = {
+  row: EquipmentAssetRow;
+  serialNumber: string;
+  existingSerial: string;
+  existingArea: EquipmentArea;
+};
 
 type Props = {
   area: EquipmentArea;
@@ -49,7 +57,28 @@ function getBarcodeValue(row: EquipmentAssetRow) {
   return row.barcode || row.serial_number || row.asset_code;
 }
 
+function NfcIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="5" y="2" width="14" height="20" rx="2" />
+      <path d="M9 7h6" />
+      <path d="M9 11h6" />
+      <path d="M9 15h4" />
+      <path d="M12 6v12" />
+    </svg>
+  );
+}
+
+function SpinnerIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 1s linear infinite", transformOrigin: "center" }}>
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
+}
+
 export default function EquipmentLabelsClient({ area, basePath }: Props) {
+  const { user } = useAuth();
   const access = useIsAdmin();
   const toast = useToast();
   const isAdmin = area === "LINEE" ? access.canManageEquipmentLinee : access.canManageEquipmentStazioni;
@@ -61,6 +90,10 @@ export default function EquipmentLabelsClient({ area, basePath }: Props) {
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | EquipmentStatus>("ALL");
   const [selected, setSelected] = useState<Set<string> | null>(new Set());
+  const [nfcAssociatingId, setNfcAssociatingId] = useState<string | null>(null);
+  const [nfcTagReassign, setNfcTagReassign] = useState<NfcReassignState | null>(null);
+  const [isNfcSupported, setIsNfcSupported] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
   const headerCheckRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -85,12 +118,119 @@ export default function EquipmentLabelsClient({ area, basePath }: Props) {
     return () => window.clearTimeout(timer);
   }, [isAdmin, load]);
 
+  useEffect(() => {
+    setIsNfcSupported(typeof NDEFReader !== "undefined");
+    const ua = navigator.userAgent;
+    setIsIOS(/iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+  }, []);
+
+  async function writeAuditLog(action: string, entityId: string | null, details: Record<string, unknown>) {
+    try {
+      await supabase.from("audit_log").insert({
+        action,
+        entity_type: "equipment_asset",
+        entity_id: entityId,
+        code: details.asset_code ?? null,
+        warehouse: area,
+        user_id: user?.id ?? null,
+        user_email: user?.email ?? null,
+        user_name: null,
+        details_json: details,
+      });
+    } catch (error) {
+      console.error("equipment audit error:", error);
+    }
+  }
+
+  async function saveNfcAssociation(row: EquipmentAssetRow, serialNumber: string) {
+    await supabase.from("equipment_assets").update({ nfc_tag_id: null }).eq("nfc_tag_id", serialNumber);
+    const { error } = await supabase
+      .from("equipment_assets")
+      .update({ nfc_tag_id: serialNumber })
+      .eq("id", row.id)
+      .eq("equipment_area", area);
+
+    if (error) throw error;
+
+    await writeAuditLog("EQUIPMENT_UPDATED", row.id, {
+      asset_code: row.asset_code,
+      serial_number: row.serial_number,
+      equipment_area: row.equipment_area,
+      nfc_tag_id: serialNumber,
+      update_mode: "nfc_association",
+    });
+  }
+
+  async function doAssociateNfc(row: EquipmentAssetRow, forceReassign = false, knownSerialNumber?: string) {
+    if (!isNfcSupported) {
+      setMsg(
+        isIOS
+          ? "NFC non disponibile su iPhone/iPad. Safari non supporta la scansione NFC."
+          : "NFC richiede Chrome su Android con HTTPS. Da mobile via IP usa npm run dev:https, poi accedi da https://TUO_IP:3000"
+      );
+      return;
+    }
+
+    setNfcTagReassign(null);
+    setNfcAssociatingId(row.id);
+    setMsg("Avvicina il dispositivo al tag NFC...");
+
+    try {
+      const serialNumber = knownSerialNumber
+        ? knownSerialNumber
+        : await (async () => {
+            const ndef = new NDEFReader();
+            await ndef.scan();
+            return await new Promise<string>((resolve, reject) => {
+              const handler = (event: NDEFReadingEvent) => {
+                ndef.removeEventListener("reading", handler);
+                resolve(event.serialNumber ?? "");
+              };
+              ndef.addEventListener("reading", handler);
+              setTimeout(() => reject(new Error("Timeout: avvicina il telefono al tag entro 30 secondi")), 30000);
+            });
+          })();
+
+      if (!serialNumber || serialNumber === "unknown") {
+        setMsg("Impossibile leggere l'ID del tag. Riprova.");
+        return;
+      }
+
+      const { data: existing } = await supabase
+        .from("equipment_assets")
+        .select("id,serial_number,asset_code,equipment_area")
+        .eq("nfc_tag_id", serialNumber)
+        .maybeSingle();
+
+      if (existing && existing.id !== row.id && !forceReassign) {
+        setNfcTagReassign({
+          row,
+          serialNumber,
+          existingSerial: existing.serial_number || existing.asset_code,
+          existingArea: existing.equipment_area as EquipmentArea,
+        });
+        setMsg(null);
+        return;
+      }
+
+      await saveNfcAssociation(row, serialNumber);
+      toast.success("NFC associato");
+      setMsg("NFC associato ✅");
+      await load();
+    } catch (error) {
+      console.error(error);
+      setMsg(error instanceof Error ? error.message : "Errore associazione NFC");
+    } finally {
+      setNfcAssociatingId(null);
+    }
+  }
+
   const filtered = useMemo(() => {
     const search = q.trim().toLowerCase();
     return rows.filter((row) => {
       if (statusFilter !== "ALL" && row.status !== statusFilter) return false;
       if (!search) return true;
-      return [row.serial_number, row.name, row.barcode]
+      return [row.serial_number, row.name, row.barcode, row.nfc_tag_id]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(search));
     });
@@ -279,9 +419,9 @@ body{margin:0;padding:0;background:#fff}
         <div style={{ display: "grid", gap: 12 }}>
           <div className="equipmentSectionHeader" style={{ marginBottom: 0 }}>
             <div>
-              <div className="equipmentSectionTitle">Stampa etichette {areaLabel}</div>
+              <div className="equipmentSectionTitle">Etichette {areaLabel}</div>
               <div className="equipmentSectionHint">
-                Filtra il registro, seleziona le attrezzature e genera le etichette barcode dell&apos;area.
+                Barcode, NFC e stampa etichette. Filtra, seleziona, associa NFC e genera le etichette.
               </div>
             </div>
             <div className="equipmentAreaPill">Area: {areaLabel}</div>
@@ -323,8 +463,8 @@ body{margin:0;padding:0;background:#fff}
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
         <div className="equipmentSectionHeader">
           <div>
-            <div className="equipmentSectionTitle">Selezione attrezzature</div>
-            <div className="equipmentSectionHint">Scegli quali etichette includere nella stampa.</div>
+            <div className="equipmentSectionTitle">Barcode e NFC</div>
+            <div className="equipmentSectionHint">Scegli quali etichette stampare e associa i tag NFC.</div>
           </div>
         </div>
         <div className="tableWrap">
@@ -348,17 +488,19 @@ body{margin:0;padding:0;background:#fff}
                 <th>Area</th>
                 <th>Stato</th>
                 <th>Barcode</th>
+                <th>NFC</th>
+                <th>Azioni</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={7}>Caricamento attrezzature...</td>
+                  <td colSpan={9}>Caricamento attrezzature...</td>
                 </tr>
               )}
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7}>Nessuna attrezzatura disponibile.</td>
+                  <td colSpan={9}>Nessuna attrezzatura disponibile.</td>
                 </tr>
               )}
               {filtered.map((row) => {
@@ -373,7 +515,20 @@ body{margin:0;padding:0;background:#fff}
                     <td>{[row.shelf, row.place].filter(Boolean).join(" · ") || "—"}</td>
                     <td>{EQUIPMENT_AREA_LABELS[row.equipment_area]}</td>
                     <td>{EQUIPMENT_STATUS_LABELS[row.status]}</td>
-                    <td>{getBarcodeValue(row)}</td>
+                    <td title={getBarcodeValue(row)}>{getBarcodeValue(row) || "Da generare"}</td>
+                    <td title={row.nfc_tag_id || "Non associato"}>{row.nfc_tag_id || "Non associato"}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => void doAssociateNfc(row)}
+                        disabled={nfcAssociatingId === row.id}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                      >
+                        <NfcIcon />
+                        {nfcAssociatingId === row.id ? "NFC..." : row.nfc_tag_id ? "Riassegna NFC" : "Associa NFC"}
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -381,6 +536,67 @@ body{margin:0;padding:0;background:#fff}
           </table>
         </div>
       </div>
+
+      {!!nfcAssociatingId && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+            zIndex: 10050,
+          }}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: 14,
+              padding: 24,
+              maxWidth: 420,
+              width: "100%",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.3)",
+            }}
+          >
+            <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Associazione NFC</div>
+            <div style={{ padding: 24, background: "#0f172a", borderRadius: 12, marginBottom: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+              <SpinnerIcon />
+              <div style={{ fontSize: 14, color: "#94a3b8" }}>Avvicina il telefono al tag NFC</div>
+            </div>
+            <button type="button" className="btn" onClick={() => setNfcAssociatingId(null)}>
+              Fine
+            </button>
+          </div>
+        </div>
+      )}
+
+      {nfcTagReassign && (
+        <div className="card" style={{ padding: 12, marginTop: 12, borderColor: "rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.08)" }}>
+          <div className="equipmentSectionHeader">
+            <div>
+              <div className="equipmentSectionTitle">Tag NFC già associato</div>
+              <div className="equipmentSectionHint">
+                Il tag letto è già associato a ` {nfcTagReassign.existingSerial} ` nell&apos;area {EQUIPMENT_AREA_LABELS[nfcTagReassign.existingArea]}.
+              </div>
+            </div>
+          </div>
+          <div className="equipmentActionGroup">
+            <button
+              className="btn btnPrimary"
+              onClick={() => void doAssociateNfc(nfcTagReassign.row, true, nfcTagReassign.serialNumber)}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              <NfcIcon />
+              Conferma riassegnazione
+            </button>
+            <button className="btn" onClick={() => setNfcTagReassign(null)}>
+              Annulla
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
         <div className="equipmentSectionHeader">

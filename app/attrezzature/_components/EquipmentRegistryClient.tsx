@@ -62,6 +62,112 @@ function SpinnerIcon() {
   );
 }
 
+function ClearableInput(props: {
+  id?: string;
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+  style?: React.CSSProperties;
+  onFocus?: () => void;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  type?: string;
+}) {
+  const { id, value, onChange, disabled, placeholder, style, onFocus, onKeyDown, type } = props;
+  const showClear = !disabled && value.length > 0;
+
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        id={id}
+        className="input"
+        type={type ?? "text"}
+        value={value}
+        disabled={disabled}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={onFocus}
+        onKeyDown={onKeyDown}
+        style={{
+          ...style,
+          paddingRight: showClear ? 36 : undefined,
+        }}
+      />
+      {showClear && (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          aria-label="Cancella"
+          style={{
+            position: "absolute",
+            right: 8,
+            top: "50%",
+            transform: "translateY(-50%)",
+            border: "none",
+            background: "transparent",
+            color: "#64748b",
+            cursor: "pointer",
+            fontSize: 18,
+            lineHeight: 1,
+            padding: 4,
+          }}
+        >
+          ×
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ClearableSelect(props: {
+  id?: string;
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+  clearValue?: string;
+}) {
+  const { id, value, onChange, disabled, children, clearValue = "" } = props;
+  const showClear = !disabled && value !== clearValue;
+
+  return (
+    <div style={{ position: "relative" }}>
+      <select
+        id={id}
+        className="input"
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ paddingRight: showClear ? 36 : undefined }}
+      >
+        {children}
+      </select>
+      {showClear && (
+        <button
+          type="button"
+          onClick={() => onChange(clearValue)}
+          aria-label="Cancella"
+          style={{
+            position: "absolute",
+            right: 8,
+            top: "50%",
+            transform: "translateY(-50%)",
+            border: "none",
+            background: "transparent",
+            color: "#64748b",
+            cursor: "pointer",
+            fontSize: 18,
+            lineHeight: 1,
+            padding: 4,
+          }}
+        >
+          ×
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function EquipmentRegistryClient({ area, basePath }: Props) {
   const { user, loading: authLoading, approved } = useAuth();
   const access = useIsAdmin();
@@ -478,45 +584,45 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
           <div className="equipmentFilterGrid mobileGrid1">
             <div style={{ minWidth: 0 }}>
               <label className="label" htmlFor={`equipment-quick-category-${area}`}>Categoria</label>
-              <select
+              <ClearableSelect
                 id={`equipment-quick-category-${area}`}
-                className="input"
                 value={quickCategoryFilter}
-                onChange={(e) => setQuickCategoryFilter(e.target.value)}
+                onChange={setQuickCategoryFilter}
+                clearValue=""
               >
                 <option value="">Tutte</option>
                 {quickCategories.map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
-              </select>
+              </ClearableSelect>
             </div>
             <div style={{ minWidth: 0 }}>
               <label className="label" htmlFor={`equipment-quick-warehouse-${area}`}>Magazzino</label>
-              <select
+              <ClearableSelect
                 id={`equipment-quick-warehouse-${area}`}
-                className="input"
                 value={quickWarehouseFilter}
-                onChange={(e) => setQuickWarehouseFilter(e.target.value)}
+                onChange={setQuickWarehouseFilter}
+                clearValue="ALL"
               >
                 <option value="ALL">Tutti</option>
                 <option value="">Nessuno</option>
                 {quickWarehouses.map((w) => (
                   <option key={w} value={w}>{w}</option>
                 ))}
-              </select>
+              </ClearableSelect>
             </div>
             <div ref={quickBoxRef} style={{ minWidth: 0, position: "relative" }}>
               <label className="label" htmlFor={`equipment-quick-search-${area}`}>
                 Controllo veloce
               </label>
-              <input
+              <ClearableInput
                 id={`equipment-quick-search-${area}`}
-                className="input"
                 value={quickSearch}
-                onChange={(e) => {
-                  setQuickSearch(e.target.value);
+                placeholder={`Cerca per seriale, nome, barcode o NFC`}
+                onChange={(v) => {
+                  setQuickSearch(v);
                   setQuickSelectedId("");
-                  setQuickOpen(true);
+                  setQuickOpen(v.length > 0);
                 }}
                 onFocus={() => setQuickOpen(true)}
                 onKeyDown={(e) => {
@@ -529,7 +635,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                     setQuickActiveIndex((i) => Math.max(i - 1, 0));
                   } else if (e.key === "Enter") {
                     e.preventDefault();
-                    if (quickActive) pickQuickMatch(quickActive);
+                    setQuickOpen(false);
                   } else if (e.key === "Escape") {
                     setQuickOpen(false);
                   }
@@ -592,11 +698,11 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
               <label className="label" htmlFor={`equipment-quick-pick-${area}`}>
                 Attrezzatura
               </label>
-              <select
+              <ClearableSelect
                 id={`equipment-quick-pick-${area}`}
-                className="input"
                 value={quickSelectedId}
-                onChange={(e) => setQuickSelectedId(e.target.value)}
+                onChange={setQuickSelectedId}
+                clearValue=""
               >
                 <option value="">Seleziona risultato</option>
                 {quickMatches.map((row) => (
@@ -604,7 +710,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                     {(row.serial_number || row.asset_code) + " - " + row.name}
                   </option>
                 ))}
-              </select>
+              </ClearableSelect>
             </div>
           </div>
 
@@ -673,7 +779,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
             alignItems: "center",
             justifyContent: "center",
             padding: 20,
-            zIndex: 1100,
+            zIndex: 10050,
           }}
         >
           <div
@@ -745,12 +851,11 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
             <label className="label" htmlFor={`equipment-history-from-${area}`}>
               Data da
             </label>
-            <input
+            <ClearableInput
               id={`equipment-history-from-${area}`}
-              className="input"
               type="date"
               value={historyFrom}
-              onChange={(e) => setHistoryFrom(e.target.value)}
+              onChange={setHistoryFrom}
             />
           </div>
 
@@ -758,12 +863,11 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
             <label className="label" htmlFor={`equipment-history-to-${area}`}>
               Data a
             </label>
-            <input
+            <ClearableInput
               id={`equipment-history-to-${area}`}
-              className="input"
               type="date"
               value={historyTo}
-              onChange={(e) => setHistoryTo(e.target.value)}
+              onChange={setHistoryTo}
             />
           </div>
 

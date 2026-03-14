@@ -47,11 +47,11 @@ export default function StazioniAdminPage() {
             </button>
           </div>
         )}
-        <EquipmentNfcCategoryTagsClient area="STAZIONI" />
         <ScopedRoleAdminUsersClient
           scope="STAZIONI"
           intro="Da qui puoi scegliere chi gestisce le funzioni admin dell'area Attrezzature Stazioni."
         />
+        <EquipmentNfcCategoryTagsClient area="STAZIONI" />
       </div>
 
       <ConfirmWithInputModal

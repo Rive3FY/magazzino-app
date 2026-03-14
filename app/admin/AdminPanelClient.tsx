@@ -655,7 +655,7 @@ export default function AdminPanelClient() {
             background: "rgba(0,0,0,0.35)",
             display: "grid",
             placeItems: "center",
-            zIndex: 999,
+            zIndex: 10050,
             padding: 16,
           }}
         >

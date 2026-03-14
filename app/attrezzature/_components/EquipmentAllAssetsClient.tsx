@@ -35,13 +35,6 @@ type AssetFormState = {
   notes: string;
 };
 
-type NfcReassignState = {
-  row: EquipmentAssetRow;
-  serialNumber: string;
-  existingSerial: string;
-  existingArea: EquipmentArea;
-};
-
 const supabase = createClient();
 
 const emptyForm: AssetFormState = {
@@ -52,18 +45,6 @@ const emptyForm: AssetFormState = {
   shelf: "",
   notes: "",
 };
-
-function NfcIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="5" y="2" width="14" height="20" rx="2" />
-      <path d="M9 7h6" />
-      <path d="M9 11h6" />
-      <path d="M9 15h4" />
-      <path d="M12 6v12" />
-    </svg>
-  );
-}
 
 function PhoneIcon() {
   return (
@@ -119,7 +100,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchActiveIndex, setSearchActiveIndex] = useState(0);
   const [statusFilter, setStatusFilter] = useState<"ALL" | EquipmentStatus>("ALL");
-  const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [warehouseFilter, setWarehouseFilter] = useState<string>("ALL");
   const [msg, setMsg] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -133,13 +113,11 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const [searchByNfcScanning, setSearchByNfcScanning] = useState(false);
   const [isNfcSupported, setIsNfcSupported] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
-  const [nfcAssociatingId, setNfcAssociatingId] = useState<string | null>(null);
-  const [nfcTagReassign, setNfcTagReassign] = useState<NfcReassignState | null>(null);
-  const [remoteScanRow, setRemoteScanRow] = useState<EquipmentAssetRow | null>(null);
-  const [remoteScanRows, setRemoteScanRows] = useState<EquipmentAssetRow[] | null>(null);
   const [techSheetBusyId, setTechSheetBusyId] = useState<string | null>(null);
   const [techSheetTargetRow, setTechSheetTargetRow] = useState<EquipmentAssetRow | null>(null);
   const [actionMenuOpenRowId, setActionMenuOpenRowId] = useState<string | null>(null);
+  const [remoteScanRow, setRemoteScanRow] = useState<EquipmentAssetRow | null>(null);
+  const [remoteScanRows, setRemoteScanRows] = useState<EquipmentAssetRow[] | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
@@ -175,6 +153,25 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [actionMenuOpenRowId]);
+
+  async function saveNfcAssociation(row: EquipmentAssetRow, serialNumber: string) {
+    await supabase.from("equipment_assets").update({ nfc_tag_id: null }).eq("nfc_tag_id", serialNumber);
+    const { error } = await supabase
+      .from("equipment_assets")
+      .update({ nfc_tag_id: serialNumber })
+      .eq("id", row.id)
+      .eq("equipment_area", area);
+
+    if (error) throw error;
+
+    await writeAuditLog("EQUIPMENT_UPDATED", row.id, {
+      asset_code: row.asset_code,
+      serial_number: row.serial_number,
+      equipment_area: row.equipment_area,
+      nfc_tag_id: serialNumber,
+      update_mode: "nfc_association",
+    });
+  }
 
   async function writeAuditLog(action: string, entityId: string | null, details: Record<string, unknown>) {
     try {
@@ -230,15 +227,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   }, []);
 
 
-  const categories = useMemo(() => {
-    const set = new Set<string>();
-    for (const row of rows) {
-      const c = (row.category ?? "").trim();
-      if (c) set.add(c);
-    }
-    return Array.from(set).sort();
-  }, [rows]);
-
   const warehouses = useMemo(() => {
     const set = new Set<string>();
     for (const row of rows) {
@@ -252,7 +240,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     const search = q.trim().toLowerCase();
     return rows.filter((row) => {
       if (statusFilter !== "ALL" && row.status !== statusFilter) return false;
-      if (categoryFilter && (row.category ?? "").trim() !== categoryFilter) return false;
       if (warehouseFilter !== "ALL" && warehouseFilter !== "" && (row.warehouse ?? "").trim() !== warehouseFilter) return false;
       if (warehouseFilter === "" && (row.warehouse ?? "").trim() !== "") return false;
       if (!search) return true;
@@ -269,7 +256,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(search));
     });
-  }, [q, rows, statusFilter, categoryFilter, warehouseFilter]);
+  }, [q, rows, statusFilter, warehouseFilter]);
 
   const ROWS_PER_PAGE = 15;
   const paginatedRows = useMemo(() => {
@@ -286,11 +273,11 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
 
   useEffect(() => {
     setPage(1);
-  }, [q, statusFilter, categoryFilter, warehouseFilter]);
+  }, [q, statusFilter, warehouseFilter]);
 
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [q, statusFilter, categoryFilter, warehouseFilter]);
+  }, [q, statusFilter, warehouseFilter]);
 
   const stats = useMemo(() => {
     return EQUIPMENT_STATUS_OPTIONS.reduce<Record<EquipmentStatus, number>>(
@@ -310,7 +297,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const searchMatches = useMemo(() => {
     const search = q.trim().toLowerCase();
     let base = rows;
-    if (categoryFilter) base = base.filter((row) => (row.category ?? "").trim() === categoryFilter);
     if (warehouseFilter !== "ALL") base = base.filter((row) => (row.warehouse ?? "").trim() === warehouseFilter);
     if (!search) return base.slice(0, 12);
     return base
@@ -328,7 +314,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
           .some((value) => String(value).toLowerCase().includes(search))
       )
       .slice(0, 12);
-  }, [q, rows, categoryFilter, warehouseFilter]);
+  }, [q, rows, warehouseFilter]);
 
   const searchActive = useMemo(() => searchMatches[searchActiveIndex] ?? null, [searchMatches, searchActiveIndex]);
 
@@ -436,94 +422,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
 
   function stopNfcScan() {
     setSearchByNfcScanning(false);
-    setMsg(null);
-  }
-
-  async function saveNfcAssociation(row: EquipmentAssetRow, serialNumber: string) {
-    await supabase.from("equipment_assets").update({ nfc_tag_id: null }).eq("nfc_tag_id", serialNumber);
-    const { error } = await supabase
-      .from("equipment_assets")
-      .update({ nfc_tag_id: serialNumber })
-      .eq("id", row.id)
-      .eq("equipment_area", area);
-
-    if (error) throw error;
-
-    await writeAuditLog("EQUIPMENT_UPDATED", row.id, {
-      asset_code: row.asset_code,
-      serial_number: row.serial_number,
-      equipment_area: row.equipment_area,
-      nfc_tag_id: serialNumber,
-      update_mode: "nfc_association",
-    });
-  }
-
-  async function doAssociateNfc(row: EquipmentAssetRow, forceReassign = false, knownSerialNumber?: string) {
-    if (!isNfcSupported) {
-      setMsg(
-        isIOS
-          ? "NFC non disponibile su iPhone/iPad. Safari non supporta la scansione NFC."
-          : "NFC richiede Chrome su Android con HTTPS. Da mobile via IP usa npm run dev:https, poi accedi da https://TUO_IP:3000"
-      );
-      return;
-    }
-
-    setNfcTagReassign(null);
-    setNfcAssociatingId(row.id);
-    setMsg("Avvicina il dispositivo al tag NFC...");
-
-    try {
-      const serialNumber = knownSerialNumber
-        ? knownSerialNumber
-        : await (async () => {
-            const ndef = new NDEFReader();
-            await ndef.scan();
-            return await new Promise<string>((resolve, reject) => {
-              const handler = (event: NDEFReadingEvent) => {
-                ndef.removeEventListener("reading", handler);
-                resolve(event.serialNumber ?? "");
-              };
-              ndef.addEventListener("reading", handler);
-              setTimeout(() => reject(new Error("Timeout: avvicina il telefono al tag entro 30 secondi")), 30000);
-            });
-          })();
-
-      if (!serialNumber || serialNumber === "unknown") {
-        setMsg("Impossibile leggere l'ID del tag. Riprova.");
-        return;
-      }
-
-      const { data: existing } = await supabase
-        .from("equipment_assets")
-        .select("id,serial_number,asset_code,equipment_area")
-        .eq("nfc_tag_id", serialNumber)
-        .maybeSingle();
-
-      if (existing && existing.id !== row.id && !forceReassign) {
-        setNfcTagReassign({
-          row,
-          serialNumber,
-          existingSerial: existing.serial_number || existing.asset_code,
-          existingArea: existing.equipment_area as EquipmentArea,
-        });
-        setMsg(null);
-        return;
-      }
-
-      await saveNfcAssociation(row, serialNumber);
-      toast.success("NFC associato");
-      setMsg("NFC associato ✅");
-      await loadAssets();
-    } catch (error) {
-      console.error(error);
-      setMsg(error instanceof Error ? error.message : "Errore associazione NFC");
-    } finally {
-      setNfcAssociatingId(null);
-    }
-  }
-
-  function stopNfcAssociation() {
-    setNfcAssociatingId(null);
     setMsg(null);
   }
 
@@ -888,33 +786,60 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
           <div className="equipmentFilterGrid mobileGrid1">
             <div ref={searchBoxRef} style={{ minWidth: 0, position: "relative" }}>
               <label className="label" htmlFor={`all-equipment-search-${area}`}>Cerca</label>
-              <input
-                id={`all-equipment-search-${area}`}
-                className="input"
-                value={q}
-                onChange={(e) => {
-                  setQ(e.target.value);
-                  setSearchOpen(true);
-                }}
-                onFocus={() => setSearchOpen(true)}
-                onKeyDown={(e) => {
-                  if (!searchOpen) return;
-                  if (e.key === "ArrowDown") {
-                    e.preventDefault();
-                    setSearchActiveIndex((i) => Math.min(i + 1, searchMatches.length - 1));
-                  } else if (e.key === "ArrowUp") {
-                    e.preventDefault();
-                    setSearchActiveIndex((i) => Math.max(i - 1, 0));
-                  } else if (e.key === "Enter") {
-                    e.preventDefault();
-                    if (searchActive) pickSearchMatch(searchActive);
-                  } else if (e.key === "Escape") {
-                    setSearchOpen(false);
-                  }
-                }}
-                placeholder={`Cerca in ${areaLabel.toLowerCase()} per seriale, nome, assegnatario, barcode o NFC`}
-                style={{ width: "100%" }}
-              />
+              <div style={{ position: "relative" }}>
+                <input
+                  id={`all-equipment-search-${area}`}
+                  className="input"
+                  value={q}
+                  onChange={(e) => {
+                    setQ(e.target.value);
+                    setSearchOpen(true);
+                  }}
+                  onFocus={() => setSearchOpen(true)}
+                  onKeyDown={(e) => {
+                    if (!searchOpen) return;
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      setSearchActiveIndex((i) => Math.min(i + 1, searchMatches.length - 1));
+                    } else if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      setSearchActiveIndex((i) => Math.max(i - 1, 0));
+                    } else if (e.key === "Enter") {
+                      e.preventDefault();
+                      setSearchOpen(false);
+                    } else if (e.key === "Escape") {
+                      setSearchOpen(false);
+                    }
+                  }}
+                  placeholder={`Cerca in ${areaLabel.toLowerCase()} per seriale, nome, categoria, barcode o NFC`}
+                  style={{ width: "100%", paddingRight: q ? 36 : undefined }}
+                />
+                {q && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQ("");
+                      setSearchOpen(false);
+                    }}
+                    aria-label="Cancella ricerca"
+                    style={{
+                      position: "absolute",
+                      right: 8,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      border: "none",
+                      background: "transparent",
+                      color: "#64748b",
+                      cursor: "pointer",
+                      fontSize: 18,
+                      lineHeight: 1,
+                      padding: 4,
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
               {searchOpen && q.trim() && (
                 <div
                   style={{
@@ -961,20 +886,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
             </div>
 
             <div style={{ minWidth: 0 }}>
-              <label className="label" htmlFor={`all-equipment-category-${area}`}>Categoria</label>
-              <select
-                id={`all-equipment-category-${area}`}
-                className="input"
-                value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
-              >
-                <option value="">Tutte le categorie</option>
-                {categories.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-            <div style={{ minWidth: 0 }}>
               <label className="label" htmlFor={`all-equipment-status-${area}`}>Stato</label>
               <select
                 id={`all-equipment-status-${area}`}
@@ -1009,7 +920,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
         </div>
       </div>
 
-      {(cameraScanning || searchByNfcScanning || !!nfcAssociatingId) && (
+      {(cameraScanning || searchByNfcScanning) && (
         <div
           style={{
             position: "fixed",
@@ -1019,7 +930,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
             alignItems: "center",
             justifyContent: "center",
             padding: 20,
-            zIndex: 1100,
+            zIndex: 10050,
           }}
         >
           <div
@@ -1043,7 +954,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                   Fine
                 </button>
               </>
-            ) : searchByNfcScanning ? (
+            ) : (
               <>
                 <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner NFC</div>
                 <div style={{ padding: 24, background: "#0f172a", borderRadius: 12, marginBottom: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
@@ -1051,17 +962,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                   <div style={{ fontSize: 14, color: "#94a3b8" }}>Avvicina il telefono al tag NFC</div>
                 </div>
                 <button type="button" className="btn" onClick={stopNfcScan}>
-                  Fine
-                </button>
-              </>
-            ) : (
-              <>
-                <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Associazione NFC</div>
-                <div style={{ padding: 24, background: "#0f172a", borderRadius: 12, marginBottom: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-                  <SpinnerIcon />
-                  <div style={{ fontSize: 14, color: "#94a3b8" }}>Avvicina il telefono al tag NFC</div>
-                </div>
-                <button type="button" className="btn" onClick={stopNfcAssociation}>
                   Fine
                 </button>
               </>
@@ -1158,17 +1058,15 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
           <table className="table equipmentTableCompact" style={{ width: "100%", tableLayout: "fixed" }}>
             <colgroup>
               <col style={{ width: "3%" }} />
-              <col style={{ width: "8%" }} />
+              <col style={{ width: "10%" }} />
+              <col style={{ width: "16%" }} />
+              <col style={{ width: "9%" }} />
+              <col style={{ width: "7%" }} />
               <col style={{ width: "14%" }} />
               <col style={{ width: "8%" }} />
-              <col style={{ width: "6%" }} />
+              <col style={{ width: "7%" }} />
               <col style={{ width: "12%" }} />
-              <col style={{ width: "7%" }} />
-              <col style={{ width: "6%" }} />
-              <col style={{ width: "10%" }} />
-              <col style={{ width: "7%" }} />
-              <col style={{ width: "7%" }} />
-              <col style={{ width: "9%" }} />
+              <col style={{ width: "11%" }} />
               <col style={{ width: "5%" }} />
             </colgroup>
             <thead>
@@ -1191,8 +1089,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                 <th>Stato</th>
                 <th>Scaffale</th>
                 <th>Assegnata a</th>
-                <th>Barcode</th>
-                <th>NFC</th>
                 <th>Ultimo agg.</th>
                 <th>Azioni</th>
               </tr>
@@ -1200,12 +1096,12 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
             <tbody>
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={13}>Nessuna attrezzatura trovata.</td>
+                  <td colSpan={11}>Nessuna attrezzatura trovata.</td>
                 </tr>
               )}
               {loading && (
                 <tr>
-                  <td colSpan={13}>Caricamento attrezzature...</td>
+                  <td colSpan={11}>Caricamento attrezzature...</td>
                 </tr>
               )}
               {paginatedRows.map((row) => {
@@ -1234,20 +1130,38 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                       )}
                     </td>
                     <td>
-                      <div style={{ display: "grid", gap: 4 }}>
+                      <span className="equipmentCellText" title={row.serial_number || row.asset_code || ""}>
                         <strong>{row.serial_number || row.asset_code}</strong>
-                      </div>
+                      </span>
                     </td>
-                    <td>{row.name}</td>
-                    <td>{row.category || "—"}</td>
-                    <td>{row.warehouse || "—"}</td>
-                    <td title={row.notes ?? ""}>{row.notes || "—"}</td>
-                    <td><span style={equipmentStatusStyle(row.status)}>{EQUIPMENT_STATUS_LABELS[row.status]}</span></td>
-                    <td>{[row.shelf, row.place].filter(Boolean).join(" · ") || "—"}</td>
-                    <td>{assignedTo}</td>
-                    <td>{row.barcode || "Da generare"}</td>
-                    <td>{row.nfc_tag_id || "Non associato"}</td>
-                    <td>{fmtDateTime(row.updated_at)}</td>
+                    <td>
+                      <span className="equipmentCellText" title={row.name ?? ""}>{row.name}</span>
+                    </td>
+                    <td>
+                      <span className="equipmentCellText" title={row.category || "—"}>{row.category || "—"}</span>
+                    </td>
+                    <td>
+                      <span className="equipmentCellText" title={row.warehouse || "—"}>{row.warehouse || "—"}</span>
+                    </td>
+                    <td>
+                      <span className="equipmentCellText" title={row.notes ?? ""}>{row.notes || "—"}</span>
+                    </td>
+                    <td>
+                      <span className="equipmentCellText" title={EQUIPMENT_STATUS_LABELS[row.status]}>
+                        <span style={equipmentStatusStyle(row.status)}>{EQUIPMENT_STATUS_LABELS[row.status]}</span>
+                      </span>
+                    </td>
+                    <td>
+                      <span className="equipmentCellText" title={[row.shelf, row.place].filter(Boolean).join(" · ") || "—"}>
+                        {[row.shelf, row.place].filter(Boolean).join(" · ") || "—"}
+                      </span>
+                    </td>
+                    <td>
+                      <span className="equipmentCellText" title={assignedTo}>{assignedTo}</span>
+                    </td>
+                    <td>
+                      <span className="equipmentCellText" title={fmtDateTime(row.updated_at)}>{fmtDateTime(row.updated_at)}</span>
+                    </td>
                     <td onClick={(e) => e.stopPropagation()} data-action-menu>
                       {!isMobile && (
                         <div style={{ position: "relative" }}>
@@ -1320,34 +1234,19 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                                 </button>
                               )}
                               {isAdmin && (
-                                <>
-                                  <button
-                                    type="button"
-                                    className="btn"
-                                    style={{ width: "100%", justifyContent: "flex-start", borderRadius: 0, display: "flex", alignItems: "center", gap: 8 }}
-                                    onClick={() => {
-                                      setActionMenuOpenRowId(null);
-                                      void doAssociateNfc(row);
-                                    }}
-                                    disabled={nfcAssociatingId === row.id}
-                                  >
-                                    <NfcIcon />
-                                    {nfcAssociatingId === row.id ? "NFC..." : row.nfc_tag_id ? "Riassegna NFC" : "Associa NFC"}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="btn"
-                                    style={{ width: "100%", justifyContent: "flex-start", borderRadius: 0, display: "flex", alignItems: "center", gap: 8 }}
-                                    onClick={() => {
-                                      setActionMenuOpenRowId(null);
-                                      setRemoteScanRow(row);
-                                    }}
-                                    title="Usa telefono come lettore NFC"
-                                  >
-                                    <PhoneIcon />
-                                    Telefono
-                                  </button>
-                                </>
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  style={{ width: "100%", justifyContent: "flex-start", borderRadius: 0, display: "flex", alignItems: "center", gap: 8 }}
+                                  onClick={() => {
+                                    setActionMenuOpenRowId(null);
+                                    setRemoteScanRow(row);
+                                  }}
+                                  title="Usa telefono come lettore NFC"
+                                >
+                                  <PhoneIcon />
+                                  Telefono
+                                </button>
                               )}
                               {isAdmin && (
                                 <button
@@ -1374,8 +1273,8 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
           </table>
         </div>
 
-        {(totalPages > 1 || (isAdmin && selectedIds.size > 0)) && (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(15,23,42,0.08)" }}>
+          {(totalPages > 1 || (isAdmin && selectedIds.size > 0)) && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(15,23,42,0.08)" }}>
             {isAdmin && selectedIds.size > 0 && (
               <>
                 <button
@@ -1461,7 +1360,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
             alignItems: "center",
             justifyContent: "center",
             padding: 14,
-            zIndex: 999,
+            zIndex: 10050,
           }}
         >
           <div
@@ -1578,6 +1477,17 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                       {techSheetBusyId === editingRow.id ? "Caricamento..." : editingRow.technical_sheet_path ? "Aggiorna scheda" : "Carica scheda"}
                     </button>
                   )}
+                  {isAdmin && (
+                    <button
+                      className="btn"
+                      onClick={() => setRemoteScanRow(editingRow)}
+                      title="Usa telefono come lettore NFC"
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                    >
+                      <PhoneIcon />
+                      Telefono
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -1627,17 +1537,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                       disabled={saving}
                     >
                       Gestisci stato
-                    </button>
-                  )}
-                  {isAdmin && (
-                    <button
-                      className="btn"
-                      onClick={() => void doAssociateNfc(editingRow)}
-                      disabled={nfcAssociatingId === editingRow.id}
-                      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-                    >
-                      <NfcIcon />
-                      {nfcAssociatingId === editingRow.id ? "NFC..." : editingRow.nfc_tag_id ? "Riassegna NFC" : "Associa NFC"}
                     </button>
                   )}
                   {isAdmin && (
@@ -1796,32 +1695,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                 </>
               );
             })()}
-          </div>
-        </div>
-      )}
-
-      {nfcTagReassign && (
-        <div className="card" style={{ padding: 12, marginTop: 12, borderColor: "rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.08)" }}>
-          <div className="equipmentSectionHeader">
-            <div>
-              <div className="equipmentSectionTitle">Tag NFC già associato</div>
-              <div className="equipmentSectionHint">
-                Il tag letto è già associato a ` {nfcTagReassign.existingSerial} ` nell&apos;area {EQUIPMENT_AREA_LABELS[nfcTagReassign.existingArea]}.
-              </div>
-            </div>
-          </div>
-          <div className="equipmentActionGroup">
-            <button
-              className="btn btnPrimary"
-              onClick={() => void doAssociateNfc(nfcTagReassign.row, true, nfcTagReassign.serialNumber)}
-              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-            >
-              <NfcIcon />
-              Conferma riassegnazione
-            </button>
-            <button className="btn" onClick={() => setNfcTagReassign(null)}>
-              Annulla
-            </button>
           </div>
         </div>
       )}

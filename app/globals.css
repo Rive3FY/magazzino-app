@@ -17,6 +17,9 @@ html, body {
   --text: #1e293b;
   --muted: #64748b;
 
+  /* z-index: sidebar 9999, topbar 10000, modals sopra la sidebar */
+  --z-modal: 10050;
+
   --sidebar: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
   --sidebar-solid: #0f172a;
   --sidebar-text: #ffffff;
@@ -826,6 +829,11 @@ body:has(.appLogin) {
   border: 2px solid var(--sidebar-solid);
 }
 
+/* Modali e popup: sopra la sidebar (z-index 9999) */
+.modalOverlay {
+  z-index: var(--z-modal) !important;
+}
+
 /* Overlay a schermo intero: blocca scroll pagina, chiude al tap fuori */
 .notificationBellOverlay{
   position: fixed;
@@ -1582,7 +1590,7 @@ textarea.input{
   align-self:center;
 }
 
-/* Tabella attrezzature compatta: larghezza piena, max 15 righe con paginazione */
+/* Tabella attrezzature compatta: ellissi + tooltip per evitare sovrapposizioni */
 .equipmentTableCompact {
   width: 100% !important;
   min-width: 0 !important;
@@ -1591,10 +1599,29 @@ textarea.input{
 }
 .equipmentTableCompact thead th,
 .equipmentTableCompact tbody td {
-  white-space: normal;
-  word-break: break-word;
   padding: 8px 6px !important;
-  overflow-wrap: break-word;
+}
+.equipmentTableCompact thead th {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.equipmentTableCompact tbody td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.equipmentTableCompact tbody td:first-child,
+.equipmentTableCompact tbody td:last-child {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+.equipmentTableCompact .equipmentCellText {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .equipmentTableCompact .equipmentActionGroup {
   flex-wrap: wrap;
@@ -1609,13 +1636,6 @@ textarea.input{
   .equipmentTableCompact {
     width: max-content !important;
     min-width: 1180px !important;
-  }
-
-  .equipmentTableCompact thead th,
-  .equipmentTableCompact tbody td {
-    white-space: nowrap;
-    word-break: normal;
-    overflow-wrap: normal;
   }
 }
 
@@ -2535,7 +2555,7 @@ html, body {
   align-items: center;
   justify-content: center;
   padding: 20px;
-  z-index: 10001;
+  z-index: var(--z-modal);
 }
 .confirmModalContent {
   background: #fff;

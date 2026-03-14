@@ -1247,7 +1247,7 @@ await writeAuditLog({
             alignItems: "center",
             justifyContent: "center",
             padding: 14,
-            zIndex: 999,
+            zIndex: 10050,
           }}
         >
           <div
@@ -1438,7 +1438,7 @@ await writeAuditLog({
       alignItems: "center",
       justifyContent: "center",
       padding: 14,
-      zIndex: 999,
+      zIndex: 10050,
     }}
   >
     <div

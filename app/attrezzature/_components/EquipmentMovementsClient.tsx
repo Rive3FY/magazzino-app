@@ -159,6 +159,16 @@ function SpinnerIcon() {
   );
 }
 
+function PhoneIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="7" y="2" width="10" height="20" rx="2" />
+      <path d="M11 18h2" />
+      <path d="M10 5h4" />
+    </svg>
+  );
+}
+
 function ClearableInput(props: {
   id?: string;
   value: string;
@@ -1187,7 +1197,8 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
               {searchByNfcScanning ? "NFC..." : "NFC"}
             </button>
             <button className="btn" onClick={() => setRemoteScanOpen(true)} disabled={!warehouseSelected} type="button" title="Usa telefono come lettore NFC" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              📱 Telefono
+              <PhoneIcon />
+              Telefono
             </button>
           </div>
         </div>
@@ -1607,7 +1618,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
             alignItems: "center",
             justifyContent: "center",
             padding: 20,
-            zIndex: 1100,
+            zIndex: 10050,
           }}
         >
           <div
@@ -1657,7 +1668,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
             alignItems: "center",
             justifyContent: "center",
             padding: 20,
-            zIndex: 1100,
+            zIndex: 10050,
           }}
         >
           <div
@@ -1780,7 +1791,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
             alignItems: "center",
             justifyContent: "center",
             padding: 14,
-            zIndex: 999,
+            zIndex: 10050,
           }}
         >
           <div
@@ -2050,13 +2061,13 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       {categorySelectModalOpen && categorySelectModalCategory && (
         <div
           style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1100,
+      position: "fixed",
+      inset: 0,
+      background: "rgba(0,0,0,0.5)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 10050,
             padding: 16,
           }}
           onClick={() => setCategorySelectModalOpen(false)}

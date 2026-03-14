@@ -2648,7 +2648,7 @@ async function confirmCartPickup() {
             alignItems: "center",
             justifyContent: "center",
             padding: 14,
-            zIndex: warehouseChoicePopup.forCart ? 1100 : 999,
+            zIndex: 10050,
           }}
         >
           <div
@@ -2806,7 +2806,7 @@ async function confirmCartPickup() {
             alignItems: "center",
             justifyContent: "center",
             padding: 14,
-            zIndex: 999,
+            zIndex: 10050,
           }}
         >
           <div
@@ -3006,7 +3006,7 @@ async function confirmCartPickup() {
             alignItems: "center",
             justifyContent: "center",
             padding: 14,
-            zIndex: 999,
+            zIndex: 10050,
           }}
         >
           <div
@@ -3525,7 +3525,7 @@ async function confirmCartPickup() {
             alignItems: "center",
             justifyContent: "center",
             padding: 14,
-            zIndex: 999,
+            zIndex: 10050,
           }}
         >
           <div
@@ -3615,7 +3615,7 @@ async function confirmCartPickup() {
       alignItems: "center",
       justifyContent: "center",
       padding: 20,
-      zIndex: 1100,
+      zIndex: 10050,
     }}
   >
     <div
@@ -3691,7 +3691,7 @@ async function confirmCartPickup() {
       alignItems: "center",
       justifyContent: "center",
       padding: 14,
-      zIndex: 999,
+      zIndex: 10050,
     }}
   >
     <div

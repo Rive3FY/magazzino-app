@@ -99,6 +99,7 @@ export default function ScopedRoleAdminUsersClient({ scope, title, intro }: Prop
   const [editFirst, setEditFirst] = useState("");
   const [editLast, setEditLast] = useState("");
   const [editBusy, setEditBusy] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
 
   const canManageScope =
     scope === "MATERIALS"
@@ -203,77 +204,108 @@ export default function ScopedRoleAdminUsersClient({ scope, title, intro }: Prop
 
   return (
     <>
-      <div className="card" style={{ padding: 12 }}>
-        <div style={{ marginBottom: 10 }}>
-            <div style={{ fontWeight: 900 }}>{title ?? config.title}</div>
-            {intro ? <div style={{ marginTop: 4, color: "#64748b", fontSize: 13 }}>{intro}</div> : null}
+      <div
+        style={{
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          overflow: "hidden",
+          background: "var(--panel)",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          style={{
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "12px 16px",
+            border: "none",
+            background: "transparent",
+            cursor: "pointer",
+            textAlign: "left",
+            fontSize: 15,
+            fontWeight: 700,
+            color: "var(--text)",
+          }}
+        >
+          <span>{title ?? config.title}</span>
+          <span style={{ fontSize: 18, color: "var(--muted)", transition: "transform 0.2s", transform: collapsed ? "rotate(0deg)" : "rotate(180deg)" }}>
+            ▼
+          </span>
+        </button>
+        {!collapsed && (
+          <div style={{ padding: 12, borderTop: "1px solid var(--border)" }}>
+            {intro ? <div style={{ marginBottom: 10, color: "#64748b", fontSize: 13 }}>{intro}</div> : null}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+              <input
+                className="input"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Cerca per email, badge o nome"
+                style={{ minWidth: 200, flex: "1 1 200px" }}
+              />
+              <button className="btn" onClick={loadRows}>Aggiorna</button>
+            </div>
+            {msg ? <div style={{ marginBottom: 10, fontWeight: 700 }}>{msg}</div> : null}
+            <div className="tableWrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Email</th>
+                    <th>Badge</th>
+                    <th>Nome</th>
+                    <th>Approvato</th>
+                    <th>Ruolo</th>
+                    <th>Azioni</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr><td colSpan={6} style={{ padding: 12 }}>Caricamento…</td></tr>
+                  ) : filteredRows.length === 0 ? (
+                    <tr><td colSpan={6} style={{ padding: 12 }}>Nessun utente</td></tr>
+                  ) : (
+                    filteredRows.map((row) => {
+                      const enabled = getScopeEnabled(row, scope);
+                      const busy = workingId === row.id;
+                      const isMe = myId === row.user_id;
+                      return (
+                        <tr key={row.id}>
+                          <td>{row.email ?? "-"}</td>
+                          <td>{row.badge_number ?? "-"}</td>
+                          <td>{`${row.first_name ?? ""} ${row.last_name ?? ""}`.trim() || "-"}</td>
+                          <td style={{ fontWeight: 800 }}>{row.approved ? "SI" : "NO"}</td>
+                          <td style={{ fontWeight: 800 }}>{enabled ? "ATTIVO" : "-"}</td>
+                          <td>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              <button className="btn" onClick={() => openEdit(row)}>Modifica profilo</button>
+                              {enabled ? (
+                                <button
+                                  className="btn"
+                                  disabled={busy || isMe}
+                                  title={isMe ? "Non puoi rimuovere da solo il tuo ruolo da questa pagina." : ""}
+                                  onClick={() => toggleScopeAdmin(row.user_id, false)}
+                                >
+                                  {config.disableLabel}
+                                </button>
+                              ) : (
+                                <button className="btn btnPrimary" disabled={busy} onClick={() => toggleScopeAdmin(row.user_id, true)}>
+                                  {config.enableLabel}
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-          <input
-            className="input"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Cerca per email, badge o nome"
-            style={{ minWidth: 200, flex: "1 1 200px" }}
-          />
-          <button className="btn" onClick={loadRows}>Aggiorna</button>
-        </div>
-        {msg ? <div style={{ marginBottom: 10, fontWeight: 700 }}>{msg}</div> : null}
-        <div className="tableWrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Email</th>
-                <th>Badge</th>
-                <th>Nome</th>
-                <th>Approvato</th>
-                <th>Ruolo</th>
-                <th>Azioni</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={6} style={{ padding: 12 }}>Caricamento…</td></tr>
-              ) : filteredRows.length === 0 ? (
-                <tr><td colSpan={6} style={{ padding: 12 }}>Nessun utente</td></tr>
-              ) : (
-                filteredRows.map((row) => {
-                  const enabled = getScopeEnabled(row, scope);
-                  const busy = workingId === row.id;
-                  const isMe = myId === row.user_id;
-                  return (
-                    <tr key={row.id}>
-                      <td>{row.email ?? "-"}</td>
-                      <td>{row.badge_number ?? "-"}</td>
-                      <td>{`${row.first_name ?? ""} ${row.last_name ?? ""}`.trim() || "-"}</td>
-                      <td style={{ fontWeight: 800 }}>{row.approved ? "SI" : "NO"}</td>
-                      <td style={{ fontWeight: 800 }}>{enabled ? "ATTIVO" : "-"}</td>
-                      <td>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                          <button className="btn" onClick={() => openEdit(row)}>Modifica profilo</button>
-                          {enabled ? (
-                            <button
-                              className="btn"
-                              disabled={busy || isMe}
-                              title={isMe ? "Non puoi rimuovere da solo il tuo ruolo da questa pagina." : ""}
-                              onClick={() => toggleScopeAdmin(row.user_id, false)}
-                            >
-                              {config.disableLabel}
-                            </button>
-                          ) : (
-                            <button className="btn btnPrimary" disabled={busy} onClick={() => toggleScopeAdmin(row.user_id, true)}>
-                              {config.enableLabel}
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+        )}
       </div>
 
       {editOpen && editRow ? (
@@ -290,7 +322,7 @@ export default function ScopedRoleAdminUsersClient({ scope, title, intro }: Prop
             background: "rgba(0,0,0,0.35)",
             display: "grid",
             placeItems: "center",
-            zIndex: 999,
+            zIndex: 10050,
             padding: 16,
           }}
         >

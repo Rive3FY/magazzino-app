@@ -575,7 +575,7 @@ export default function ScaffaliPage() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              zIndex: 1200,
+              zIndex: 10050,
               padding: 20,
             }}
           >
@@ -623,7 +623,7 @@ export default function ScaffaliPage() {
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                zIndex: 1100,
+                zIndex: 10050,
                 padding: 20,
               }}
             >
@@ -684,7 +684,7 @@ export default function ScaffaliPage() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              zIndex: 1100,
+              zIndex: 10050,
               padding: 20,
             }}
           >
@@ -769,7 +769,7 @@ export default function ScaffaliPage() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              zIndex: 1100,
+              zIndex: 10050,
               padding: 20,
             }}
           >
@@ -804,7 +804,7 @@ export default function ScaffaliPage() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              zIndex: 1100,
+              zIndex: 10050,
               padding: 20,
             }}
           >
@@ -845,7 +845,7 @@ export default function ScaffaliPage() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              zIndex: 1100,
+              zIndex: 10050,
               padding: 20,
             }}
           >
@@ -907,7 +907,7 @@ export default function ScaffaliPage() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              zIndex: 1000,
+              zIndex: 10050,
               padding: 16,
             }}
           >

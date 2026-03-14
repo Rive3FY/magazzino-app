@@ -69,7 +69,7 @@ export default function EquipmentStatusManager({ asset, isOpen, isSaving = false
         alignItems: "center",
         justifyContent: "center",
         padding: 14,
-        zIndex: 1200,
+        zIndex: 10050,
       }}
     >
       <div

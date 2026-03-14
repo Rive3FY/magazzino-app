@@ -189,7 +189,7 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
         background: "rgba(0,0,0,0.4)",
         display: "grid",
         placeItems: "center",
-        zIndex: 999,
+        zIndex: 10050,
         padding: 16,
       }}
     >

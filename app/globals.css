@@ -66,6 +66,16 @@ body{
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Input e textarea: permettere selezione e digitazione */
+input,
+textarea,
+[contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 a{ color: var(--accent); text-decoration: none; transition: color 0.15s ease; }

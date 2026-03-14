@@ -253,6 +253,9 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const [searchByNfcScanning, setSearchByNfcScanning] = useState(false);
   const [scanResult, setScanResult] = useState<ScanResultState | null>(null);
   const [remoteScanOpen, setRemoteScanOpen] = useState(false);
+  const [categorySelectModalOpen, setCategorySelectModalOpen] = useState(false);
+  const [categorySelectModalCategory, setCategorySelectModalCategory] = useState<string | null>(null);
+  const [categorySelectModalSelected, setCategorySelectModalSelected] = useState<Set<string>>(new Set());
   const [isNfcSupported, setIsNfcSupported] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [form, setForm] = useState<MovementFormState>(() => ({
@@ -455,6 +458,18 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const assetMatches = useMemo(() => filteredAssets.slice(0, 12), [filteredAssets]);
   const assetActive = useMemo(() => assetMatches[assetActiveIndex] ?? null, [assetActiveIndex, assetMatches]);
 
+  const categoryModalAssets = useMemo(() => {
+    if (!categorySelectModalCategory || !warehouseFilter) return [];
+    return assetsByWarehouse.filter((a) => (a.category ?? "").trim() === categorySelectModalCategory);
+  }, [assetsByWarehouse, categorySelectModalCategory, warehouseFilter]);
+
+  function canAddAssetToCart(asset: EquipmentAssetRow): boolean {
+    if (asset.status !== "AVAILABLE") return false;
+    if (history.some((row) => row.equipment_id === asset.id && getMovementStatus(row) === "OPEN")) return false;
+    if (cart.includes(asset.id)) return false;
+    return true;
+  }
+
   const uniqueHistoryRows = useMemo(() => {
     const seen = new Set<string>();
     return history.filter((row) => {
@@ -516,11 +531,10 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     if (mode === "nfc") {
       const category = await checkNfcCategoryTag(value);
       if (category) {
-        setAssetCategoryFilter(category);
-        setAssetOpen(true);
-        setAssetSearch("");
-        setForm((prev) => ({ ...prev, equipment_id: "" }));
-        setMsg(`Gruppo "${category}" selezionato. Scegli l'attrezzatura dalla lista.`);
+        setCategorySelectModalCategory(category);
+        setCategorySelectModalSelected(new Set());
+        setCategorySelectModalOpen(true);
+        setMsg(null);
         setScanResult(null);
         return;
       }
@@ -713,11 +727,9 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     if (!normalized) return;
     const category = await checkNfcCategoryTag(nfcTagId);
     if (category) {
-      setAssetCategoryFilter(category);
-      setAssetOpen(true);
-      setAssetSearch("");
-      setForm((prev) => ({ ...prev, equipment_id: "" }));
-      setMsg(`Gruppo "${category}" selezionato. Scegli l'attrezzatura dalla lista.`);
+      setCategorySelectModalCategory(category);
+      setCategorySelectModalSelected(new Set());
+      setCategorySelectModalOpen(true);
       setRemoteScanOpen(false);
       return;
     }
@@ -752,6 +764,37 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
   function removeCartItem(id: string) {
     setCart((prev) => prev.filter((item) => item !== id));
+  }
+
+  function toggleCategoryModalSelection(id: string) {
+    setCategorySelectModalSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function addCategoryModalSelectedToCart() {
+    const toAdd = categoryModalAssets.filter(
+      (a) => categorySelectModalSelected.has(a.id) && canAddAssetToCart(a)
+    );
+    if (toAdd.length === 0) {
+      setMsg("Seleziona almeno un'attrezzatura disponibile.");
+      return;
+    }
+    const newIds = toAdd.map((a) => a.id);
+    setCart((prev) => {
+      const set = new Set(prev);
+      newIds.forEach((id) => set.add(id));
+      return Array.from(set);
+    });
+    setCartOpen(true);
+    setScanMode("CART");
+    setCategorySelectModalOpen(false);
+    setCategorySelectModalCategory(null);
+    setCategorySelectModalSelected(new Set());
+    setMsg(`${toAdd.length} attrezzatura/e aggiunta/e al carrello.`);
   }
 
   async function confirmCartPickup() {
@@ -1148,44 +1191,6 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
             </button>
           </div>
         </div>
-
-        {assetCategories.length > 0 && warehouseSelected && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => setAssetCategoryFilter("")}
-              style={{
-                padding: "8px 14px",
-                fontSize: 13,
-                fontWeight: 600,
-                ...(assetCategoryFilter === "" ? { background: "var(--primary)", color: "#fff", borderColor: "var(--primary)" } : {}),
-              }}
-            >
-              Tutte
-            </button>
-            {assetCategories.map((c) => (
-              <button
-                key={c}
-                type="button"
-                className="btn"
-                onClick={() => {
-                  setAssetCategoryFilter(c);
-                  setAssetOpen(true);
-                  setMsg(null);
-                }}
-                style={{
-                  padding: "8px 14px",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  ...(assetCategoryFilter === c ? { background: "var(--primary)", color: "#fff", borderColor: "var(--primary)" } : {}),
-                }}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
-        )}
 
         <div className="equipmentFilterGrid mobileGrid1" style={{ opacity: warehouseSelected ? 1 : 0.5, pointerEvents: warehouseSelected ? "auto" : "none" }}>
           <div style={{ minWidth: 0 }}>
@@ -2040,6 +2045,133 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           onConfirm={() => void handleDeleteConfirm()}
           onCancel={() => setDeleteConfirm(null)}
         />
+      )}
+
+      {categorySelectModalOpen && categorySelectModalCategory && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1100,
+            padding: 16,
+          }}
+          onClick={() => setCategorySelectModalOpen(false)}
+        >
+          <div
+            style={{
+              background: "var(--bg)",
+              borderRadius: 12,
+              padding: 20,
+              maxWidth: 480,
+              width: "100%",
+              maxHeight: "85vh",
+              display: "flex",
+              flexDirection: "column",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.25)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: "0 0 12px", fontSize: 18, fontWeight: 700 }}>
+              Gruppo &quot;{categorySelectModalCategory}&quot; – Seleziona da prelevare
+            </h3>
+            <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--muted)" }}>
+              Seleziona le attrezzature da aggiungere al carrello.
+            </p>
+            {categoryModalAssets.some(canAddAssetToCart) && (
+              <div style={{ marginBottom: 8, display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ fontSize: 12, padding: "6px 10px" }}
+                  onClick={() => {
+                    const selectable = categoryModalAssets.filter(canAddAssetToCart).map((a) => a.id);
+                    setCategorySelectModalSelected((prev) => {
+                      const next = new Set(prev);
+                      selectable.forEach((id) => next.add(id));
+                      return next;
+                    });
+                  }}
+                >
+                  Seleziona tutti
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ fontSize: 12, padding: "6px 10px" }}
+                  onClick={() => setCategorySelectModalSelected(new Set())}
+                >
+                  Deseleziona tutti
+                </button>
+              </div>
+            )}
+            <div style={{ flex: 1, overflowY: "auto", marginBottom: 16, border: "1px solid var(--border)", borderRadius: 8, padding: 8 }}>
+              {categoryModalAssets.length === 0 ? (
+                <div style={{ padding: 24, textAlign: "center", color: "var(--muted)" }}>
+                  Nessuna attrezzatura in questo gruppo nel magazzino selezionato.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {categoryModalAssets.map((asset) => {
+                    const canAdd = canAddAssetToCart(asset);
+                    const isSelected = categorySelectModalSelected.has(asset.id);
+                    return (
+                      <label
+                        key={asset.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "10px 12px",
+                          borderRadius: 8,
+                          background: isSelected ? "rgba(59,130,246,0.12)" : "transparent",
+                          cursor: canAdd ? "pointer" : "not-allowed",
+                          opacity: canAdd ? 1 : 0.6,
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => canAdd && toggleCategoryModalSelection(asset.id)}
+                          disabled={!canAdd}
+                          style={{ width: 20, height: 20, accentColor: "var(--primary)" }}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: 14 }}>
+                            {asset.serial_number || asset.asset_code} – {asset.name}
+                          </div>
+                          <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                            {asset.status !== "AVAILABLE" && `Stato: ${EQUIPMENT_STATUS_LABELS[asset.status]}`}
+                            {asset.status === "AVAILABLE" && cart.includes(asset.id) && "Già nel carrello"}
+                            {asset.status === "AVAILABLE" && !cart.includes(asset.id) && history.some((r) => r.equipment_id === asset.id && getMovementStatus(r) === "OPEN") && "Movimento aperto"}
+                            {asset.status === "AVAILABLE" && !cart.includes(asset.id) && !history.some((r) => r.equipment_id === asset.id && getMovementStatus(r) === "OPEN") && "Disponibile"}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button type="button" className="btn" onClick={() => setCategorySelectModalOpen(false)}>
+                Annulla
+              </button>
+              <button
+                type="button"
+                className="btn btnPrimary"
+                onClick={addCategoryModalSelectedToCart}
+                disabled={categorySelectModalSelected.size === 0}
+                style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+              >
+                Aggiungi {categorySelectModalSelected.size > 0 ? `(${categorySelectModalSelected.size})` : ""} al carrello
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <RemoteNfcScanModal

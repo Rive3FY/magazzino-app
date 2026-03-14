@@ -1217,10 +1217,10 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                   <tr
                     key={row.id}
                     onClick={() => {
-                      if (isMobile) openEdit(row);
+                      if (isAdmin) openEdit(row);
                     }}
-                    style={isMobile ? { cursor: "pointer" } : undefined}
-                    title={isMobile ? "Tocca per aprire il dettaglio" : undefined}
+                    style={isAdmin ? { cursor: "pointer" } : undefined}
+                    title={isAdmin ? "Clicca per modificare" : undefined}
                   >
                     <td onClick={(e) => e.stopPropagation()}>
                       {isAdmin && (

@@ -121,52 +121,132 @@ export default function RemoteNfcScanModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1100,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "rgba(15, 23, 42, 0.6)",
+        padding: 20,
+      }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="remote-scan-title"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="max-w-sm rounded-xl bg-white p-6 shadow-xl">
-        <h2 id="remote-scan-title" className="mb-4 text-lg font-semibold text-slate-800">
-          {title}
-        </h2>
-        <p className="mb-4 text-sm text-slate-600">
-          {allowMultiple
-            ? "Inquadra il QR una volta, poi scansiona tutti i tag che vuoi. Ogni scansione apparirà sul PC."
-            : "Inquadra il QR con il telefono, poi avvicina il tag NFC. La scansione apparirà sul PC."}
-        </p>
+      <div
+        style={{
+          maxWidth: 380,
+          width: "100%",
+          background: "#fff",
+          borderRadius: 20,
+          overflow: "hidden",
+          boxShadow: "0 24px 60px rgba(0,0,0,0.25), 0 0 0 1px rgba(15,23,42,0.06)",
+        }}
+      >
+        <div
+          style={{
+            background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)",
+            padding: "20px 24px",
+            color: "#fff",
+          }}
+        >
+          <h2 id="remote-scan-title" style={{ margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: "0.02em" }}>
+            {title}
+          </h2>
+          <p style={{ margin: "8px 0 0", fontSize: 13, opacity: 0.9, lineHeight: 1.4 }}>
+            {allowMultiple
+              ? "Inquadra il QR, poi scansiona i tag. Ogni scansione apparirà sul PC."
+              : "Inquadra il QR con il telefono, poi avvicina il tag NFC."}
+          </p>
+        </div>
 
-        {loading && (
-          <div className="flex justify-center py-8">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-sky-600 border-t-transparent" />
-          </div>
-        )}
-
-        {error && (
-          <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
-
-        {code && !loading && (
-          <div className="flex flex-col items-center gap-4">
-            <div className="rounded-lg bg-white p-3 ring-2 ring-slate-200">
-              <QRCodeSVG value={scanUrl} size={180} level="M" />
+        <div style={{ padding: 24 }}>
+          {loading && (
+            <div style={{ display: "flex", justifyContent: "center", padding: "40px 0" }}>
+              <div
+                style={{
+                  width: 40,
+                  height: 40,
+                  border: "3px solid #e2e8f0",
+                  borderTopColor: "#0f172a",
+                  borderRadius: "50%",
+                  animation: "spin 0.8s linear infinite",
+                }}
+              />
             </div>
-            <div className="rounded-lg bg-slate-100 px-6 py-2 font-mono text-xl font-bold tracking-wider text-slate-800">
-              {code}
-            </div>
-            <p className="text-center text-xs text-slate-500">
-              Sessione valida 15 minuti. {allowMultiple && processedCount > 0 ? `${processedCount} tag ricevuti. ` : ""}In attesa...
-            </p>
-          </div>
-        )}
+          )}
 
-        <div className="mt-6 flex justify-end">
-          <button type="button" className="btn" onClick={onClose}>
-            Chiudi
-          </button>
+          {error && (
+            <div
+              style={{
+                marginBottom: 16,
+                padding: 12,
+                background: "rgba(239,68,68,0.08)",
+                border: "1px solid rgba(239,68,68,0.25)",
+                borderRadius: 12,
+                color: "#991b1b",
+                fontSize: 14,
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          {code && !loading && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 20 }}>
+              <div
+                style={{
+                  padding: 20,
+                  background: "linear-gradient(145deg, #f8fafc 0%, #f1f5f9 100%)",
+                  borderRadius: 16,
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.8), 0 4px 20px rgba(15,23,42,0.08)",
+                }}
+              >
+                <QRCodeSVG value={scanUrl} size={200} level="M" />
+              </div>
+              <div
+                style={{
+                  padding: "10px 20px",
+                  background: "#0f172a",
+                  color: "#fff",
+                  borderRadius: 10,
+                  fontFamily: "ui-monospace, monospace",
+                  fontSize: 16,
+                  fontWeight: 700,
+                  letterSpacing: "0.15em",
+                }}
+              >
+                {code}
+              </div>
+              <p style={{ margin: 0, fontSize: 12, color: "#64748b", textAlign: "center", lineHeight: 1.5 }}>
+                Sessione valida 15 minuti
+                {allowMultiple && processedCount > 0 && ` · ${processedCount} tag ricevuti`}
+                {" · "}In attesa...
+              </p>
+            </div>
+          )}
+
+          <div style={{ marginTop: 24, display: "flex", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              className="btn"
+              onClick={onClose}
+              style={{
+                padding: "10px 20px",
+                background: "#0f172a",
+                color: "#fff",
+                border: "none",
+                borderRadius: 10,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              Chiudi
+            </button>
+          </div>
         </div>
       </div>
     </div>

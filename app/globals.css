@@ -538,9 +538,17 @@ body:has(.appLogin) {
     display: flex;
   }
 
-  /* Desktop con sidebar collassabile: layout animato */
+  /* Desktop con sidebar collassabile: topbar e sidebar fixed per restare sempre unite durante lo scroll */
   .app.appWithSidebar {
     grid-template-columns: 1fr;
+    padding-top: var(--banner-height);
+  }
+  .app.appWithSidebar .topbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 10000;
   }
   .app.appWithSidebar .sidebar {
     position: fixed;
@@ -548,7 +556,7 @@ body:has(.appLogin) {
     top: var(--banner-height);
     bottom: 0;
     width: 260px;
-    z-index: 9998;
+    z-index: 9999;
     grid-column: unset;
     grid-row: unset;
     transition: transform 0.25s ease;
@@ -585,7 +593,7 @@ body:has(.appLogin) {
   width: 100%;
 }
 
-/* Topbar - stesso stile banner */
+/* Topbar - stesso stile banner, sticky per restare attaccata alla sidebar durante lo scroll */
 .topbar{
   background: var(--banner-bg);
   color: var(--sidebar-text);
@@ -596,7 +604,8 @@ body:has(.appLogin) {
   padding: 0 24px;
   min-height: var(--banner-height);
   box-shadow: none;
-  position: relative;
+  position: sticky;
+  top: 0;
   z-index: 60;
   grid-column: 1 / -1;
   grid-row: 1;

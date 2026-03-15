@@ -627,6 +627,28 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     if (!isAdmin) return;
     setSaving(true);
     setMsg(null);
+
+    const { data: openMovement, error: openMovementError } = await supabase
+      .from("equipment_movements")
+      .select("id")
+      .eq("equipment_id", row.id)
+      .eq("equipment_area", area)
+      .eq("status", "OPEN")
+      .limit(1)
+      .maybeSingle();
+
+    if (openMovementError) {
+      setSaving(false);
+      setMsg("Errore verifica movimenti aperti: " + openMovementError.message);
+      return;
+    }
+
+    if (openMovement && newStatus !== "ASSIGNED") {
+      setSaving(false);
+      setMsg("Non puoi cambiare manualmente questo stato: l'attrezzatura ha un movimento aperto.");
+      return;
+    }
+
     const payload = buildEquipmentStatusUpdate(newStatus, maintenanceNote);
     const { error } = await supabase.from("equipment_assets").update(payload).eq("id", row.id).eq("equipment_area", area);
     setSaving(false);

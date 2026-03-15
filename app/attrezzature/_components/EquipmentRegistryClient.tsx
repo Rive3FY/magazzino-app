@@ -3,6 +3,7 @@
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../../_lib/supabase/client";
+import { notifyEquipmentSync, subscribeEquipmentSync } from "../../_lib/equipmentSync";
 import { useAuth } from "../../_lib/hooks/useAuth";
 import { useIsAdmin } from "../../_lib/hooks/useIsAdmin";
 import { useToast } from "../../_lib/ToastContext";
@@ -274,10 +275,37 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     };
   }, [user, area, loadAssets]);
 
+  useEffect(() => {
+    if (!user) return;
+    return subscribeEquipmentSync(area, () => void loadAssets());
+  }, [user, area, loadAssets]);
+
   async function changeAssetStatus(row: EquipmentAssetRow, newStatus: EquipmentStatus, maintenanceNote?: string) {
     if (!isAdmin) return;
     setStatusChanging(true);
     setMsg(null);
+
+    const { data: openMovement, error: openMovementError } = await supabase
+      .from("equipment_movements")
+      .select("id")
+      .eq("equipment_id", row.id)
+      .eq("equipment_area", area)
+      .eq("status", "OPEN")
+      .limit(1)
+      .maybeSingle();
+
+    if (openMovementError) {
+      setStatusChanging(false);
+      setMsg("Errore verifica movimenti aperti: " + openMovementError.message);
+      return;
+    }
+
+    if (openMovement && newStatus !== "ASSIGNED") {
+      setStatusChanging(false);
+      setMsg("Non puoi cambiare manualmente questo stato: l'attrezzatura ha un movimento aperto.");
+      return;
+    }
+
     const payload = buildEquipmentStatusUpdate(newStatus, maintenanceNote);
     const { error } = await supabase.from("equipment_assets").update(payload).eq("id", row.id).eq("equipment_area", area);
     setStatusChanging(false);
@@ -286,6 +314,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
       return;
     }
     toast.success(`Stato aggiornato a ${EQUIPMENT_STATUS_LABELS[newStatus]}`);
+    notifyEquipmentSync(area, "registry-status-change");
     await loadAssets();
     setStatusModalOpen(false);
   }
@@ -419,6 +448,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
         if (error) throw error;
       }
       toast.success("Movimento eliminato");
+      notifyEquipmentSync(area, "registry-delete-movement");
       await loadAssets();
     } catch (error: unknown) {
       const err = error as { message?: string };

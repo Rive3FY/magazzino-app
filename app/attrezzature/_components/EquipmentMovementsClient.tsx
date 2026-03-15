@@ -4,6 +4,7 @@ import { BrowserMultiFormatReader } from "@zxing/browser";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../../_lib/supabase/client";
+import { notifyEquipmentSync, subscribeEquipmentSync } from "../../_lib/equipmentSync";
 import { useAuth } from "../../_lib/hooks/useAuth";
 import { useIsAdmin } from "../../_lib/hooks/useIsAdmin";
 import { useToast } from "../../_lib/ToastContext";
@@ -232,6 +233,11 @@ function getMovementResolution(row: EquipmentMovementRow) {
   return row.resolution_type ?? "RETURN";
 }
 
+function isOpenMovementConflictError(error: unknown) {
+  const message = describeError(error).toLowerCase();
+  return message.includes("gia aperto") || message.includes("già aperto") || message.includes("already has an open movement");
+}
+
 export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const searchParams = useSearchParams();
   const { user, loading: authLoading, approved } = useAuth();
@@ -242,6 +248,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
   const [assets, setAssets] = useState<EquipmentAssetRow[]>([]);
   const [history, setHistory] = useState<EquipmentMovementRow[]>([]);
+  const [openHistory, setOpenHistory] = useState<EquipmentMovementRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [cartBusy, setCartBusy] = useState(false);
@@ -350,9 +357,10 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     setLoading(true);
     setMsg(null);
 
-    const [assetsRes, historyRes] = await Promise.all([
+    const [assetsRes, historyRes, openRes] = await Promise.all([
       supabase.from("equipment_assets").select("*").eq("equipment_area", area).order("serial_number", { ascending: true }),
       supabase.from("equipment_movements").select("*").eq("equipment_area", area).order("created_at", { ascending: false }).limit(300),
+      supabase.from("equipment_movements").select("*").eq("equipment_area", area).eq("status", "OPEN").order("created_at", { ascending: false }),
     ]);
 
     if (assetsRes.error) {
@@ -369,6 +377,14 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       setMsg((prev) => prev ?? "Errore caricamento storico movimenti.");
     } else {
       setHistory((historyRes.data ?? []) as EquipmentMovementRow[]);
+    }
+
+    if (openRes.error) {
+      console.error(openRes.error);
+      setOpenHistory([]);
+      setMsg((prev) => prev ?? "Errore caricamento movimenti aperti.");
+    } else {
+      setOpenHistory((openRes.data ?? []) as EquipmentMovementRow[]);
     }
 
     setLoading(false);
@@ -400,6 +416,11 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     return () => {
       supabase.removeChannel(channel);
     };
+  }, [user, area, loadData]);
+
+  useEffect(() => {
+    if (!user) return;
+    return subscribeEquipmentSync(area, () => void loadData());
   }, [user, area, loadData]);
 
   useEffect(() => {
@@ -493,16 +514,21 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     return assetsByWarehouse.filter((a) => (a.category ?? "").trim() === categorySelectModalCategory);
   }, [assetsByWarehouse, categorySelectModalCategory, warehouseFilter]);
 
+  const openMovementAssetIds = useMemo(
+    () => new Set(openHistory.map((row) => row.equipment_id)),
+    [openHistory]
+  );
+
   function canAddAssetToCart(asset: EquipmentAssetRow): boolean {
     if (asset.status !== "AVAILABLE") return false;
-    if (history.some((row) => row.equipment_id === asset.id && getMovementStatus(row) === "OPEN")) return false;
+    if (openMovementAssetIds.has(asset.id)) return false;
     if (cart.includes(asset.id)) return false;
     return true;
   }
 
-  const uniqueHistoryRows = useMemo(() => {
+  const uniqueOpenRows = useMemo(() => {
     const seen = new Set<string>();
-    return history.filter((row) => {
+    return openHistory.filter((row) => {
       const gid = row.movement_group_id;
       if (gid) {
         if (seen.has(gid)) return false;
@@ -510,22 +536,22 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       }
       return true;
     });
-  }, [history]);
+  }, [openHistory]);
 
   const openMovements = useMemo(
-    () => uniqueHistoryRows.filter((row) => getMovementStatus(row) === "OPEN"),
-    [uniqueHistoryRows]
+    () => uniqueOpenRows.filter((row) => getMovementStatus(row) === "OPEN"),
+    [uniqueOpenRows]
   );
 
   const selectedAssetHasOpenMovement = useMemo(() => {
     if (!selectedAsset) return false;
-    return history.some((row) => row.equipment_id === selectedAsset.id && getMovementStatus(row) === "OPEN");
-  }, [history, selectedAsset]);
+    return openMovementAssetIds.has(selectedAsset.id);
+  }, [openMovementAssetIds, selectedAsset]);
 
   const scanResultHasOpenMovement = useMemo(() => {
     if (!scanResult) return false;
-    return history.some((row) => row.equipment_id === scanResult.asset.id && getMovementStatus(row) === "OPEN");
-  }, [history, scanResult]);
+    return openMovementAssetIds.has(scanResult.asset.id);
+  }, [openMovementAssetIds, scanResult]);
 
   const scanResultAlreadyInCart = useMemo(() => {
     if (!scanResult) return false;
@@ -855,9 +881,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       return;
     }
 
-    const alreadyOpen = cartItems.filter((item) =>
-      history.some((row) => row.equipment_id === item.id && getMovementStatus(row) === "OPEN")
-    );
+    const alreadyOpen = cartItems.filter((item) => openMovementAssetIds.has(item.id));
     if (alreadyOpen.length > 0) {
       setMsg("Alcune attrezzature nel carrello hanno già un movimento aperto.");
       return;
@@ -900,11 +924,16 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
       resetPickupFields();
       toast.success("Prelievo multiplo registrato");
+      notifyEquipmentSync(area, "movements-cart-pickup");
       await loadData();
     } catch (error: unknown) {
       console.error("equipment cart close error:", error);
-      const message = describeError(error);
-      setMsg("Registrazione carrello non riuscita: " + message);
+      if (isOpenMovementConflictError(error)) {
+        setMsg("Registrazione carrello non riuscita: una o più attrezzature hanno già un movimento aperto.");
+      } else {
+        const message = describeError(error);
+        setMsg("Registrazione carrello non riuscita: " + message);
+      }
     } finally {
       setCartBusy(false);
     }
@@ -966,13 +995,18 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     if (error) {
       const errMsg = describeError(error);
       console.error("equipment movement create error:", errMsg, error);
-      setMsg("Registrazione movimento non riuscita: " + errMsg);
+      if (isOpenMovementConflictError(error)) {
+        setMsg("Registrazione movimento non riuscita: questa attrezzatura ha già un movimento aperto.");
+      } else {
+        setMsg("Registrazione movimento non riuscita: " + errMsg);
+      }
       setSaving(false);
       return;
     }
 
     toast.success("Prelievo registrato");
     resetPickupFields();
+    notifyEquipmentSync(area, "movements-single-pickup");
     await loadData();
     setSaving(false);
   }
@@ -1010,6 +1044,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         if (error) throw error;
       }
       toast.success("Movimento eliminato");
+      notifyEquipmentSync(area, "movements-delete");
       await loadData();
     } catch (error: unknown) {
       const message = describeError(error);
@@ -1107,6 +1142,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       }
 
       toast.success(targetRows.length > 1 ? "Gruppo chiuso" : "Movimento chiuso");
+      notifyEquipmentSync(area, "movements-close");
       await loadData();
       closeModal();
     } catch (error) {
@@ -1589,7 +1625,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                       <td><span style={equipmentMovementPillStyle("OUT")}>{EQUIPMENT_MOVEMENT_LABELS.OUT}</span></td>
                       <td style={{ fontWeight: 900 }}>
                         {row.movement_group_id
-                          ? `Prelievo multiplo (${history.filter((m) => m.movement_group_id === row.movement_group_id).length} attrezzature)`
+                          ? `Prelievo multiplo (${openHistory.filter((m) => m.movement_group_id === row.movement_group_id).length} attrezzature)`
                           : asset
                             ? `${asset.serial_number || asset.asset_code} - ${asset.name}`
                             : row.equipment_id}

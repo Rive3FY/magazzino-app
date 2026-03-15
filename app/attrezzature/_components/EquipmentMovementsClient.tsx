@@ -384,6 +384,26 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
   useEffect(() => {
     if (!user) return;
+    const channel = supabase
+      .channel(`equipment-movements-${area}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "equipment_movements", filter: `equipment_area=eq.${area}` },
+        () => void loadData()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "equipment_assets", filter: `equipment_area=eq.${area}` },
+        () => void loadData()
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, area, loadData]);
+
+  useEffect(() => {
+    if (!user) return;
     const timer = window.setTimeout(() => {
       void loadCurrentProfile();
     }, 0);

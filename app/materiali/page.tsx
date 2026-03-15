@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 
@@ -304,38 +304,40 @@ export default function Home() {
     setActiveIndex(0);
   }
 
-  useEffect(() => {
-    let alive = true;
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    const { count: cItems, error: eItems } = await supabase
+      .from("items")
+      .select("code", { count: "exact", head: true });
 
-    (async () => {
-      setLoading(true);
+    const { data: movs, error: eMovs } = await supabase
+      .from("movements")
+      .select("id,created_at,type,code,qty,note,created_by_name,warehouse")
+      .order("created_at", { ascending: false })
+      .limit(100);
 
-      const { count: cItems, error: eItems } = await supabase
-        .from("items")
-        .select("code", { count: "exact", head: true });
+    if (eItems) console.error(eItems);
+    if (eMovs) console.error(eMovs);
 
-      const { data: movs, error: eMovs } = await supabase
-        .from("movements")
-        .select("id,created_at,type,code,qty,note,created_by_name,warehouse")
-        .order("created_at", { ascending: false })
-        .limit(100);
-
-      if (!alive) return;
-
-      if (eItems) console.error(eItems);
-      if (eMovs) console.error(eMovs);
-
-      setItemsCount(cItems ?? 0);
-      setMovements((movs ?? []) as Movement[]);
-      setLoading(false);
-    })();
-
-    return () => {
-      alive = false;
-      stopScan();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setItemsCount(cItems ?? 0);
+    setMovements((movs ?? []) as Movement[]);
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    void loadData();
+    return () => stopScan();
+  }, [loadData]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("materiali-movements")
+      .on("postgres_changes", { event: "*", schema: "public", table: "movements" }, () => void loadData())
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadData]);
 
   useEffect(() => {
     setIsNfcSupported(typeof (window as any).NDEFReader !== "undefined");

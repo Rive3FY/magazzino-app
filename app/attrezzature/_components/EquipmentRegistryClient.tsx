@@ -254,6 +254,26 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     return () => window.clearTimeout(timer);
   }, [user, loadAssets]);
 
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel(`equipment-registry-${area}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "equipment_movements", filter: `equipment_area=eq.${area}` },
+        () => void loadAssets()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "equipment_assets", filter: `equipment_area=eq.${area}` },
+        () => void loadAssets()
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, area, loadAssets]);
+
   async function changeAssetStatus(row: EquipmentAssetRow, newStatus: EquipmentStatus, maintenanceNote?: string) {
     if (!isAdmin) return;
     setStatusChanging(true);

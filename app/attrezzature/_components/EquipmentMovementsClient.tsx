@@ -72,6 +72,9 @@ type ProfileRow = {
 
 const supabase = createClient();
 
+/** Filtri (Categoria, Attrezzatura, Selezione rapida): nascosti per ora. Impostare a true per mostrare. */
+const SHOW_EQUIPMENT_FILTERS = false;
+
 const emptyForm: MovementFormState = {
   equipment_id: "",
   type: "OUT",
@@ -285,6 +288,10 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const [closeResolutionType, setCloseResolutionType] = useState<EquipmentResolutionType>("RETURN");
   const [closeNote, setCloseNote] = useState("");
   const [groupEditState, setGroupEditState] = useState<GroupEditState>({});
+  /** Flusso guidato uscita: 1 = Magazzino, 2 = Attrezzatura, 3 = Dettagli e conferma */
+  const [outboundStep, setOutboundStep] = useState<1 | 2 | 3>(1);
+  /** Wizard prelievo in popup: quando true il flusso è dentro un modal */
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
@@ -923,6 +930,8 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       }
 
       resetPickupFields();
+      setOutboundStep(2);
+      setWizardOpen(false);
       toast.success("Prelievo multiplo registrato");
       notifyEquipmentSync(area, "movements-cart-pickup");
       await loadData();
@@ -1006,6 +1015,8 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
     toast.success("Prelievo registrato");
     resetPickupFields();
+    setOutboundStep(2);
+    setWizardOpen(false);
     notifyEquipmentSync(area, "movements-single-pickup");
     await loadData();
     setSaving(false);
@@ -1188,43 +1199,156 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           <div className="equipmentAreaPill">Area: {areaLabel}</div>
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12, alignItems: "flex-end" }}>
-          <div className="mobileInputFull" style={{ minWidth: 240 }}>
-            <label className="label" htmlFor={`move-warehouse-${area}`}>Magazzino prelievo *</label>
-            <select
-              id={`move-warehouse-${area}`}
-              className="input"
-              value={warehouseFilter}
-              onChange={(e) => {
-                const value = e.target.value;
-                setWarehouseFilter(value);
-                setForm((prev) => ({ ...prev, equipment_id: "" }));
-                setAssetCategoryFilter("");
-                setAssetSearch("");
-                setCart([]);
-                setCartOpen(false);
+        {!wizardOpen && (
+          <div style={{ marginTop: 12 }}>
+            <button
+              type="button"
+              className="btn btnPrimary"
+              onClick={() => {
+                setWizardOpen(true);
+                setOutboundStep(1);
                 setMsg(null);
               }}
+              style={{ padding: "12px 24px", fontSize: 15, fontWeight: 800 }}
             >
-              <option value="">— Seleziona magazzino —</option>
-              {warehouses.map((w) => (
-                <option key={w} value={w}>{w}</option>
-              ))}
-            </select>
+              Avvia prelievo
+            </button>
           </div>
-          {!warehouseSelected && (
-            <div style={{ padding: 10, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 12, fontWeight: 700, color: "#b45309" }}>
-              Seleziona il magazzino prima di continuare.
-            </div>
-          )}
-          {warehouses.length === 0 && !loading && (
-            <div style={{ fontSize: 13, color: "#64748b" }}>
-              Nessun magazzino configurato. Assegna un magazzino alle attrezzature in Tutte le attrezzature.
-            </div>
-          )}
-        </div>
+        )}
+      </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12, opacity: warehouseSelected ? 1 : 0.5, pointerEvents: warehouseSelected ? "auto" : "none" }}>
+      {/* Popup wizard prelievo */}
+      {wizardOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="wizard-title"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            zIndex: 10040,
+          }}
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setWizardOpen(false);
+          }}
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              width: "min(560px, 100%)",
+              maxHeight: "90vh",
+              overflow: "auto",
+              background: "#fff",
+              borderRadius: 16,
+              border: "1px solid rgba(15,23,42,0.12)",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.25)",
+              padding: 20,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
+              <h2 id="wizard-title" style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>
+                Prelievo · Passo {outboundStep}/3
+              </h2>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setWizardOpen(false)}
+                aria-label="Chiudi"
+                style={{ padding: "6px 10px" }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Stepper */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+                marginBottom: 20,
+                padding: "10px 12px",
+                background: "rgba(15,23,42,0.04)",
+                borderRadius: 12,
+                border: "1px solid rgba(15,23,42,0.08)",
+              }}
+            >
+              {[
+                { step: 1 as const, label: "1. Magazzino" },
+                { step: 2 as const, label: "2. Attrezzatura" },
+                { step: 3 as const, label: "3. Dettagli" },
+              ].map(({ step, label }) => (
+                <span
+                  key={step}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    fontSize: 13,
+                    fontWeight: 800,
+                    background: outboundStep === step ? "#0f172a" : "transparent",
+                    color: outboundStep === step ? "#fff" : outboundStep > step ? "#64748b" : "#94a3b8",
+                  }}
+                >
+                  {label}
+                </span>
+              ))}
+            </div>
+
+            {/* Step 1: Magazzino */}
+            {(outboundStep === 1 || !warehouseSelected) && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12, alignItems: "flex-end" }}>
+            <div className="mobileInputFull" style={{ minWidth: 240 }}>
+              <label className="label" htmlFor={`move-warehouse-${area}`}>Magazzino prelievo *</label>
+              <select
+                id={`move-warehouse-${area}`}
+                className="input"
+                value={warehouseFilter}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setWarehouseFilter(value);
+                  setForm((prev) => ({ ...prev, equipment_id: "" }));
+                  setAssetCategoryFilter("");
+                  setAssetSearch("");
+                  setCart([]);
+                  setCartOpen(false);
+                  setMsg(null);
+                  setOutboundStep(1);
+                }}
+              >
+                <option value="">— Seleziona magazzino —</option>
+                {warehouses.map((w) => (
+                  <option key={w} value={w}>{w}</option>
+                ))}
+              </select>
+            </div>
+            {!warehouseSelected && (
+              <div style={{ padding: 10, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 12, fontWeight: 700, color: "#b45309" }}>
+                Seleziona il magazzino prima di continuare.
+              </div>
+            )}
+            {warehouses.length === 0 && !loading && (
+              <div style={{ fontSize: 13, color: "#64748b" }}>
+                Nessun magazzino configurato. Assegna un magazzino alle attrezzature in Tutte le attrezzature.
+              </div>
+            )}
+            {warehouseSelected && (
+              <button type="button" className="btn btnPrimary" onClick={() => setOutboundStep(2)}>
+                Avanti →
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Step 2: Modalità e attrezzatura */}
+        {outboundStep >= 2 && warehouseSelected && (
+          <>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12, alignItems: "flex-end" }}>
           <div className="mobileInputFull" style={{ minWidth: 240 }}>
             <label className="label" htmlFor={`move-mode-${area}`}>Modalità uscita</label>
             <select
@@ -1260,216 +1384,248 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         </div>
 
         <div className="equipmentFilterGrid mobileGrid1" style={{ opacity: warehouseSelected ? 1 : 0.5, pointerEvents: warehouseSelected ? "auto" : "none" }}>
-          <div style={{ minWidth: 0 }}>
-            <label className="label" htmlFor={`move-category-${area}`}>Categoria</label>
-            <select
-              id={`move-category-${area}`}
-              className="input"
-              value={assetCategoryFilter}
-              onChange={(e) => setAssetCategoryFilter(e.target.value)}
-              disabled={!warehouseSelected}
-            >
-              <option value="">Tutte</option>
-              {assetCategories.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-          </div>
-          <div ref={assetBoxRef} style={{ minWidth: 0, position: "relative" }}>
-            <label className="label" htmlFor={`move-search-${area}`}>Attrezzatura</label>
-            <ClearableInput
-              id={`move-search-${area}`}
-              value={assetSearch}
-              disabled={!warehouseSelected}
-              onChange={(value) => {
-                setAssetSearch(value);
-                setForm((prev) => ({ ...prev, equipment_id: "" }));
-                setAssetOpen(true);
-                setMsg(null);
-              }}
-              onFocus={() => setAssetOpen(true)}
-              onKeyDown={(e) => {
-                if (!assetOpen) return;
-                if (e.key === "ArrowDown") {
-                  e.preventDefault();
-                  setAssetActiveIndex((i) => Math.min(i + 1, assetMatches.length - 1));
-                } else if (e.key === "ArrowUp") {
-                  e.preventDefault();
-                  setAssetActiveIndex((i) => Math.max(i - 1, 0));
-                } else if (e.key === "Enter") {
-                  e.preventDefault();
-                  if (assetActive) pickAsset(assetActive);
-                } else if (e.key === "Escape") {
-                  setAssetOpen(false);
-                }
-              }}
-            />
-            {assetOpen && assetSearch.trim() && (
-              <div
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  top: "100%",
-                  marginTop: 6,
-                  background: "#fff",
-                  border: "1px solid rgba(15,23,42,0.12)",
-                  borderRadius: 12,
-                  boxShadow: "0 16px 40px rgba(0,0,0,0.12)",
-                  overflow: "hidden",
-                  zIndex: 50,
-                  maxHeight: 240,
-                  overflowY: "auto",
-                }}
-              >
-                {assetMatches.length === 0 ? (
-                  <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
-                ) : (
-                  assetMatches.map((asset, idx) => {
-                    const ledColor = asset.status === "AVAILABLE" ? "#22c55e" : "#ef4444";
-                    return (
-                    <div
-                      key={asset.id}
-                      onMouseEnter={() => setAssetActiveIndex(idx)}
-                      onMouseDown={(ev) => {
-                        ev.preventDefault();
-                        pickAsset(asset);
-                      }}
-                      style={{
-                        padding: "10px 12px",
-                        cursor: "pointer",
-                        background: idx === assetActiveIndex ? "#eef2ff" : "white",
-                        borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: 10,
-                      }}
-                    >
-                      <span
-                        title={EQUIPMENT_STATUS_LABELS[asset.status]}
-                        style={{
-                          width: 10,
-                          height: 10,
-                          borderRadius: "50%",
-                          backgroundColor: ledColor,
-                          boxShadow: `0 0 6px ${ledColor}`,
-                          flexShrink: 0,
-                          marginTop: 5,
-                        }}
-                        aria-hidden
-                      />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 900, color: "#0f172a" }}>{asset.serial_number || asset.asset_code}</div>
-                        <div style={{ fontSize: 12, color: "#334155" }}>{asset.name}</div>
-                        {(asset.shelf || asset.place) && (
-                          <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>Scaffale: {[asset.shelf, asset.place].filter(Boolean).join(" · ") || "—"}</div>
-                        )}
-                        {asset.notes && (
-                          <div style={{ fontSize: 11, color: "#64748b", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.notes}</div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                  })
+          {SHOW_EQUIPMENT_FILTERS && (
+            <>
+              <div style={{ minWidth: 0 }}>
+                <label className="label" htmlFor={`move-category-${area}`}>Categoria</label>
+                <select
+                  id={`move-category-${area}`}
+                  className="input"
+                  value={assetCategoryFilter}
+                  onChange={(e) => setAssetCategoryFilter(e.target.value)}
+                  disabled={!warehouseSelected}
+                >
+                  <option value="">Tutte</option>
+                  {assetCategories.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+              <div ref={assetBoxRef} style={{ minWidth: 0, position: "relative" }}>
+                <label className="label" htmlFor={`move-search-${area}`}>Attrezzatura</label>
+                <ClearableInput
+                  id={`move-search-${area}`}
+                  value={assetSearch}
+                  disabled={!warehouseSelected}
+                  onChange={(value) => {
+                    setAssetSearch(value);
+                    setForm((prev) => ({ ...prev, equipment_id: "" }));
+                    setAssetOpen(true);
+                    setMsg(null);
+                  }}
+                  onFocus={() => setAssetOpen(true)}
+                  onKeyDown={(e) => {
+                    if (!assetOpen) return;
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      setAssetActiveIndex((i) => Math.min(i + 1, assetMatches.length - 1));
+                    } else if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      setAssetActiveIndex((i) => Math.max(i - 1, 0));
+                    } else if (e.key === "Enter") {
+                      e.preventDefault();
+                      if (assetActive) pickAsset(assetActive);
+                    } else if (e.key === "Escape") {
+                      setAssetOpen(false);
+                    }
+                  }}
+                />
+                {assetOpen && assetSearch.trim() && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      top: "100%",
+                      marginTop: 6,
+                      background: "#fff",
+                      border: "1px solid rgba(15,23,42,0.12)",
+                      borderRadius: 12,
+                      boxShadow: "0 16px 40px rgba(0,0,0,0.12)",
+                      overflow: "hidden",
+                      zIndex: 50,
+                      maxHeight: 240,
+                      overflowY: "auto",
+                    }}
+                  >
+                    {assetMatches.length === 0 ? (
+                      <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
+                    ) : (
+                      assetMatches.map((asset, idx) => {
+                        const ledColor = asset.status === "AVAILABLE" ? "#22c55e" : "#ef4444";
+                        return (
+                        <div
+                          key={asset.id}
+                          onMouseEnter={() => setAssetActiveIndex(idx)}
+                          onMouseDown={(ev) => {
+                            ev.preventDefault();
+                            pickAsset(asset);
+                          }}
+                          style={{
+                            padding: "10px 12px",
+                            cursor: "pointer",
+                            background: idx === assetActiveIndex ? "#eef2ff" : "white",
+                            borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: 10,
+                          }}
+                        >
+                          <span
+                            title={EQUIPMENT_STATUS_LABELS[asset.status]}
+                            style={{
+                              width: 10,
+                              height: 10,
+                              borderRadius: "50%",
+                              backgroundColor: ledColor,
+                              boxShadow: `0 0 6px ${ledColor}`,
+                              flexShrink: 0,
+                              marginTop: 5,
+                            }}
+                            aria-hidden
+                          />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 900, color: "#0f172a" }}>{asset.serial_number || asset.asset_code}</div>
+                            <div style={{ fontSize: 12, color: "#334155" }}>{asset.name}</div>
+                            {(asset.shelf || asset.place) && (
+                              <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>Scaffale: {[asset.shelf, asset.place].filter(Boolean).join(" · ") || "—"}</div>
+                            )}
+                            {asset.notes && (
+                              <div style={{ fontSize: 11, color: "#64748b", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.notes}</div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                      })
+                    )}
+                  </div>
                 )}
               </div>
-            )}
-          </div>
+            </>
+          )}
 
-          <div style={{ minWidth: 0 }}>
-            <label className="label" htmlFor={`move-asset-${area}`}>Selezione rapida</label>
-            <select
-              id={`move-asset-${area}`}
-              className="input"
-              value={form.equipment_id}
-              disabled={!warehouseSelected}
-              onChange={(e) => {
-                const value = e.target.value;
-                const asset = assetMap.get(value) ?? null;
-                setForm((prev) => ({ ...prev, equipment_id: value }));
-                if (asset) setAssetSearch(`${asset.serial_number || asset.asset_code} - ${asset.name}`);
-              }}
-            >
-              <option value="">Seleziona attrezzatura</option>
-              {filteredAssets.map((asset) => {
-                const led = asset.status === "AVAILABLE" ? "🟢" : "🔴";
-                const shelfInfo = [asset.shelf, asset.place].filter(Boolean).join(" · ");
-                return (
-                <option key={asset.id} value={asset.id}>
-                  {led} {(asset.serial_number || asset.asset_code)} - {asset.name}
-                  {shelfInfo ? ` · Scaffale: ${shelfInfo}` : ""}
-                  {asset.notes ? ` · ${asset.notes}` : ""}
-                </option>
-              );
-              })}
-            </select>
-          </div>
-
-          <div style={{ minWidth: 0 }}>
-            <label className="label" htmlFor={`move-note-${area}`}>Note</label>
-            <ClearableInput
-              id={`move-note-${area}`}
-              value={scanMode === "CART" ? cartNote : form.note}
-              disabled={!warehouseSelected}
-              onChange={(value) => {
-                if (scanMode === "CART") setCartNote(value);
-                else setForm((prev) => ({ ...prev, note: value }));
-              }}
-            />
-          </div>
-
-          <div style={{ minWidth: 0 }}>
-            <label className="label" htmlFor={`move-destination-${area}`}>Destinazione *</label>
-            <ClearableInput
-              id={`move-destination-${area}`}
-              value={scanMode === "CART" ? cartDestination : form.destination}
-              disabled={!warehouseSelected}
-              onChange={(value) => {
-                if (scanMode === "CART") setCartDestination(value);
-                else setForm((prev) => ({ ...prev, destination: value }));
-              }}
-            />
-          </div>
-
-          {scanMode === "CART" && (
-            <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 10 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: warehouseSelected ? "pointer" : "not-allowed", margin: 0 }}>
-                <input
-                  type="checkbox"
-                  checked={cartInterventionPlanEnabled}
-                  disabled={!warehouseSelected}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setCartInterventionPlanEnabled(checked);
-                    if (!checked) setCartInterventionPlanNumber("");
-                  }}
-                  style={{ width: 18, height: 18, accentColor: "#0f172a" }}
-                  aria-label="Inserisci piano di intervento"
-                />
-                <span className="label" style={{ margin: 0 }}>Piano d&apos;intervento</span>
-              </label>
-              <ClearableInput
-                id={`move-intervention-plan-${area}`}
-                value={cartInterventionPlanNumber}
-                onChange={setCartInterventionPlanNumber}
-                disabled={!cartInterventionPlanEnabled || !warehouseSelected}
-                style={{ flex: 1, minWidth: 0, opacity: cartInterventionPlanEnabled ? 1 : 0.6 }}
-              />
+          {SHOW_EQUIPMENT_FILTERS && (
+            <div style={{ minWidth: 0 }}>
+              <label className="label" htmlFor={`move-asset-${area}`}>Selezione rapida</label>
+              <select
+                id={`move-asset-${area}`}
+                className="input"
+                value={form.equipment_id}
+                disabled={!warehouseSelected}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  const asset = assetMap.get(value) ?? null;
+                  setForm((prev) => ({ ...prev, equipment_id: value }));
+                  if (asset) setAssetSearch(`${asset.serial_number || asset.asset_code} - ${asset.name}`);
+                }}
+              >
+                <option value="">Seleziona attrezzatura</option>
+                {filteredAssets.map((asset) => {
+                  const led = asset.status === "AVAILABLE" ? "🟢" : "🔴";
+                  const shelfInfo = [asset.shelf, asset.place].filter(Boolean).join(" · ");
+                  return (
+                  <option key={asset.id} value={asset.id}>
+                    {led} {(asset.serial_number || asset.asset_code)} - {asset.name}
+                    {shelfInfo ? ` · Scaffale: ${shelfInfo}` : ""}
+                    {asset.notes ? ` · ${asset.notes}` : ""}
+                  </option>
+                );
+                })}
+              </select>
             </div>
           )}
 
-          <div style={{ minWidth: 0, display: "flex", alignItems: "end" }}>
-            {scanMode === "CART" ? (
-              <button className="btn btnPrimary" onClick={addSelectedToCart} disabled={!warehouseSelected || !selectedAsset} type="button">
-                Aggiungi al carrello
-              </button>
-            ) : (
-              <button className="btn btnPrimary" onClick={saveMovement} disabled={!warehouseSelected || saving || !form.equipment_id} type="button">
-                {saving ? "Salvataggio..." : "Conferma prelievo"}
-              </button>
-            )}
-          </div>
+          {outboundStep === 3 && (
+            <>
+              <div style={{ minWidth: 0 }}>
+                <label className="label" htmlFor={`move-note-${area}`}>Note</label>
+                <ClearableInput
+                  id={`move-note-${area}`}
+                  value={scanMode === "CART" ? cartNote : form.note}
+                  disabled={!warehouseSelected}
+                  onChange={(value) => {
+                    if (scanMode === "CART") setCartNote(value);
+                    else setForm((prev) => ({ ...prev, note: value }));
+                  }}
+                />
+              </div>
+
+              <div style={{ minWidth: 0 }}>
+                <label className="label" htmlFor={`move-destination-${area}`}>Destinazione *</label>
+                <ClearableInput
+                  id={`move-destination-${area}`}
+                  value={scanMode === "CART" ? cartDestination : form.destination}
+                  disabled={!warehouseSelected}
+                  onChange={(value) => {
+                    if (scanMode === "CART") setCartDestination(value);
+                    else setForm((prev) => ({ ...prev, destination: value }));
+                  }}
+                />
+              </div>
+
+              {scanMode === "CART" && (
+                <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 10 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: warehouseSelected ? "pointer" : "not-allowed", margin: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={cartInterventionPlanEnabled}
+                      disabled={!warehouseSelected}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setCartInterventionPlanEnabled(checked);
+                        if (!checked) setCartInterventionPlanNumber("");
+                      }}
+                      style={{ width: 18, height: 18, accentColor: "#0f172a" }}
+                      aria-label="Inserisci piano di intervento"
+                    />
+                    <span className="label" style={{ margin: 0 }}>Piano d&apos;intervento</span>
+                  </label>
+                  <ClearableInput
+                    id={`move-intervention-plan-${area}`}
+                    value={cartInterventionPlanNumber}
+                    onChange={setCartInterventionPlanNumber}
+                    disabled={!cartInterventionPlanEnabled || !warehouseSelected}
+                    style={{ flex: 1, minWidth: 0, opacity: cartInterventionPlanEnabled ? 1 : 0.6 }}
+                  />
+                </div>
+              )}
+
+              <div style={{ minWidth: 0, display: "flex", alignItems: "end", gap: 8 }}>
+                <button type="button" className="btn" onClick={() => setOutboundStep(2)}>
+                  ← Indietro
+                </button>
+                {scanMode === "CART" ? (
+                  <button className="btn btnPrimary" onClick={addSelectedToCart} disabled={!warehouseSelected || !selectedAsset} type="button">
+                    Aggiungi al carrello
+                  </button>
+                ) : (
+                  <button className="btn btnPrimary" onClick={saveMovement} disabled={!warehouseSelected || saving || !form.equipment_id} type="button">
+                    {saving ? "Salvataggio..." : "Conferma prelievo"}
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </div>
+
+        {/* Step 2: pulsanti Avanti / Indietro (dettagli in step 3) */}
+        {outboundStep === 2 && warehouseSelected && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12, alignItems: "center" }}>
+            <button type="button" className="btn" onClick={() => setOutboundStep(1)}>
+              ← Indietro
+            </button>
+            <button
+              type="button"
+              className="btn btnPrimary"
+              onClick={() => setOutboundStep(3)}
+              disabled={
+                scanMode === "NORMAL" ? !form.equipment_id : cart.length === 0
+              }
+            >
+              Avanti → Dettagli e conferma
+            </button>
+          </div>
+        )}
 
         {selectedAsset && (
           <div className="equipmentInfoGrid" style={{ marginTop: 12 }}>
@@ -1504,8 +1660,10 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           </div>
         )}
 
-        {msg && <div style={{ marginTop: 12, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
-      </div>
+            {msg && <div style={{ marginTop: 12, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
+          </div>
+        </div>
+      )}
 
       {scanMode === "CART" && (cartOpen || cart.length > 0) && (
         <div className="card" style={{ padding: 12, marginTop: 12 }}>

@@ -16,6 +16,9 @@ import type { CartRow, QuickMaterialInfo, DbItem, MovementRow, ReferentRow, Exce
 
 const PAGE_LIMIT = 300;
 
+/** Filtri storico movimenti: nascosti per ora. Impostare a true per mostrare di nuovo. */
+const SHOW_HISTORY_FILTERS = false;
+
 function sameUser(a: string | null | undefined, b: string | null | undefined) {
   return !!a && !!b && a === b;
 }
@@ -311,6 +314,11 @@ export default function MovimentiPage() {
     name: string;
     items: { warehouse: "PRM" | "REALE"; shelf: string; place?: string | null }[];
   } | null>(null);
+
+  /** Flusso guidato uscita materiali: 1 = Materiale, 2 = Dettagli e conferma (solo quando type === "OUT") */
+  const [outboundStepMat, setOutboundStepMat] = useState<1 | 2>(1);
+  /** Wizard prelievo materiali in popup */
+  const [wizardMatOpen, setWizardMatOpen] = useState(false);
 
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyCode, setHistoryCode] = useState<string | null>(null);
@@ -1173,6 +1181,8 @@ async function confirmCartPickup() {
     setCart([]);
     setCartOpen(false);
     setScanMode("NORMAL");
+    setOutboundStepMat(1);
+    setWizardMatOpen(false);
     setMsg("Prelievo multiplo salvato ✅");
     toast.success("Prelievo multiplo salvato");
     await loadHistory();
@@ -1373,6 +1383,8 @@ async function confirmCartPickup() {
 
         setQty("");
         setNote("");
+        setOutboundStepMat(1);
+        setWizardMatOpen(false);
         setMsg(`Prelievo misto salvato ✅ (PRM: ${fromPRM}, REALE: ${fromREALE})`);
         toast.success("Prelievo misto salvato");
         const shelfItems: { warehouse: "PRM" | "REALE"; shelf: string; place?: string | null }[] = [];
@@ -1463,6 +1475,10 @@ async function confirmCartPickup() {
 
     setQty("");
     setNote("");
+    if (type === "OUT") {
+      setOutboundStepMat(1);
+      setWizardMatOpen(false);
+    }
     setMsg(
       excelLiveOk
         ? "Movimento salvato ✅"
@@ -2276,103 +2292,105 @@ async function confirmCartPickup() {
         <div className="pageBarTitle">Magazzino - Movimenti</div>
       </div>
 
-      <div className="filtersRow" style={{ padding: 12 }}>
-        <div
-          className="mobileGrid1"
-          style={{
-            display: "grid",
-            gridTemplateColumns: "2fr 2fr 1.2fr 1.2fr 2.6fr auto auto",
-            gap: 10,
-            alignItems: "end",
-          }}
-        >
-          <div className="filterDateWrap">
-            <label className="label" htmlFor="fFrom">
-              Data da
-            </label>
-            <input id="fFrom" name="fFrom" className="input mobileInputFull" type="date" value={fFrom} onChange={(e) => setFFrom(e.target.value)} />
-          </div>
-
-          <div className="filterDateWrap">
-            <label className="label" htmlFor="fTo">
-              Data a
-            </label>
-            <input id="fTo" name="fTo" className="input mobileInputFull" type="date" value={fTo} onChange={(e) => setFTo(e.target.value)} />
-          </div>
-
-          <div>
-            <label className="label" htmlFor="fType">
-              Tipo
-            </label>
-            <select id="fType" name="fType" className="input" value={fType} onChange={(e) => setFType(e.target.value as any)}>
-              <option value="ALL">Tutti</option>
-              <option value="IN">Entrata</option>
-              <option value="OUT">Uscita</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="label" htmlFor="fWh">
-              Magazzino
-            </label>
-            <select id="fWh" name="fWh" className="input" value={fWarehouse} onChange={(e) => setFWarehouse(e.target.value as any)}>
-              <option value="ALL">Tutti</option>
-              <option value="PRM">PRM</option>
-              <option value="REALE">REALE</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="label" htmlFor="fMaterial">
-              Materiale
-            </label>
-            <input
-              id="fMaterial"
-              name="fMaterial"
-              className="input"
-              value={fMaterial}
-              onChange={(e) => setFMaterial(e.target.value)}
-              placeholder="Cerca per codice o descrizione..."
-            />
-          </div>
-
-          <button
-            className="btn"
-            onClick={() => {
-              setFFrom("");
-              setFTo("");
-              setFType("ALL");
-              setFWarehouse("ALL");
-              setFMaterial("");
-              setTimeout(() => loadHistory(true), 0);
+      {SHOW_HISTORY_FILTERS && (
+        <div className="filtersRow" style={{ padding: 12 }}>
+          <div
+            className="mobileGrid1"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "2fr 2fr 1.2fr 1.2fr 2.6fr auto auto",
+              gap: 10,
+              alignItems: "end",
             }}
           >
-            Reset
-          </button>
+            <div className="filterDateWrap">
+              <label className="label" htmlFor="fFrom">
+                Data da
+              </label>
+              <input id="fFrom" name="fFrom" className="input mobileInputFull" type="date" value={fFrom} onChange={(e) => setFFrom(e.target.value)} />
+            </div>
 
-          <button className="btn" onClick={() => downloadRegistroPDF(history)}>
-            PDF
-          </button>
-        </div>
+            <div className="filterDateWrap">
+              <label className="label" htmlFor="fTo">
+                Data a
+              </label>
+              <input id="fTo" name="fTo" className="input mobileInputFull" type="date" value={fTo} onChange={(e) => setFTo(e.target.value)} />
+            </div>
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginTop: 10,
-            gap: 10,
-            flexWrap: "wrap",
-          }}
-        >
-          <div style={{ fontSize: 12, opacity: 0.72 }}>
-            Ricerca automatica attiva · scrivi almeno 2 caratteri nel campo materiale
-            {refreshing ? " · aggiornamento..." : ""}
+            <div>
+              <label className="label" htmlFor="fType">
+                Tipo
+              </label>
+              <select id="fType" name="fType" className="input" value={fType} onChange={(e) => setFType(e.target.value as any)}>
+                <option value="ALL">Tutti</option>
+                <option value="IN">Entrata</option>
+                <option value="OUT">Uscita</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="label" htmlFor="fWh">
+                Magazzino
+              </label>
+              <select id="fWh" name="fWh" className="input" value={fWarehouse} onChange={(e) => setFWarehouse(e.target.value as any)}>
+                <option value="ALL">Tutti</option>
+                <option value="PRM">PRM</option>
+                <option value="REALE">REALE</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="label" htmlFor="fMaterial">
+                Materiale
+              </label>
+              <input
+                id="fMaterial"
+                name="fMaterial"
+                className="input"
+                value={fMaterial}
+                onChange={(e) => setFMaterial(e.target.value)}
+                placeholder="Cerca per codice o descrizione..."
+              />
+            </div>
+
+            <button
+              className="btn"
+              onClick={() => {
+                setFFrom("");
+                setFTo("");
+                setFType("ALL");
+                setFWarehouse("ALL");
+                setFMaterial("");
+                setTimeout(() => loadHistory(true), 0);
+              }}
+            >
+              Reset
+            </button>
+
+            <button className="btn" onClick={() => downloadRegistroPDF(history)}>
+              PDF
+            </button>
           </div>
 
-          <div style={{ opacity: 0.75, fontSize: 12 }}>Permessi: {isAdmin ? "Admin" : "Operatore"}</div>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginTop: 10,
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ fontSize: 12, opacity: 0.72 }}>
+              Ricerca automatica attiva · scrivi almeno 2 caratteri nel campo materiale
+              {refreshing ? " · aggiornamento..." : ""}
+            </div>
+
+            <div style={{ opacity: 0.75, fontSize: 12 }}>Permessi: {isAdmin ? "Admin" : "Operatore"}</div>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
         <div className="mobileFlexCol" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
@@ -2381,6 +2399,7 @@ async function confirmCartPickup() {
               className={`btn ${type === "IN" ? "btnPrimary" : ""}`}
               onClick={() => {
                 setType("IN");
+                setWizardMatOpen(false);
                 if (warehouse === "MISTO") setWarehouse("PRM");
               }}
               type="button"
@@ -2389,9 +2408,32 @@ async function confirmCartPickup() {
             </button>
           )}
 
-          <button className={`btn ${type === "OUT" ? "btnPrimary" : ""}`} onClick={() => setType("OUT")} type="button">
+          <button
+            className={`btn ${type === "OUT" ? "btnPrimary" : ""}`}
+            onClick={() => {
+              setType("OUT");
+              setOutboundStepMat(1);
+              setWizardMatOpen(false);
+            }}
+            type="button"
+          >
             Uscita
           </button>
+
+          {type === "OUT" && !wizardMatOpen && (
+            <button
+              type="button"
+              className="btn btnPrimary"
+              onClick={() => {
+                setWizardMatOpen(true);
+                setOutboundStepMat(1);
+                setMsg(null);
+              }}
+              style={{ padding: "10px 20px", fontWeight: 800 }}
+            >
+              Avvia prelievo
+            </button>
+          )}
 
           {type === "IN" && (
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
@@ -2412,6 +2454,8 @@ async function confirmCartPickup() {
             </div>
           )}
 
+          {type === "IN" && (
+          <>
           <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
             {scanMode === "CART" && (
               <button
@@ -2485,7 +2529,43 @@ async function confirmCartPickup() {
               </select>
             </div>
           </div>
-        </div>
+
+        {type === "OUT" && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
+              marginTop: 12,
+              marginBottom: 4,
+              padding: "10px 12px",
+              background: "rgba(15,23,42,0.04)",
+              borderRadius: 12,
+              border: "1px solid rgba(15,23,42,0.08)",
+            }}
+          >
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginRight: 4 }}>Passo:</span>
+            {[
+              { step: 1 as const, label: "1. Materiale" },
+              { step: 2 as const, label: "2. Dettagli e conferma" },
+            ].map(({ step, label }) => (
+              <span
+                key={step}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 800,
+                  background: outboundStepMat === step ? "#0f172a" : "transparent",
+                  color: outboundStepMat === step ? "#fff" : outboundStepMat > step ? "#64748b" : "#94a3b8",
+                }}
+              >
+                {label}
+              </span>
+            ))}
+          </div>
+        )}
 
         <div ref={boxRef} style={{ position: "relative", marginTop: 12 }}>
           <label className="label" htmlFor="searchItem">
@@ -2567,38 +2647,64 @@ async function confirmCartPickup() {
           )}
         </div>
 
-        {/* Video spostato nel popup scanner */}
-
-        <div className="mobileFormRow" style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10, marginTop: 12 }}>
-          <div style={{ gridColumn: "span 8" }}>
-            <label className="label" htmlFor="noteMove">
-              Note *
-            </label>
-            <input id="noteMove" name="noteMove" className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="DDT / commessa / cliente (obbligatorio)" required />
-          </div>
-
-          <div style={{ gridColumn: "span 3" }}>
-            <label className="label" htmlFor="qtyMove">
-              Quantità
-            </label>
-            <input
-              ref={qtyRef}
-              id="qtyMove"
-              name="qtyMove"
-              className="input"
-              value={qty}
-              onChange={(e) => setQty(e.target.value)}
-              inputMode="decimal"
-              placeholder="es. 5"
-            />
-          </div>
-
-          <div style={{ gridColumn: "span 1", display: "flex", alignItems: "end" }}>
-            <button className="btn btnPrimary" onClick={saveMovement} style={{ width: "100%" }}>
-              Salva
+        {/* Step 1 uscita: pulsante Avanti */}
+        {type === "OUT" && outboundStepMat === 1 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12, alignItems: "center" }}>
+            <button
+              type="button"
+              className="btn btnPrimary"
+              onClick={() => setOutboundStepMat(2)}
+              disabled={scanMode === "NORMAL" ? !picked : cart.length === 0}
+            >
+              Avanti → Dettagli e conferma
             </button>
           </div>
-        </div>
+        )}
+
+        {/* Video spostato nel popup scanner */}
+
+        {/* Step 2 uscita oppure sempre per entrata: Note, Quantità, Salva */}
+        {(type !== "OUT" || outboundStepMat === 2) && (
+          <div style={{ marginTop: 12 }}>
+            {type === "OUT" && (
+              <div style={{ marginBottom: 10 }}>
+                <button type="button" className="btn" onClick={() => setOutboundStepMat(1)}>
+                  ← Indietro
+                </button>
+              </div>
+            )}
+            <div className="mobileFormRow" style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
+              <div style={{ gridColumn: "span 8" }}>
+                <label className="label" htmlFor="noteMove">
+                  Note *
+                </label>
+                <input id="noteMove" name="noteMove" className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="DDT / commessa / cliente (obbligatorio)" required />
+              </div>
+
+              <div style={{ gridColumn: "span 3" }}>
+                <label className="label" htmlFor="qtyMove">
+                  Quantità
+                </label>
+                <input
+                  ref={qtyRef}
+                  id="qtyMove"
+                  name="qtyMove"
+                  className="input"
+                  value={qty}
+                  onChange={(e) => setQty(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="es. 5"
+                />
+              </div>
+
+              <div style={{ gridColumn: "span 1", display: "flex", alignItems: "end" }}>
+                <button className="btn btnPrimary" onClick={saveMovement} style={{ width: "100%" }}>
+                  Salva
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {picked && (
           <div style={{ marginTop: 12, fontSize: 13, opacity: 0.95 }}>
@@ -2612,7 +2718,291 @@ async function confirmCartPickup() {
         )}
 
         {msg && <div style={{ marginTop: 10, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
+          </>
+          )}
       </div>
+      </div>
+
+      {/* Popup wizard prelievo materiali (solo uscita) */}
+      {type === "OUT" && wizardMatOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="wizard-mat-title"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            zIndex: 10040,
+          }}
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setWizardMatOpen(false);
+          }}
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              width: "min(560px, 100%)",
+              maxHeight: "90vh",
+              overflow: "auto",
+              background: "#fff",
+              borderRadius: 16,
+              border: "1px solid rgba(15,23,42,0.12)",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.25)",
+              padding: 20,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
+              <h2 id="wizard-mat-title" style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>
+                Prelievo · Passo {outboundStepMat}/2
+              </h2>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setWizardMatOpen(false)}
+                aria-label="Chiudi"
+                style={{ padding: "6px 10px" }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+                marginBottom: 20,
+                padding: "10px 12px",
+                background: "rgba(15,23,42,0.04)",
+                borderRadius: 12,
+                border: "1px solid rgba(15,23,42,0.08)",
+              }}
+            >
+              {[
+                { step: 1 as const, label: "1. Materiale" },
+                { step: 2 as const, label: "2. Dettagli e conferma" },
+              ].map(({ step, label }) => (
+                <span
+                  key={step}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    fontSize: 13,
+                    fontWeight: 800,
+                    background: outboundStepMat === step ? "#0f172a" : "transparent",
+                    color: outboundStepMat === step ? "#fff" : outboundStepMat > step ? "#64748b" : "#94a3b8",
+                  }}
+                >
+                  {label}
+                </span>
+              ))}
+            </div>
+
+            {outboundStepMat === 1 && (
+              <>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
+                  {scanMode === "CART" && (
+                    <button
+                      className={`btn ${cartOpen ? "btnPrimary" : ""}`}
+                      type="button"
+                      onClick={() => setCartOpen((o) => !o)}
+                      style={{ display: "flex", alignItems: "center", gap: 6 }}
+                    >
+                      <CartIcon />
+                      <span>Carrello</span>
+                      {cart.length > 0 && (
+                        <span style={{ background: "rgba(0,0,0,0.15)", borderRadius: 10, padding: "2px 6px", fontSize: 11, fontWeight: 800 }}>
+                          {cart.length}
+                        </span>
+                      )}
+                    </button>
+                  )}
+                  <button className="btn" type="button" onClick={() => (scanning ? stopScan() : startScan())} disabled={cartNfcScanning} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <BarcodeIcon />
+                    Barcode
+                  </button>
+                  <button className="btn" type="button" onClick={startNfcScan} disabled={scanning || cartNfcScanning} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {cartNfcScanning ? <SpinnerIcon /> : <NfcIcon />}
+                    NFC
+                  </button>
+                  <button className="btn" type="button" onClick={resetSearch}>
+                    Pulisci
+                  </button>
+                  <select
+                    className="input"
+                    value={scanMode}
+                    onChange={(e) => {
+                      const mode = e.target.value as "NORMAL" | "CART";
+                      setScanMode(mode);
+                      if (mode === "CART") setCartOpen(true);
+                      else setCartOpen(false);
+                    }}
+                  >
+                    <option value="NORMAL">Singolo</option>
+                    <option value="CART">Carrello</option>
+                  </select>
+                </div>
+                <div ref={boxRef} style={{ position: "relative", marginBottom: 12 }}>
+                  <label className="label" htmlFor="searchItemWiz">Materiale (codice o descrizione)</label>
+                  <input
+                    id="searchItemWiz"
+                    className="input"
+                    value={search}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setSearch(v);
+                      setOpen(true);
+                      setPicked(null);
+                      setMsg(null);
+                      if (!v.trim()) setSuggestions([]);
+                    }}
+                    onFocus={() => setOpen(true)}
+                    onKeyDown={(e) => {
+                      if (!open) return;
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setActiveIndex((i) => Math.min(i + 1, suggestions.length - 1));
+                      } else if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setActiveIndex((i) => Math.max(i - 1, 0));
+                      } else if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (active) pickItem(active);
+                      } else if (e.key === "Escape") setOpen(false);
+                    }}
+                    placeholder="Cerca codice o descrizione..."
+                  />
+                  {open && search.trim() && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: 0,
+                        right: 0,
+                        top: "100%",
+                        marginTop: 6,
+                        background: "#fff",
+                        border: "1px solid rgba(15,23,42,0.12)",
+                        borderRadius: 12,
+                        boxShadow: "0 16px 40px rgba(0,0,0,0.12)",
+                        overflow: "hidden",
+                        zIndex: 50,
+                      }}
+                    >
+                      {suggestions.length === 0 ? (
+                        <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
+                      ) : (
+                        suggestions.map((it, idx) => (
+                          <div
+                            key={it.code}
+                            onMouseEnter={() => setActiveIndex(idx)}
+                            onMouseDown={(ev) => {
+                              ev.preventDefault();
+                              pickItem(it);
+                            }}
+                            style={{
+                              padding: "10px 12px",
+                              cursor: "pointer",
+                              background: idx === activeIndex ? "#eef2ff" : "white",
+                              borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
+                            }}
+                          >
+                            <div style={{ fontWeight: 900 }}>{it.code}</div>
+                            <div style={{ fontSize: 12, color: "#334155" }}>{it.name}</div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+                {picked && (
+                  <div style={{ marginBottom: 12, fontSize: 13 }}>
+                    <b>{picked.code}</b> · {picked.name}
+                  </div>
+                )}
+                {cart.length > 0 && (
+                  <div style={{ marginBottom: 12, fontSize: 13 }}>
+                    Nel carrello: <b>{cart.length}</b> articolo/i
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="btn btnPrimary"
+                  onClick={() => setOutboundStepMat(2)}
+                  disabled={scanMode === "NORMAL" ? !picked : cart.length === 0}
+                >
+                  Avanti → Dettagli e conferma
+                </button>
+              </>
+            )}
+
+            {outboundStepMat === 2 && (
+              <>
+                <div style={{ marginBottom: 12 }}>
+                  <button type="button" className="btn" onClick={() => setOutboundStepMat(1)}>
+                    ← Indietro
+                  </button>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 10, alignItems: "end", marginBottom: 12 }}>
+                  <div>
+                    <label className="label" htmlFor="noteMoveWiz">Note *</label>
+                    <input
+                      id="noteMoveWiz"
+                      className="input"
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      placeholder="DDT / commessa / cliente"
+                    />
+                  </div>
+                  <div>
+                    <label className="label" htmlFor="qtyMoveWiz">Quantità</label>
+                    <input
+                      id="qtyMoveWiz"
+                      className="input"
+                      value={qty}
+                      onChange={(e) => setQty(e.target.value)}
+                      inputMode="decimal"
+                      placeholder="es. 5"
+                    />
+                  </div>
+                  <div>
+                    {scanMode === "NORMAL" ? (
+                      <button className="btn btnPrimary" onClick={saveMovement}>
+                        Salva
+                      </button>
+                    ) : (
+                      <button
+                        className="btn btnPrimary"
+                        onClick={confirmCartPickup}
+                        disabled={cart.length === 0 || cartBusy}
+                      >
+                        {cartBusy ? "Salvataggio..." : "Conferma prelievo multiplo"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {picked && scanMode === "NORMAL" && (
+                  <div style={{ fontSize: 13, marginBottom: 8 }}>
+                    <b>{picked.code}</b> · {picked.name} {picked.um && `· UM: ${picked.um}`}
+                  </div>
+                )}
+                {cart.length > 0 && scanMode === "CART" && (
+                  <div style={{ fontSize: 13 }}>
+                    Carrello: {cart.length} righe
+                  </div>
+                )}
+              </>
+            )}
+
+            {msg && <div style={{ marginTop: 12, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
+          </div>
+        </div>
+      )}
 
       <ConfirmModal
         open={!!deleteConfirm}
@@ -2867,9 +3257,11 @@ async function confirmCartPickup() {
                 {deletingBulk ? "Eliminazione…" : `Elimina ${selectedIds.size} selezionati`}
               </button>
             )}
-            <button className="btn" onClick={() => loadHistory()} style={{ justifyContent: "center" }}>
-              Applica filtri
-            </button>
+            {SHOW_HISTORY_FILTERS && (
+              <button className="btn" onClick={() => loadHistory()} style={{ justifyContent: "center" }}>
+                Applica filtri
+              </button>
+            )}
           </div>
         </div>
 

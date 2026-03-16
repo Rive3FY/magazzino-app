@@ -793,7 +793,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     setAssetOpen(false);
     setAssetActiveIndex(0);
     setScanMode("CART");
-    setMsg("Attrezzatura aggiunta al carrello.");
+    setMsg(`Attrezzatura aggiunta al carrello. Totale: ${cart.length + 1}.`);
   }
 
   async function addAssetByNfcToCart(nfcTagId: string) {
@@ -834,7 +834,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     setCart((prev) => [...prev, matched.id]);
     setCartOpen(true);
     setScanMode("CART");
-    setMsg("Aggiunta al carrello.");
+    setMsg(`Attrezzatura aggiunta al carrello. Totale: ${cart.length + 1}.`);
   }
 
   function removeCartItem(id: string) {
@@ -869,7 +869,8 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     setCategorySelectModalOpen(false);
     setCategorySelectModalCategory(null);
     setCategorySelectModalSelected(new Set());
-    setMsg(`${toAdd.length} attrezzatura/e aggiunta/e al carrello.`);
+    const total = new Set([...cart, ...newIds]).size;
+    setMsg(`${toAdd.length} attrezzatura/e aggiunta/e al carrello. Totale: ${total}.`);
   }
 
   async function confirmCartPickup() {
@@ -1689,7 +1690,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                   </div>
                 )}
 
-                {selectedAsset && (
+                {selectedAsset && scanMode === "NORMAL" && (
                   <div className="equipmentInfoGrid" style={{ marginTop: 4 }}>
                     <div>
                       <div className="equipmentInfoLabel">Seriale</div>
@@ -1712,6 +1713,50 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                   </div>
                 )}
 
+                {scanMode === "CART" && (
+                  <div
+                    style={{
+                      marginTop: 4,
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid rgba(15,23,42,0.08)",
+                      background: "rgba(15,23,42,0.03)",
+                    }}
+                  >
+                    <div style={{ fontWeight: 900, color: "#0f172a" }}>
+                      Carrello attuale: {cartItems.length} {cartItems.length === 1 ? "attrezzatura" : "attrezzature"}
+                    </div>
+                    <div style={{ marginTop: 6, fontSize: 13, color: "#64748b" }}>
+                      Dopo ogni aggiunta l'attrezzatura entra subito nel carrello. Puoi aggiungere altri gruppi e poi continuare.
+                    </div>
+                    {cartItems.length > 0 && (
+                      <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+                        {cartItems.slice(-4).map((item) => (
+                          <div
+                            key={item.id}
+                            style={{
+                              padding: "8px 10px",
+                              borderRadius: 10,
+                              background: "#fff",
+                              border: "1px solid rgba(15,23,42,0.08)",
+                              fontSize: 13,
+                            }}
+                          >
+                            <span style={{ fontWeight: 800 }}>{item.serial_number || item.asset_code}</span>
+                            {" · "}
+                            <span>{item.name}</span>
+                          </div>
+                        ))}
+                        {cartItems.length > 4 && (
+                          <div style={{ fontSize: 12, color: "#64748b" }}>
+                            ...e altre {cartItems.length - 4} nel carrello
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 }}>
                   <button type="button" className="btn" onClick={() => setOutboundStep(1)}>
                     ← Indietro
@@ -1730,7 +1775,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
             {outboundStep === 3 && warehouseSelected && (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {selectedAsset && (
+                {selectedAsset && scanMode === "NORMAL" && (
                   <div className="equipmentInfoGrid">
                     <div>
                       <div className="equipmentInfoLabel">Seriale</div>
@@ -1740,6 +1785,49 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                       <div className="equipmentInfoLabel">Nome</div>
                       <div className="equipmentInfoValue">{selectedAsset.name}</div>
                     </div>
+                  </div>
+                )}
+
+                {scanMode === "CART" && (
+                  <div
+                    style={{
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid rgba(15,23,42,0.08)",
+                      background: "rgba(15,23,42,0.03)",
+                    }}
+                  >
+                    <div style={{ fontWeight: 900, color: "#0f172a" }}>
+                      Riepilogo carrello: {cartItems.length} {cartItems.length === 1 ? "attrezzatura" : "attrezzature"}
+                    </div>
+                    {cartItems.length > 0 ? (
+                      <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+                        {cartItems.map((item) => (
+                          <div
+                            key={item.id}
+                            style={{
+                              padding: "8px 10px",
+                              borderRadius: 10,
+                              background: "#fff",
+                              border: "1px solid rgba(15,23,42,0.08)",
+                              fontSize: 13,
+                            }}
+                          >
+                            <span style={{ fontWeight: 800 }}>{item.serial_number || item.asset_code}</span>
+                            {" · "}
+                            <span>{item.name}</span>
+                            {" · "}
+                            <span style={{ color: "#64748b" }}>
+                              {[item.shelf, item.place].filter(Boolean).join(" · ") || "Senza posizione"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 8, fontSize: 13, color: "#64748b" }}>
+                        Il carrello e vuoto. Torna al passo 2 per aggiungere attrezzature.
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1798,8 +1886,8 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                     ← Indietro
                   </button>
                   {scanMode === "CART" ? (
-                    <button className="btn btnPrimary" onClick={addSelectedToCart} disabled={!selectedAsset} type="button">
-                      Aggiungi al carrello
+                    <button className="btn btnPrimary" onClick={confirmCartPickup} disabled={cartBusy || cartItems.length === 0} type="button">
+                      {cartBusy ? "Salvataggio..." : "Conferma prelievo"}
                     </button>
                   ) : (
                     <button className="btn btnPrimary" onClick={saveMovement} disabled={saving || !form.equipment_id} type="button">
@@ -1863,6 +1951,9 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
             <div style={{ fontWeight: 800 }}>Righe: {cartItems.length}</div>
+            <button className="btn btnPrimary" onClick={() => setOutboundStep(3)} disabled={!warehouseSelected || cartBusy || cartItems.length === 0} type="button">
+              Vai ai dettagli
+            </button>
             <button className="btn btnPrimary" onClick={confirmCartPickup} disabled={!warehouseSelected || cartBusy || cartItems.length === 0} type="button">
               {cartBusy ? "Salvataggio..." : "Conferma prelievo"}
             </button>

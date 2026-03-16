@@ -1250,6 +1250,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
               padding: 20,
             }}
           >
+            <>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
               <h2 id="wizard-title" style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>
                 Prelievo · Passo {outboundStep}/3
@@ -1661,6 +1662,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         )}
 
         {msg && <div style={{ marginTop: 12, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
+            </>
           </div>
         </div>
       )}

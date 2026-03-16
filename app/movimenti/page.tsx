@@ -2529,6 +2529,8 @@ async function confirmCartPickup() {
               </select>
             </div>
           </div>
+          </>
+          )}
 
         {type === "OUT" && (
           <div
@@ -2718,8 +2720,6 @@ async function confirmCartPickup() {
         )}
 
         {msg && <div style={{ marginTop: 10, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
-          </>
-          )}
       </div>
       </div>
 

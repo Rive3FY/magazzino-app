@@ -335,6 +335,16 @@ export default function MovimentiPage() {
     }>
   >([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [mixedPreviewLoading, setMixedPreviewLoading] = useState(false);
+  const [mixedPreview, setMixedPreview] = useState<{
+    prmFree: number;
+    realeFree: number;
+    requested: number;
+    fromPrm: number;
+    fromReale: number;
+    totalAvailable: number;
+    enough: boolean;
+  } | null>(null);
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "single" | "bulk"; id?: string; count?: number } | null>(null);
 
@@ -1242,6 +1252,36 @@ async function confirmCartPickup() {
 
     if (eIns) throw eIns;
     return (created ?? null) as ExcelLiveRow | null;
+  }
+
+  async function getWarehouseFreeQty(code: string, wh: "PRM" | "REALE") {
+    const { data: live, error: liveErr } = await supabase
+      .from("excel_live")
+      .select("qty_free,row_json")
+      .eq("code", code)
+      .eq("warehouse", wh)
+      .maybeSingle();
+    if (liveErr) throw liveErr;
+    if (live) {
+      const rowJson = ((live as any).row_json ?? {}) as Record<string, unknown>;
+      return Number.isFinite(Number((live as any).qty_free))
+        ? n((live as any).qty_free)
+        : n(rowJson["Qnt. a Mag. libero"] ?? 0);
+    }
+
+    const { data: orig, error: origErr } = await supabase
+      .from("excel_original")
+      .select("qty_free,row_json")
+      .eq("code", code)
+      .eq("warehouse", wh)
+      .maybeSingle();
+    if (origErr) throw origErr;
+    if (!orig) return 0;
+
+    const rowJson = ((orig as any).row_json ?? {}) as Record<string, unknown>;
+    return Number.isFinite(Number((orig as any).qty_free))
+      ? n((orig as any).qty_free)
+      : n(rowJson["Qnt. a Mag. libero"] ?? 0);
   }
 
   type ApplyDeltaResult = true | false | { needsRequest: true; code: string; warehouse: "PRM" | "REALE"; deltaFree: number };
@@ -2272,6 +2312,60 @@ async function confirmCartPickup() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fFrom, fTo, fType, fWarehouse, fMaterial]);
 
+  useEffect(() => {
+    if (
+      type !== "OUT" ||
+      warehouse !== "MISTO" ||
+      scanMode !== "NORMAL" ||
+      !picked?.code ||
+      !wizardMatOpen ||
+      outboundStepMat !== 2
+    ) {
+      setMixedPreview(null);
+      setMixedPreviewLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      setMixedPreviewLoading(true);
+      try {
+        const [prmFree, realeFree] = await Promise.all([
+          getWarehouseFreeQty(picked.code, "PRM"),
+          getWarehouseFreeQty(picked.code, "REALE"),
+        ]);
+        if (cancelled) return;
+
+        const requested = Math.max(0, toNumber(qty));
+        const totalAvailable = prmFree + realeFree;
+        const fromPrm = Math.min(prmFree, requested);
+        const fromReale = Math.max(0, requested - fromPrm);
+
+        setMixedPreview({
+          prmFree,
+          realeFree,
+          requested,
+          fromPrm,
+          fromReale,
+          totalAvailable,
+          enough: requested > 0 && totalAvailable >= requested,
+        });
+      } catch (error) {
+        if (!cancelled) {
+          console.error("mixed preview error:", error);
+          setMixedPreview(null);
+        }
+      } finally {
+        if (!cancelled) setMixedPreviewLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [type, warehouse, scanMode, picked?.code, qty, wizardMatOpen, outboundStepMat]);
+
   const active = useMemo(() => suggestions[activeIndex], [suggestions, activeIndex]);
 
   const displayHistory = useMemo(() => {
@@ -2869,9 +2963,25 @@ async function confirmCartPickup() {
                     </div>
                   )}
                 </div>
-                {picked && (
-                  <div style={{ marginBottom: 12, fontSize: 13 }}>
-                    <b>{picked.code}</b> · {picked.name}
+                {picked && scanMode === "NORMAL" && (
+                  <div
+                    style={{
+                      marginBottom: 12,
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid rgba(15,23,42,0.08)",
+                      background: "rgba(15,23,42,0.03)",
+                    }}
+                  >
+                    <div style={{ fontWeight: 900, color: "#0f172a" }}>Selezione corrente</div>
+                    <div style={{ marginTop: 6, fontSize: 13 }}>
+                      <b>{picked.code}</b> · {picked.name}
+                      {picked.um ? ` · UM: ${picked.um}` : ""}
+                    </div>
+                    <div style={{ marginTop: 6, fontSize: 13, color: "#334155" }}>
+                      <b>Magazzino prelievo:</b>{" "}
+                      {warehouse === "MISTO" ? "MISTO (prima PRM, poi REALE se serve)" : warehouse}
+                    </div>
                   </div>
                 )}
                 {scanMode === "CART" && picked && (
@@ -2886,8 +2996,48 @@ async function confirmCartPickup() {
                   </div>
                 )}
                 {cart.length > 0 && (
-                  <div style={{ marginBottom: 12, fontSize: 13 }}>
-                    Nel carrello: <b>{cart.length}</b> {cart.length === 1 ? "articolo" : "articoli"}
+                  <div
+                    style={{
+                      marginBottom: 12,
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid rgba(15,23,42,0.08)",
+                      background: "rgba(15,23,42,0.03)",
+                    }}
+                  >
+                    <div style={{ fontWeight: 900, color: "#0f172a" }}>
+                      Carrello attuale: {cart.length} {cart.length === 1 ? "articolo" : "articoli"}
+                    </div>
+                    <div style={{ marginTop: 6, fontSize: 13, color: "#64748b" }}>
+                      Ogni riga mostra sempre da quale magazzino stai prelevando.
+                    </div>
+                    <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+                      {cart.slice(-4).map((row) => (
+                        <div
+                          key={`${row.code}-${row.warehouse}`}
+                          style={{
+                            padding: "8px 10px",
+                            borderRadius: 10,
+                            background: "#fff",
+                            border: "1px solid rgba(15,23,42,0.08)",
+                            fontSize: 13,
+                          }}
+                        >
+                          <span style={{ fontWeight: 800 }}>{row.code}</span>
+                          {" · "}
+                          <span>{row.name}</span>
+                          {" · "}
+                          <span style={{ fontWeight: 700 }}>{row.warehouse}</span>
+                          {" · "}
+                          <span>Q.tà {row.qtyPick}</span>
+                        </div>
+                      ))}
+                      {cart.length > 4 && (
+                        <div style={{ fontSize: 12, color: "#64748b" }}>
+                          ...e altre {cart.length - 4} righe nel carrello
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
                 <button
@@ -2947,13 +3097,108 @@ async function confirmCartPickup() {
                   </div>
                 </div>
                 {picked && scanMode === "NORMAL" && (
-                  <div style={{ fontSize: 13, marginBottom: 8 }}>
-                    <b>{picked.code}</b> · {picked.name} {picked.um && `· UM: ${picked.um}`}
+                  <div
+                    style={{
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid rgba(15,23,42,0.08)",
+                      background: "rgba(15,23,42,0.03)",
+                      fontSize: 13,
+                    }}
+                  >
+                    <div style={{ fontWeight: 900, color: "#0f172a", marginBottom: 6 }}>Riepilogo prelievo</div>
+                    <div>
+                      <b>{picked.code}</b> · {picked.name} {picked.um && `· UM: ${picked.um}`}
+                    </div>
+                    <div style={{ marginTop: 6 }}>
+                      <b>Magazzino prelievo:</b>{" "}
+                      {warehouse === "MISTO" ? "MISTO (prima PRM, poi REALE se serve)" : warehouse}
+                    </div>
+                  </div>
+                )}
+                {picked && scanMode === "NORMAL" && warehouse === "MISTO" && (
+                  <div
+                    style={{
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid rgba(15,23,42,0.08)",
+                      background: "rgba(15,23,42,0.03)",
+                      fontSize: 13,
+                    }}
+                  >
+                    <div style={{ fontWeight: 900, color: "#0f172a", marginBottom: 8 }}>Ripartizione prelievo</div>
+                    {mixedPreviewLoading ? (
+                      <div style={{ color: "#64748b" }}>Calcolo disponibilita in corso...</div>
+                    ) : mixedPreview ? (
+                      <>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
+                          <div style={{ padding: 10, borderRadius: 10, background: "#fff", border: "1px solid rgba(2,132,199,0.18)" }}>
+                            <div style={{ fontSize: 12, color: "#64748b" }}>Da PRM</div>
+                            <div style={{ fontWeight: 900, color: "#0284c7" }}>{mixedPreview.fromPrm}</div>
+                            <div style={{ fontSize: 12, color: "#64748b" }}>Disponibili: {mixedPreview.prmFree}</div>
+                          </div>
+                          <div style={{ padding: 10, borderRadius: 10, background: "#fff", border: "1px solid rgba(124,58,237,0.18)" }}>
+                            <div style={{ fontSize: 12, color: "#64748b" }}>Da REALE</div>
+                            <div style={{ fontWeight: 900, color: "#7c3aed" }}>{mixedPreview.fromReale}</div>
+                            <div style={{ fontSize: 12, color: "#64748b" }}>Disponibili: {mixedPreview.realeFree}</div>
+                          </div>
+                          <div style={{ padding: 10, borderRadius: 10, background: "#fff", border: "1px solid rgba(15,23,42,0.08)" }}>
+                            <div style={{ fontSize: 12, color: "#64748b" }}>Richiesti / Totale</div>
+                            <div style={{ fontWeight: 900, color: "#0f172a" }}>
+                              {mixedPreview.requested || 0} / {mixedPreview.totalAvailable}
+                            </div>
+                            <div style={{ fontSize: 12, color: mixedPreview.enough ? "#166534" : "#b45309" }}>
+                              {mixedPreview.requested <= 0
+                                ? "Inserisci una quantita"
+                                : mixedPreview.enough
+                                  ? "Disponibilita sufficiente"
+                                  : "Disponibilita insufficiente"}
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ marginTop: 8, color: "#64748b" }}>
+                          Prelievo previsto: prima da <b>PRM</b>, poi da <b>REALE</b> per la quantita residua.
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ color: "#64748b" }}>Impossibile calcolare la ripartizione in questo momento.</div>
+                    )}
                   </div>
                 )}
                 {cart.length > 0 && scanMode === "CART" && (
-                  <div style={{ fontSize: 13 }}>
-                    Carrello: {cart.length} righe
+                  <div
+                    style={{
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid rgba(15,23,42,0.08)",
+                      background: "rgba(15,23,42,0.03)",
+                      fontSize: 13,
+                    }}
+                  >
+                    <div style={{ fontWeight: 900, color: "#0f172a" }}>
+                      Riepilogo carrello: {cart.length} righe
+                    </div>
+                    <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+                      {cart.map((row) => (
+                        <div
+                          key={`${row.code}-${row.warehouse}`}
+                          style={{
+                            padding: "8px 10px",
+                            borderRadius: 10,
+                            background: "#fff",
+                            border: "1px solid rgba(15,23,42,0.08)",
+                          }}
+                        >
+                          <span style={{ fontWeight: 800 }}>{row.code}</span>
+                          {" · "}
+                          <span>{row.name}</span>
+                          {" · "}
+                          <span style={{ fontWeight: 700 }}>{row.warehouse}</span>
+                          {" · "}
+                          <span>Q.tà {row.qtyPick}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </>

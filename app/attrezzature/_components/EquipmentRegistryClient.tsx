@@ -419,8 +419,17 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     });
   }, [history, historyFrom, historyTo, quickWarehouseFilter, filteredAssetIds]);
 
+  const [historyDetail, setHistoryDetail] = useState<EquipmentMovementRow | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<EquipmentMovementRow | null>(null);
+
+  const historyDetailGroup = useMemo(() => {
+    if (!historyDetail) return [];
+    if (!historyDetail.movement_group_id) return [historyDetail];
+    return history
+      .filter((row) => row.movement_group_id === historyDetail.movement_group_id)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  }, [history, historyDetail]);
 
   function openDeleteConfirm(row: EquipmentMovementRow) {
     if (!isAdmin) return;
@@ -968,7 +977,10 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                       key={row.id}
                       style={{
                         background: status === "OPEN" ? "rgba(148,163,184,0.18)" : "transparent",
+                        cursor: "pointer",
                       }}
+                      onClick={() => setHistoryDetail(row)}
+                      title="Tocca per vedere il dettaglio completo"
                     >
                       <td>{fmtDateTime(row.created_at)}</td>
                       <td>
@@ -1000,7 +1012,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                       <td>{row.close_note || "—"}</td>
                       <td>{row.created_by_name || row.created_by_email || "—"}</td>
                       {isAdmin && (
-                        <td>
+                        <td onClick={(e) => e.stopPropagation()}>
                           <button
                             className="btn"
                             disabled={busy}
@@ -1023,6 +1035,167 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
           </table>
         </div>
       </div>
+
+      {historyDetail && (
+        <div
+          onMouseDown={() => setHistoryDetail(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 14,
+            zIndex: 10050,
+          }}
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              width: "min(960px, 100%)",
+              maxHeight: "85vh",
+              overflow: "auto",
+              background: "white",
+              borderRadius: 14,
+              border: "1px solid rgba(15,23,42,0.16)",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
+              padding: 16,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: 18 }}>
+                  {historyDetailGroup.length > 1 ? `Dettaglio prelievo multiplo (${historyDetailGroup.length} attrezzature)` : "Dettaglio movimento"}
+                </div>
+                <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
+                  Area {areaLabel}
+                </div>
+              </div>
+              <button type="button" className="btn" onClick={() => setHistoryDetail(null)}>
+                Chiudi
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: 10,
+                marginTop: 16,
+              }}
+            >
+              <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                <div style={{ fontSize: 12, color: "#64748b" }}>Data inserimento</div>
+                <div style={{ fontWeight: 800 }}>{fmtDateTime(historyDetail.created_at)}</div>
+              </div>
+              <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                <div style={{ fontSize: 12, color: "#64748b" }}>Stato</div>
+                <div style={{ marginTop: 4 }}>
+                  <span style={equipmentMovementPillStyle(historyDetail.status ?? "OPEN")}>
+                    {EQUIPMENT_MOVEMENT_STATUS_LABELS[historyDetail.status ?? "OPEN"]}
+                  </span>
+                </div>
+              </div>
+              <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                <div style={{ fontSize: 12, color: "#64748b" }}>Tipo</div>
+                <div style={{ marginTop: 4 }}>
+                  <span style={equipmentMovementPillStyle("OUT")}>{EQUIPMENT_MOVEMENT_LABELS.OUT}</span>
+                </div>
+              </div>
+              <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                <div style={{ fontSize: 12, color: "#64748b" }}>Inserito da</div>
+                <div style={{ fontWeight: 800 }}>{historyDetail.created_by_name || historyDetail.created_by_email || "—"}</div>
+              </div>
+              <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                <div style={{ fontSize: 12, color: "#64748b" }}>Assegnatario</div>
+                <div style={{ fontWeight: 800 }}>
+                  {[historyDetail.assigned_to_name, historyDetail.assigned_to_badge ? `Badge ${historyDetail.assigned_to_badge}` : null]
+                    .filter(Boolean)
+                    .join(" · ") || "—"}
+                </div>
+                {historyDetail.assigned_to_email && (
+                  <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>{historyDetail.assigned_to_email}</div>
+                )}
+              </div>
+              <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                <div style={{ fontSize: 12, color: "#64748b" }}>Destinazione</div>
+                <div style={{ fontWeight: 800 }}>{historyDetail.destination || "—"}</div>
+              </div>
+              <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                <div style={{ fontSize: 12, color: "#64748b" }}>Esito finale</div>
+                <div style={{ fontWeight: 800 }}>
+                  {historyDetail.resolution_type ? EQUIPMENT_RESOLUTION_LABELS[historyDetail.resolution_type] : "—"}
+                </div>
+              </div>
+              <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                <div style={{ fontSize: 12, color: "#64748b" }}>Piano d&apos;intervento</div>
+                <div style={{ fontWeight: 800 }}>{historyDetail.intervention_plan_number || "—"}</div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
+              <div style={{ padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff" }}>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Note uscita</div>
+                <div style={{ fontWeight: 700 }}>{historyDetail.note || "—"}</div>
+              </div>
+              <div style={{ padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff" }}>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Note chiusura</div>
+                <div style={{ fontWeight: 700 }}>{historyDetail.close_note || "—"}</div>
+              </div>
+              <div style={{ padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff" }}>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Data chiusura</div>
+                <div style={{ fontWeight: 700 }}>
+                  {historyDetail.closed_at ? fmtDateTime(historyDetail.closed_at) : "Movimento ancora aperto"}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontWeight: 900, marginBottom: 10 }}>
+                {historyDetailGroup.length > 1 ? "Attrezzature del gruppo" : "Attrezzatura coinvolta"}
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                {historyDetailGroup.map((movement) => {
+                  const asset = rows.find((item) => item.id === movement.equipment_id);
+                  return (
+                    <div
+                      key={movement.id}
+                      style={{
+                        padding: 12,
+                        borderRadius: 10,
+                        border: "1px solid #e2e8f0",
+                        background: "#f8fafc",
+                      }}
+                    >
+                      <div style={{ fontWeight: 900 }}>
+                        {asset ? `${asset.serial_number || asset.asset_code} - ${asset.name}` : movement.equipment_id}
+                      </div>
+                      <div style={{ marginTop: 6, fontSize: 13, color: "#334155" }}>
+                        {[
+                          asset?.warehouse || null,
+                          asset?.category || null,
+                          [asset?.shelf, asset?.place].filter(Boolean).join(" · ") || null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || "Nessun dettaglio aggiuntivo"}
+                      </div>
+                      <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
+                        {[
+                          asset?.barcode ? `Barcode ${asset.barcode}` : null,
+                          asset?.nfc_tag_id ? `NFC ${asset.nfc_tag_id}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || "Nessun identificativo"}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {deleteConfirm && (
         <ConfirmModal

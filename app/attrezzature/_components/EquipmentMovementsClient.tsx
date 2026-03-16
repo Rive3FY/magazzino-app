@@ -292,6 +292,8 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const [outboundStep, setOutboundStep] = useState<1 | 2 | 3>(1);
   /** Wizard prelievo in popup: quando true il flusso è dentro un modal */
   const [wizardOpen, setWizardOpen] = useState(false);
+  /** Se impostato, mostriamo conferma "svuota carrello" prima di cambiare magazzino */
+  const [confirmClearCartForWarehouse, setConfirmClearCartForWarehouse] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
@@ -313,14 +315,19 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     if (typeof window === "undefined") return;
     try {
       const cached = localStorage.getItem(`equipment_cart_${area}`);
-      if (!cached) return;
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed)) {
-        const normalized = parsed.filter((value) => typeof value === "string");
-        setCart(normalized);
-        if (normalized.length > 0) {
-          setCartOpen(true);
-          setScanMode("CART");
+      const cachedWarehouse = localStorage.getItem(`equipment_cart_warehouse_${area}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) {
+          const normalized = parsed.filter((value) => typeof value === "string");
+          setCart(normalized);
+          if (normalized.length > 0) {
+            setCartOpen(true);
+            setScanMode("CART");
+            if (cachedWarehouse && typeof cachedWarehouse === "string" && cachedWarehouse.trim()) {
+              setWarehouseFilter(cachedWarehouse.trim());
+            }
+          }
         }
       }
     } catch {}
@@ -328,9 +335,14 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (cart.length === 0) localStorage.removeItem(`equipment_cart_${area}`);
-    else localStorage.setItem(`equipment_cart_${area}`, JSON.stringify(cart));
-  }, [area, cart]);
+    if (cart.length === 0) {
+      localStorage.removeItem(`equipment_cart_${area}`);
+      localStorage.removeItem(`equipment_cart_warehouse_${area}`);
+    } else {
+      localStorage.setItem(`equipment_cart_${area}`, JSON.stringify(cart));
+      if (warehouseFilter) localStorage.setItem(`equipment_cart_warehouse_${area}`, warehouseFilter);
+    }
+  }, [area, cart, warehouseFilter]);
 
   useEffect(() => {
     setIsNfcSupported(typeof NDEFReader !== "undefined");
@@ -1206,12 +1218,12 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
               className="btn btnPrimary"
               onClick={() => {
                 setWizardOpen(true);
-                setOutboundStep(1);
+                setOutboundStep(cart.length > 0 && warehouseFilter ? 2 : 1);
                 setMsg(null);
               }}
               style={{ padding: "12px 24px", fontSize: 15, fontWeight: 800 }}
             >
-              Avvia prelievo
+              {cart.length > 0 ? "Continua prelievo" : "Avvia prelievo"}
             </button>
           </div>
         )}
@@ -1303,12 +1315,18 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                     value={warehouseFilter}
                     onChange={(e) => {
                       const value = e.target.value;
+                      if (cart.length > 0 && value !== warehouseFilter) {
+                        setConfirmClearCartForWarehouse(value);
+                        return;
+                      }
                       setWarehouseFilter(value);
                       setForm((prev) => ({ ...prev, equipment_id: "" }));
                       setAssetCategoryFilter("");
                       setAssetSearch("");
-                      setCart([]);
-                      setCartOpen(false);
+                      if (cart.length > 0) {
+                        setCart([]);
+                        setCartOpen(false);
+                      }
                       setMsg(null);
                     }}
                   >
@@ -1380,6 +1398,27 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 <div style={{ marginTop: 8, paddingTop: 12, borderTop: "1px solid rgba(15,23,42,0.08)" }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginBottom: 8 }}>Oppure selezione manuale</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {assetCategories.length > 0 && (
+                      <div>
+                        <label className="label" htmlFor={`move-category-wiz-${area}`}>Categoria</label>
+                        <select
+                          id={`move-category-wiz-${area}`}
+                          className="input"
+                          value={assetCategoryFilter}
+                          onChange={(e) => {
+                            setAssetCategoryFilter(e.target.value);
+                            setForm((prev) => ({ ...prev, equipment_id: "" }));
+                            setAssetSearch("");
+                            setAssetOpen(false);
+                          }}
+                        >
+                          <option value="">Tutte le categorie</option>
+                          {assetCategories.map((c) => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div ref={assetBoxRef} style={{ position: "relative" }}>
                       <label className="label" htmlFor={`move-search-wiz-${area}`}>Cerca attrezzatura (seriale o nome)</label>
                       <ClearableInput
@@ -1495,6 +1534,23 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                         ))}
                       </select>
                     </div>
+                    {scanMode === "CART" && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          className="btn btnPrimary"
+                          onClick={addSelectedToCart}
+                          disabled={!form.equipment_id}
+                        >
+                          Aggiungi al carrello
+                        </button>
+                        {cart.length > 0 && (
+                          <span style={{ fontSize: 13, color: "#64748b" }}>
+                            Nel carrello: {cart.length} {cart.length === 1 ? "attrezzatura" : "attrezzature"}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -2492,6 +2548,28 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        open={confirmClearCartForWarehouse !== null}
+        title="Cambia magazzino"
+        message="Cambiando magazzino il carrello verrà svuotato. Continuare?"
+        confirmLabel="Svuota e cambia"
+        cancelLabel="Annulla"
+        danger
+        onConfirm={() => {
+          if (confirmClearCartForWarehouse !== null) {
+            setWarehouseFilter(confirmClearCartForWarehouse);
+            setForm((prev) => ({ ...prev, equipment_id: "" }));
+            setAssetCategoryFilter("");
+            setAssetSearch("");
+            setCart([]);
+            setCartOpen(false);
+            setConfirmClearCartForWarehouse(null);
+            setMsg(null);
+          }
+        }}
+        onCancel={() => setConfirmClearCartForWarehouse(null)}
+      />
 
       <RemoteNfcScanModal
         open={remoteScanOpen}

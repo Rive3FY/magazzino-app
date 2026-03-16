@@ -2426,12 +2426,12 @@ async function confirmCartPickup() {
               className="btn btnPrimary"
               onClick={() => {
                 setWizardMatOpen(true);
-                setOutboundStepMat(1);
+                setOutboundStepMat(cart.length > 0 ? 2 : 1);
                 setMsg(null);
               }}
               style={{ padding: "10px 20px", fontWeight: 800 }}
             >
-              Avvia prelievo
+              {cart.length > 0 ? "Continua prelievo" : "Avvia prelievo"}
             </button>
           )}
 
@@ -2533,190 +2533,135 @@ async function confirmCartPickup() {
           )}
 
         {type === "OUT" && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              flexWrap: "wrap",
-              marginTop: 12,
-              marginBottom: 4,
-              padding: "10px 12px",
-              background: "rgba(15,23,42,0.04)",
-              borderRadius: 12,
-              border: "1px solid rgba(15,23,42,0.08)",
-            }}
-          >
-            <span style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginRight: 4 }}>Passo:</span>
-            {[
-              { step: 1 as const, label: "1. Materiale" },
-              { step: 2 as const, label: "2. Dettagli e conferma" },
-            ].map(({ step, label }) => (
-              <span
-                key={step}
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: 8,
-                  fontSize: 13,
-                  fontWeight: 800,
-                  background: outboundStepMat === step ? "#0f172a" : "transparent",
-                  color: outboundStepMat === step ? "#fff" : outboundStepMat > step ? "#64748b" : "#94a3b8",
-                }}
-              >
-                {label}
-              </span>
-            ))}
+          <div style={{ marginTop: 12, fontSize: 14, color: "#64748b" }}>
+            Per registrare un&apos;uscita usa il pulsante <strong>Avvia prelievo</strong> o <strong>Continua prelievo</strong> sopra.
           </div>
         )}
 
-        <div ref={boxRef} style={{ position: "relative", marginTop: 12 }}>
-          <label className="label" htmlFor="searchItem">
-            Materiale (codice o descrizione)
-          </label>
-          <input
-            id="searchItem"
-            name="searchItem"
-            className="input"
-            value={search}
-            onChange={(e) => {
-              const v = e.target.value;
-              setSearch(v);
-              setOpen(true);
-              setPicked(null);
-              setMsg(null);
-              if (!v.trim()) setSuggestions([]);
-            }}
-            onFocus={() => setOpen(true)}
-            onKeyDown={(e) => {
-              if (!open) return;
+        {type === "IN" && (
+          <>
+            <div ref={boxRef} style={{ position: "relative", marginTop: 12 }}>
+              <input
+                id="searchItem"
+                name="searchItem"
+                className="input"
+                value={search}
+                aria-label="Cerca materiale"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setSearch(v);
+                  setOpen(true);
+                  setPicked(null);
+                  setMsg(null);
+                  if (!v.trim()) setSuggestions([]);
+                }}
+                onFocus={() => setOpen(true)}
+                onKeyDown={(e) => {
+                  if (!open) return;
 
-              if (e.key === "ArrowDown") {
-                e.preventDefault();
-                setActiveIndex((i) => Math.min(i + 1, suggestions.length - 1));
-              } else if (e.key === "ArrowUp") {
-                e.preventDefault();
-                setActiveIndex((i) => Math.max(i - 1, 0));
-              } else if (e.key === "Enter") {
-                e.preventDefault();
-                if (active) pickItem(active);
-              } else if (e.key === "Escape") {
-                setOpen(false);
-              }
-            }}
-            placeholder="Filtra per codice, descrizione..."
-          />
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setActiveIndex((i) => Math.min(i + 1, suggestions.length - 1));
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setActiveIndex((i) => Math.max(i - 1, 0));
+                  } else if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (active) pickItem(active);
+                  } else if (e.key === "Escape") {
+                    setOpen(false);
+                  }
+                }}
+                placeholder="Filtra per codice, descrizione..."
+              />
 
-          {open && search.trim() && (
-            <div
-              style={{
-                position: "absolute",
-                left: 0,
-                right: 0,
-                top: "100%",
-                marginTop: 6,
-                background: "#fff",
-                border: "1px solid rgba(15,23,42,0.12)",
-                borderRadius: 12,
-                boxShadow: "0 16px 40px rgba(0,0,0,0.12)",
-                overflow: "hidden",
-                zIndex: 50,
-              }}
-            >
-              {suggestions.length === 0 ? (
-                <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
-              ) : (
-                suggestions.map((it, idx) => (
-                  <div
-                    key={it.code}
-                    onMouseEnter={() => setActiveIndex(idx)}
-                    onMouseDown={(ev) => {
-                      ev.preventDefault();
-                      pickItem(it);
-                    }}
-                    style={{
-                      padding: "10px 12px",
-                      cursor: "pointer",
-                      background: idx === activeIndex ? "#eef2ff" : "white",
-                      borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
-                    }}
-                  >
-                    <div style={{ fontWeight: 900, color: "#0f172a" }}>{it.code}</div>
-                    <div style={{ fontSize: 12, color: "#334155" }}>{it.name}</div>
-                  </div>
-                ))
+              {open && search.trim() && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    top: "100%",
+                    marginTop: 6,
+                    background: "#fff",
+                    border: "1px solid rgba(15,23,42,0.12)",
+                    borderRadius: 12,
+                    boxShadow: "0 16px 40px rgba(0,0,0,0.12)",
+                    overflow: "hidden",
+                    zIndex: 50,
+                  }}
+                >
+                  {suggestions.length === 0 ? (
+                    <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
+                  ) : (
+                    suggestions.map((it, idx) => (
+                      <div
+                        key={it.code}
+                        onMouseEnter={() => setActiveIndex(idx)}
+                        onMouseDown={(ev) => {
+                          ev.preventDefault();
+                          pickItem(it);
+                        }}
+                        style={{
+                          padding: "10px 12px",
+                          cursor: "pointer",
+                          background: idx === activeIndex ? "#eef2ff" : "white",
+                          borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
+                        }}
+                      >
+                        <div style={{ fontWeight: 900, color: "#0f172a" }}>{it.code}</div>
+                        <div style={{ fontSize: 12, color: "#334155" }}>{it.name}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
               )}
             </div>
-          )}
-        </div>
 
-        {/* Step 1 uscita: pulsante Avanti */}
-        {type === "OUT" && outboundStepMat === 1 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12, alignItems: "center" }}>
-            <button
-              type="button"
-              className="btn btnPrimary"
-              onClick={() => setOutboundStepMat(2)}
-              disabled={scanMode === "NORMAL" ? !picked : cart.length === 0}
-            >
-              Avanti → Dettagli e conferma
-            </button>
-          </div>
-        )}
+            <div style={{ marginTop: 12 }}>
+              <div className="mobileFormRow" style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
+                <div style={{ gridColumn: "span 8" }}>
+                  <label className="label" htmlFor="noteMove">
+                    Note *
+                  </label>
+                  <input id="noteMove" name="noteMove" className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="DDT / commessa / cliente (obbligatorio)" required />
+                </div>
 
-        {/* Video spostato nel popup scanner */}
+                <div style={{ gridColumn: "span 3" }}>
+                  <label className="label" htmlFor="qtyMove">
+                    Quantità
+                  </label>
+                  <input
+                    ref={qtyRef}
+                    id="qtyMove"
+                    name="qtyMove"
+                    className="input"
+                    value={qty}
+                    onChange={(e) => setQty(e.target.value)}
+                    inputMode="decimal"
+                    placeholder="es. 5"
+                  />
+                </div>
 
-        {/* Step 2 uscita oppure sempre per entrata: Note, Quantità, Salva */}
-        {(type !== "OUT" || outboundStepMat === 2) && (
-          <div style={{ marginTop: 12 }}>
-            {type === "OUT" && (
-              <div style={{ marginBottom: 10 }}>
-                <button type="button" className="btn" onClick={() => setOutboundStepMat(1)}>
-                  ← Indietro
-                </button>
+                <div style={{ gridColumn: "span 1", display: "flex", alignItems: "end" }}>
+                  <button className="btn btnPrimary" onClick={saveMovement} style={{ width: "100%" }}>
+                    Salva
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {picked && (
+              <div style={{ marginTop: 12, fontSize: 13, opacity: 0.95 }}>
+                <div>
+                  <b>{picked.code}</b> · {picked.name}
+                </div>
+                <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
+                  UM: <b>{picked.um ?? "-"}</b>
+                </div>
               </div>
             )}
-            <div className="mobileFormRow" style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
-              <div style={{ gridColumn: "span 8" }}>
-                <label className="label" htmlFor="noteMove">
-                  Note *
-                </label>
-                <input id="noteMove" name="noteMove" className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="DDT / commessa / cliente (obbligatorio)" required />
-              </div>
-
-              <div style={{ gridColumn: "span 3" }}>
-                <label className="label" htmlFor="qtyMove">
-                  Quantità
-                </label>
-                <input
-                  ref={qtyRef}
-                  id="qtyMove"
-                  name="qtyMove"
-                  className="input"
-                  value={qty}
-                  onChange={(e) => setQty(e.target.value)}
-                  inputMode="decimal"
-                  placeholder="es. 5"
-                />
-              </div>
-
-              <div style={{ gridColumn: "span 1", display: "flex", alignItems: "end" }}>
-                <button className="btn btnPrimary" onClick={saveMovement} style={{ width: "100%" }}>
-                  Salva
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {picked && (
-          <div style={{ marginTop: 12, fontSize: 13, opacity: 0.95 }}>
-            <div>
-              <b>{picked.code}</b> · {picked.name}
-            </div>
-            <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
-              UM: <b>{picked.um ?? "-"}</b>
-            </div>
-          </div>
+          </>
         )}
 
         {msg && <div style={{ marginTop: 10, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
@@ -2748,12 +2693,14 @@ async function confirmCartPickup() {
             style={{
               width: "min(560px, 100%)",
               maxHeight: "90vh",
-              overflow: "auto",
+              overflow: open && search.trim() ? "visible" : "auto",
               background: "#fff",
               borderRadius: 16,
               border: "1px solid rgba(15,23,42,0.12)",
               boxShadow: "0 24px 60px rgba(0,0,0,0.25)",
               padding: 20,
+              position: "relative",
+              zIndex: 10041,
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
@@ -2849,11 +2796,11 @@ async function confirmCartPickup() {
                   </select>
                 </div>
                 <div ref={boxRef} style={{ position: "relative", marginBottom: 12 }}>
-                  <label className="label" htmlFor="searchItemWiz">Materiale (codice o descrizione)</label>
                   <input
                     id="searchItemWiz"
                     className="input"
                     value={search}
+                    aria-label="Cerca materiale"
                     onChange={(e) => {
                       const v = e.target.value;
                       setSearch(v);
@@ -2873,7 +2820,7 @@ async function confirmCartPickup() {
                         setActiveIndex((i) => Math.max(i - 1, 0));
                       } else if (e.key === "Enter") {
                         e.preventDefault();
-                        if (active) pickItem(active);
+                        if (active) pickItem(active, scanMode === "CART");
                       } else if (e.key === "Escape") setOpen(false);
                     }}
                     placeholder="Cerca codice o descrizione..."
@@ -2890,8 +2837,9 @@ async function confirmCartPickup() {
                         border: "1px solid rgba(15,23,42,0.12)",
                         borderRadius: 12,
                         boxShadow: "0 16px 40px rgba(0,0,0,0.12)",
-                        overflow: "hidden",
-                        zIndex: 50,
+                        zIndex: 10050,
+                        maxHeight: 280,
+                        overflow: "auto",
                       }}
                     >
                       {suggestions.length === 0 ? (
@@ -2903,7 +2851,8 @@ async function confirmCartPickup() {
                             onMouseEnter={() => setActiveIndex(idx)}
                             onMouseDown={(ev) => {
                               ev.preventDefault();
-                              pickItem(it);
+                              ev.stopPropagation();
+                              pickItem(it, scanMode === "CART");
                             }}
                             style={{
                               padding: "10px 12px",
@@ -2925,9 +2874,20 @@ async function confirmCartPickup() {
                     <b>{picked.code}</b> · {picked.name}
                   </div>
                 )}
+                {scanMode === "CART" && picked && (
+                  <div style={{ marginBottom: 12 }}>
+                    <button
+                      type="button"
+                      className="btn btnPrimary"
+                      onClick={() => pickItem(picked!, true)}
+                    >
+                      Aggiungi al carrello
+                    </button>
+                  </div>
+                )}
                 {cart.length > 0 && (
                   <div style={{ marginBottom: 12, fontSize: 13 }}>
-                    Nel carrello: <b>{cart.length}</b> articolo/i
+                    Nel carrello: <b>{cart.length}</b> {cart.length === 1 ? "articolo" : "articoli"}
                   </div>
                 )}
                 <button
@@ -4007,7 +3967,7 @@ async function confirmCartPickup() {
       alignItems: "center",
       justifyContent: "center",
       padding: 20,
-      zIndex: 10050,
+      zIndex: 10060,
     }}
   >
     <div

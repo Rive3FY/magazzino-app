@@ -1377,6 +1377,127 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                   </button>
                 </div>
 
+                <div style={{ marginTop: 8, paddingTop: 12, borderTop: "1px solid rgba(15,23,42,0.08)" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginBottom: 8 }}>Oppure selezione manuale</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div ref={assetBoxRef} style={{ position: "relative" }}>
+                      <label className="label" htmlFor={`move-search-wiz-${area}`}>Cerca attrezzatura (seriale o nome)</label>
+                      <ClearableInput
+                        id={`move-search-wiz-${area}`}
+                        value={assetSearch}
+                        onChange={(value) => {
+                          setAssetSearch(value);
+                          setForm((prev) => ({ ...prev, equipment_id: "" }));
+                          setAssetOpen(true);
+                          setMsg(null);
+                        }}
+                        onFocus={() => setAssetOpen(true)}
+                        onKeyDown={(e) => {
+                          if (!assetOpen) return;
+                          if (e.key === "ArrowDown") {
+                            e.preventDefault();
+                            setAssetActiveIndex((i) => Math.min(i + 1, assetMatches.length - 1));
+                          } else if (e.key === "ArrowUp") {
+                            e.preventDefault();
+                            setAssetActiveIndex((i) => Math.max(i - 1, 0));
+                          } else if (e.key === "Enter") {
+                            e.preventDefault();
+                            if (assetActive) pickAsset(assetActive);
+                          } else if (e.key === "Escape") {
+                            setAssetOpen(false);
+                          }
+                        }}
+                      />
+                      {assetOpen && assetSearch.trim() && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            left: 0,
+                            right: 0,
+                            top: "100%",
+                            marginTop: 6,
+                            background: "#fff",
+                            border: "1px solid rgba(15,23,42,0.12)",
+                            borderRadius: 12,
+                            boxShadow: "0 16px 40px rgba(0,0,0,0.12)",
+                            overflow: "hidden",
+                            zIndex: 50,
+                            maxHeight: 240,
+                            overflowY: "auto",
+                          }}
+                        >
+                          {assetMatches.length === 0 ? (
+                            <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
+                          ) : (
+                            assetMatches.map((asset, idx) => {
+                              const ledColor = asset.status === "AVAILABLE" ? "#22c55e" : "#ef4444";
+                              return (
+                                <div
+                                  key={asset.id}
+                                  onMouseEnter={() => setAssetActiveIndex(idx)}
+                                  onMouseDown={(ev) => {
+                                    ev.preventDefault();
+                                    pickAsset(asset);
+                                  }}
+                                  style={{
+                                    padding: "10px 12px",
+                                    cursor: "pointer",
+                                    background: idx === assetActiveIndex ? "#eef2ff" : "white",
+                                    borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
+                                    display: "flex",
+                                    alignItems: "flex-start",
+                                    gap: 10,
+                                  }}
+                                >
+                                  <span
+                                    title={EQUIPMENT_STATUS_LABELS[asset.status]}
+                                    style={{
+                                      width: 10,
+                                      height: 10,
+                                      borderRadius: "50%",
+                                      backgroundColor: ledColor,
+                                      boxShadow: `0 0 6px ${ledColor}`,
+                                      flexShrink: 0,
+                                      marginTop: 5,
+                                    }}
+                                    aria-hidden
+                                  />
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontWeight: 900, color: "#0f172a" }}>{asset.serial_number || asset.asset_code}</div>
+                                    <div style={{ fontSize: 12, color: "#334155" }}>{asset.name}</div>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <label className="label" htmlFor={`move-asset-wiz-${area}`}>Selezione rapida dall&apos;elenco</label>
+                      <select
+                        id={`move-asset-wiz-${area}`}
+                        className="input"
+                        value={form.equipment_id}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          const asset = assetMap.get(value) ?? null;
+                          setForm((prev) => ({ ...prev, equipment_id: value }));
+                          if (asset) setAssetSearch(`${asset.serial_number || asset.asset_code} - ${asset.name}`);
+                        }}
+                      >
+                        <option value="">Seleziona attrezzatura</option>
+                        {filteredAssets.map((asset) => (
+                          <option key={asset.id} value={asset.id}>
+                            {(asset.serial_number || asset.asset_code)} - {asset.name}
+                            {asset.status === "AVAILABLE" ? " 🟢" : " 🔴"}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
                 {SHOW_EQUIPMENT_FILTERS && (
                   <div style={{ display: "grid", gap: 10 }}>
                     <div>

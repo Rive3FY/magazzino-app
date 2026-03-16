@@ -1660,7 +1660,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           </div>
         )}
 
-            {msg && <div style={{ marginTop: 12, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
+        {msg && <div style={{ marginTop: 12, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
           </div>
         </div>
       )}

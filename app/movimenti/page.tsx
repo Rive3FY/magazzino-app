@@ -211,6 +211,7 @@ export default function MovimentiPage() {
       return [];
     }
   });
+  const movementDraftRestoredRef = useRef(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -320,6 +321,50 @@ export default function MovimentiPage() {
   /** Wizard prelievo materiali in popup */
   const [wizardMatOpen, setWizardMatOpen] = useState(false);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const cached = localStorage.getItem("magazzino_movement_draft");
+      if (!cached) return;
+      const draft = JSON.parse(cached) as {
+        type?: "IN" | "OUT";
+        warehouse?: "PRM" | "REALE" | "MISTO";
+        qty?: string;
+        note?: string;
+        search?: string;
+        picked?: DbItem | null;
+        scanMode?: "NORMAL" | "CART";
+        outboundStepMat?: 1 | 2;
+        wizardMatOpen?: boolean;
+        cartOpen?: boolean;
+      };
+      if (draft.type === "IN" || draft.type === "OUT") setType(draft.type);
+      if (draft.warehouse === "PRM" || draft.warehouse === "REALE" || draft.warehouse === "MISTO") setWarehouse(draft.warehouse);
+      if (typeof draft.qty === "string") setQty(draft.qty);
+      if (typeof draft.note === "string") setNote(draft.note);
+      if (typeof draft.search === "string") setSearch(draft.search);
+      if (
+        draft.picked &&
+        typeof draft.picked.code === "string" &&
+        typeof draft.picked.name === "string" &&
+        ("um" in draft.picked)
+      ) {
+        setPicked({
+          code: draft.picked.code,
+          name: draft.picked.name,
+          um: draft.picked.um ?? null,
+        });
+      }
+      if (draft.scanMode === "NORMAL" || draft.scanMode === "CART") setScanMode(draft.scanMode);
+      if (draft.outboundStepMat === 1 || draft.outboundStepMat === 2) setOutboundStepMat(draft.outboundStepMat);
+      if (typeof draft.wizardMatOpen === "boolean") setWizardMatOpen(draft.wizardMatOpen);
+      if (typeof draft.cartOpen === "boolean") setCartOpen(draft.cartOpen);
+    } catch {}
+    finally {
+      movementDraftRestoredRef.current = true;
+    }
+  }, []);
+
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyCode, setHistoryCode] = useState<string | null>(null);
   const [historyRows, setHistoryRows] = useState<
@@ -347,6 +392,42 @@ export default function MovimentiPage() {
   } | null>(null);
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "single" | "bulk"; id?: string; count?: number } | null>(null);
+
+  const hasMaterialPersistentDraft =
+    !!picked ||
+    cart.length > 0 ||
+    wizardMatOpen ||
+    outboundStepMat > 1 ||
+    scanMode === "CART" ||
+    warehouse === "MISTO" ||
+    search.trim().length > 0 ||
+    qty.trim().length > 0 ||
+    note.trim().length > 0;
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !movementDraftRestoredRef.current) return;
+    try {
+      if (!hasMaterialPersistentDraft) {
+        localStorage.removeItem("magazzino_movement_draft");
+        return;
+      }
+      localStorage.setItem(
+        "magazzino_movement_draft",
+        JSON.stringify({
+          type,
+          warehouse,
+          qty,
+          note,
+          search,
+          picked: picked ? { code: picked.code, name: picked.name, um: picked.um ?? null } : null,
+          scanMode,
+          outboundStepMat,
+          wizardMatOpen,
+          cartOpen,
+        })
+      );
+    } catch {}
+  }, [type, warehouse, qty, note, search, picked, scanMode, outboundStepMat, wizardMatOpen, cartOpen, hasMaterialPersistentDraft, cart.length]);
 
   function canEditRow(m: MovementRow) {
     const st = (m.status ?? (m.type === "OUT" ? "OPEN" : "CLOSED")) as "OPEN" | "CLOSED";
@@ -2366,6 +2447,16 @@ async function confirmCartPickup() {
     };
   }, [type, warehouse, scanMode, picked?.code, qty, wizardMatOpen, outboundStepMat]);
 
+  const hasMaterialWizardDraft = type === "OUT" && (outboundStepMat > 1 || cart.length > 0 || !!picked);
+
+  function getResumeOutboundStepMat(): 1 | 2 {
+    if (outboundStepMat === 2) {
+      if (scanMode === "CART") return cart.length > 0 ? 2 : 1;
+      return picked ? 2 : 1;
+    }
+    return 1;
+  }
+
   const active = useMemo(() => suggestions[activeIndex], [suggestions, activeIndex]);
 
   const displayHistory = useMemo(() => {
@@ -2520,12 +2611,12 @@ async function confirmCartPickup() {
               className="btn btnPrimary"
               onClick={() => {
                 setWizardMatOpen(true);
-                setOutboundStepMat(cart.length > 0 ? 2 : 1);
+                setOutboundStepMat(getResumeOutboundStepMat());
                 setMsg(null);
               }}
               style={{ padding: "10px 20px", fontWeight: 800 }}
             >
-              {cart.length > 0 ? "Continua prelievo" : "Avvia prelievo"}
+              {hasMaterialWizardDraft ? "Continua prelievo" : "Avvia prelievo"}
             </button>
           )}
 

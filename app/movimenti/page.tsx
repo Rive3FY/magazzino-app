@@ -572,6 +572,7 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
   }
 
   async function downloadRegistroPDF(rows: MovementRow[]) {
+    const closedRows = rows.filter((r) => r.type === "IN" || r.status === "CLOSED");
     try {
       const pdf = new jsPDF("p", "mm", "a4");
 
@@ -626,6 +627,7 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
         pdf.text("Qta", 112, y);
         pdf.text("Mag.", 126, y);
         pdf.text("Operatore", 142, y);
+        pdf.text("Note", 170, y);
 
         y += 8;
       };
@@ -645,7 +647,44 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(8);
 
-      rows.forEach((r, index) => {
+      const groupCounts = new Map<string | null, number>();
+      for (const r of closedRows) {
+        const gid = (r.movement_group_id ?? "").trim() || null;
+        groupCounts.set(gid, (groupCounts.get(gid) ?? 0) + 1);
+      }
+
+      let lastGroupId: string | null = "__none__";
+      let rowIndex = 0;
+
+      for (const r of closedRows) {
+        const gid = (r.movement_group_id ?? "").trim() || null;
+        const count = groupCounts.get(gid) ?? 1;
+        const isNewGroup = !!gid && gid !== lastGroupId;
+        const isMultiGroup = !!gid && count > 1;
+
+        if (isNewGroup && isMultiGroup) {
+          if (y > 270) {
+            drawFooter();
+            pdf.addPage();
+            y = 20;
+            drawTableHeader();
+            pdf.setFont("helvetica", "normal");
+            pdf.setFontSize(8);
+          }
+          pdf.setFillColor(235, 240, 248);
+          pdf.rect(10, y - 4, 190, 6, "F");
+          pdf.setFont("helvetica", "bold");
+          pdf.setFontSize(8);
+          pdf.setTextColor(50, 70, 120);
+          pdf.text(`Prelievo multiplo (${count} articoli)`, 12, y);
+          y += 6;
+          lastGroupId = gid;
+        } else if (!gid) {
+          lastGroupId = "__none__";
+        } else if (gid !== lastGroupId) {
+          lastGroupId = gid;
+        }
+
         const date = fmtDate(r.created_at);
         const code = String(r.code).slice(0, 24);
         const tipo = r.type === "IN" ? "Entrata" : "Uscita";
@@ -655,8 +694,9 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
         const qta = `${r.type === "IN" ? "+" : "-"}${qtyVal}`;
         const mag = String(r.warehouse ?? "");
         const operatore = String(r.created_by_name ?? r.created_by ?? "").slice(0, 26);
+        const note = String(r.note ?? "").trim().slice(0, 32);
 
-        if (index % 2 === 0) {
+        if (rowIndex % 2 === 0) {
           pdf.setFillColor(250, 250, 250);
           pdf.rect(10, y - 4, 190, 6, "F");
         }
@@ -680,8 +720,10 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
         pdf.setTextColor(35, 35, 35);
         pdf.text(mag, 126, y);
         pdf.text(operatore, 142, y);
+        pdf.text(note || "-", 170, y);
 
         y += 6;
+        rowIndex += 1;
 
         if (y > 278) {
           drawFooter();
@@ -691,122 +733,13 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
           pdf.setFont("helvetica", "normal");
           pdf.setFontSize(8);
         }
-      });
+      }
 
       drawFooter();
       pdf.save("registro_movimenti.pdf");
       toast.success("PDF scaricato");
     } catch (e: any) {
       console.error("PDF error:", e);
-      setMsg("Errore generazione PDF: " + (e?.message ?? "sconosciuto"));
-    }
-  }
-
-  async function downloadMovementDetailPDF() {
-    if (!closing) return;
-
-    try {
-      const pdf = new jsPDF("p", "mm", "a4");
-      const bannerDataUrl = await loadImageAsDataUrl("/terna-logo.svg");
-
-      const img = new Image();
-      img.src = bannerDataUrl;
-
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = () => reject(new Error("Impossibile leggere il banner"));
-      });
-
-      const imgWidth = 55;
-      const imgHeight = (img.height * imgWidth) / img.width;
-      pdf.addImage(bannerDataUrl, "PNG", 10, 6, imgWidth, imgHeight);
-
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 12;
-      const contentWidth = pageWidth - margin * 2;
-      const headerBottom = 8 + imgHeight;
-      let y = headerBottom + 12;
-
-      const ensureSpace = (needed = 8) => {
-        if (y + needed <= pageHeight - 12) return;
-        pdf.addPage();
-        y = 18;
-      };
-
-      const addTitle = (text: string) => {
-        ensureSpace(10);
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(13);
-        pdf.setTextColor(20, 20, 20);
-        pdf.text(text, margin, y);
-        y += 8;
-      };
-
-      const addLine = (label: string, value: string) => {
-        const lines = pdf.splitTextToSize(`${label}: ${value || "-"}`, contentWidth);
-        ensureSpace(lines.length * 5 + 2);
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(10);
-        pdf.setTextColor(35, 35, 35);
-        pdf.text(lines, margin, y);
-        y += lines.length * 5 + 2;
-      };
-
-      const addMovementBlock = (mov: MovementRow, index?: number) => {
-        const referentName =
-          (mov as any).referee_name ||
-          referents.find((r) => r.id === mov.referent_id)?.name ||
-          mov.referee_email ||
-          "-";
-        const status = (mov.status ?? (mov.type === "OUT" ? "OPEN" : "CLOSED")) === "OPEN" ? "APERTO" : "CHIUSO";
-        const detailName =
-          mov.id === closing.id
-            ? (closingMeta ? closingMeta.name : (nameMap[mov.code] ?? "-"))
-            : (nameMap[mov.code] ?? "-");
-        const detailUm = mov.id === closing.id ? (closingMeta?.um ?? "-") : "-";
-        const detailShelf = mov.id === closing.id
-          ? ((closingMeta?.shelf || closingMeta?.place) ? [closingMeta?.shelf, closingMeta?.place].filter(Boolean).join(" · ") : "-")
-          : "-";
-
-        addTitle(index ? `Riga ${index}` : "Dettaglio movimento");
-        addLine("Codice", mov.code);
-        addLine("Descrizione", detailName);
-        addLine("Unita di misura", detailUm);
-        addLine("Scaffale · Luogo", detailShelf);
-        addLine("Tipo", mov.type === "IN" ? "Entrata" : "Uscita");
-        addLine("Stato", status);
-        addLine("Data", fmtDate(mov.created_at));
-        addLine("Magazzino", mov.warehouse ?? "-");
-        addLine("Quantita uscita", String(Math.abs(n(mov.qty))));
-        addLine("Quantita rientro", mov.type === "OUT" ? String(n(mov.returned_qty)) : "-");
-        addLine(
-          "Quantita netta",
-          mov.type === "OUT" ? String(Math.max(0, Math.abs(n(mov.qty)) - n(mov.returned_qty))) : String(Math.abs(n(mov.qty)))
-        );
-        addLine("Nota apertura", mov.note ?? "-");
-        addLine("Nota rientro", mov.return_note ?? "-");
-        addLine("Referente", referentName);
-        addLine("Email referente", mov.referee_email ?? "-");
-        addLine("Inserito da", mov.created_by_name ?? "-");
-        addLine("Chiuso da", mov.closed_by ?? "-");
-        addLine("Data chiusura", mov.closed_at ? fmtDate(mov.closed_at) : "-");
-        y += 2;
-      };
-
-      addTitle(closingGroup.length > 1 ? `Prelievo multiplo (${closingGroup.length} articoli)` : `Movimento ${closing.code}`);
-      addLine("Generato da", userEmail ?? userId ?? "-");
-
-      if (closingGroup.length > 1) {
-        closingGroup.forEach((mov, idx) => addMovementBlock(mov, idx + 1));
-      } else {
-        addMovementBlock(closing);
-      }
-
-      pdf.save(closingGroup.length > 1 ? `movimento-gruppo-${closing.movement_group_id ?? closing.id}.pdf` : `movimento-${closing.code}-${closing.id}.pdf`);
-      toast.success("PDF scaricato");
-    } catch (e: any) {
-      console.error("PDF detail error:", e);
       setMsg("Errore generazione PDF: " + (e?.message ?? "sconosciuto"));
     }
   }
@@ -3157,6 +3090,11 @@ function finalizeMaterialPickupSuccess() {
     <main className="panel" style={{ overflowX: "hidden" }}>
       <div className="pageBar">
         <div className="pageBarTitle">Magazzino - Movimenti</div>
+        <div className="pageBarActions">
+          <button className="btn btnPrimary" type="button" onClick={() => void downloadRegistroPDF(history)}>
+            Scarica PDF registro
+          </button>
+        </div>
       </div>
 
       {SHOW_HISTORY_FILTERS && (
@@ -4505,39 +4443,29 @@ function finalizeMaterialPickupSuccess() {
               padding: 12,
             }}
           >
-            <div
+            <button
+              className="btn"
+              onClick={() => {
+                setCloseOpen(false);
+                setClosing(null);
+                setClosingGroup([]);
+                setClosingMeta(null);
+                setMsg(null);
+                setEditRectify(false);
+                setEditingMovementId(null);
+                setSelectedClosedRowId(null);
+                setGroupEditState({});
+                setGroupOpenQtyEditState({});
+                setGroupOpenQtySavingId(null);
+              }}
               style={{
                 position: "absolute",
                 top: 12,
                 right: 12,
-                display: "flex",
-                gap: 8,
-                flexWrap: "wrap",
-                justifyContent: "flex-end",
               }}
             >
-              <button className="btn btnPrimary" type="button" onClick={() => void downloadMovementDetailPDF()}>
-                Scarica PDF
-              </button>
-              <button
-                className="btn"
-                onClick={() => {
-                  setCloseOpen(false);
-                  setClosing(null);
-                  setClosingGroup([]);
-                  setClosingMeta(null);
-                  setMsg(null);
-                  setEditRectify(false);
-                  setEditingMovementId(null);
-                  setSelectedClosedRowId(null);
-                  setGroupEditState({});
-                  setGroupOpenQtyEditState({});
-                  setGroupOpenQtySavingId(null);
-                }}
-              >
-                Chiudi
-              </button>
-            </div>
+              Chiudi
+            </button>
 
             {closingGroup.length > 1 && (
               <div style={{ marginBottom: 16, padding: 12, background: "#f8fafc", borderRadius: 10, border: "1px solid #e2e8f0" }}>

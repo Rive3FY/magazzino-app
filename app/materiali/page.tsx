@@ -4,7 +4,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { BrowserMultiFormatReader } from "@zxing/browser";
-import jsPDF from "jspdf";
 
 type Movement = {
   id: string;
@@ -518,93 +517,6 @@ export default function Home() {
     const parts = [movement.referee_name, movement.referee_email].map((v) => (v ?? "").trim()).filter(Boolean);
     return parts.length > 0 ? parts.join(" · ") : "-";
   }, []);
-  const downloadMovementPdf = useCallback((entry: DashboardMovementEntry) => {
-    const doc = new jsPDF({ unit: "mm", format: "a4" });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const margin = 14;
-    const contentWidth = pageWidth - margin * 2;
-    let y = margin;
-
-    const ensureSpace = (needed = 8) => {
-      if (y + needed <= pageHeight - margin) return;
-      doc.addPage();
-      y = margin;
-    };
-
-    const addTitle = (text: string) => {
-      ensureSpace(10);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(16);
-      doc.text(text, margin, y);
-      y += 8;
-    };
-
-    const addSection = (text: string) => {
-      ensureSpace(8);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text(text, margin, y);
-      y += 6;
-    };
-
-    const addLine = (label: string, value: string) => {
-      const safeValue = value.trim() || "-";
-      const lines = doc.splitTextToSize(`${label}: ${safeValue}`, contentWidth);
-      ensureSpace(lines.length * 5 + 1);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-      doc.text(lines, margin, y);
-      y += lines.length * 5 + 1;
-    };
-
-    addTitle(entry.isGroup ? `Prelievo multiplo (${entry.rows.length} articoli)` : `Movimento ${entry.lead.code}`);
-    addLine("Data", fmtDate(entry.lead.created_at));
-    addLine("Tipo", entry.lead.type === "IN" ? "Entrata" : "Uscita");
-    addLine("Magazzini", entry.warehouses);
-    addLine("Inserito da", entry.lead.created_by_name ?? "-");
-    if (entry.notes) addLine("Note", entry.notes);
-
-    if (entry.isGroup) {
-      entry.rows.forEach((row, index) => {
-        addSection(`Riga ${index + 1}`);
-        addLine("Codice", row.code);
-        addLine("Descrizione", nameMap[row.code] ?? "-");
-        addLine("Magazzino", row.warehouse ?? "-");
-        addLine("Quantita uscita", String(Math.abs(n(row.qty))));
-        addLine("Quantita rientro", row.type === "OUT" ? String(n(row.returned_qty)) : "-");
-        addLine("Quantita netta", String(movementNetQty(row)));
-        addLine("Stato", movementStatusLabel(row));
-        addLine("Referente", movementReferent(row));
-        addLine("Nota apertura", row.note ?? "-");
-        addLine("Nota rientro", row.return_note ?? "-");
-        addLine("Inserito da", row.created_by_name ?? "-");
-        addLine("Chiuso da", row.closed_by ?? "-");
-        addLine("Data chiusura", row.closed_at ? fmtDate(row.closed_at) : "-");
-        y += 2;
-      });
-    } else {
-      addSection("Dettaglio");
-      addLine("Codice", entry.lead.code);
-      addLine("Descrizione", nameMap[entry.lead.code] ?? "-");
-      addLine("Stato", movementStatusLabel(entry.lead));
-      addLine("Magazzino", entry.lead.warehouse ?? "-");
-      addLine("Quantita uscita", String(Math.abs(n(entry.lead.qty))));
-      addLine("Quantita rientro", entry.lead.type === "OUT" ? String(n(entry.lead.returned_qty)) : "-");
-      addLine("Quantita netta", String(movementNetQty(entry.lead)));
-      addLine("Nota apertura", entry.lead.note ?? "-");
-      addLine("Nota rientro", entry.lead.return_note ?? "-");
-      addLine("Referente", movementReferent(entry.lead));
-      addLine("Inserito da", entry.lead.created_by_name ?? "-");
-      addLine("Chiuso da", entry.lead.closed_by ?? "-");
-      addLine("Data chiusura", entry.lead.closed_at ? fmtDate(entry.lead.closed_at) : "-");
-    }
-
-    const fileName = entry.isGroup
-      ? `movimento-gruppo-${entry.key}.pdf`
-      : `movimento-${entry.lead.code}-${entry.lead.id}.pdf`;
-    doc.save(fileName);
-  }, [movementNetQty, movementReferent, movementStatusLabel, nameMap]);
 
   const filterHint = useMemo(() => {
     if (!picked || !stock) return null;
@@ -1037,14 +949,9 @@ export default function Home() {
                   {fmtDate(selectedMovementEntry.lead.created_at)} · {selectedMovementEntry.lead.type === "IN" ? "Entrata" : "Uscita"}
                 </div>
               </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                <button className="btn btnPrimary" type="button" onClick={() => downloadMovementPdf(selectedMovementEntry)}>
-                  Scarica PDF
-                </button>
-                <button className="btn" type="button" onClick={() => setSelectedMovementEntry(null)}>
-                  Chiudi
-                </button>
-              </div>
+              <button className="btn" type="button" onClick={() => setSelectedMovementEntry(null)}>
+                Chiudi
+              </button>
             </div>
 
             {selectedMovementEntry.isGroup ? (

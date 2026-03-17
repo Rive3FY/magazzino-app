@@ -245,6 +245,19 @@ export default function MovimentiPage() {
   const [scanInfo, setScanInfo] = useState<QuickMaterialInfo | null>(null);
   const [scanQty, setScanQty] = useState("1");
   const [scanSource, setScanSource] = useState<"barcode" | "nfc" | null>(null);
+  const [mixedCartInfo, setMixedCartInfo] = useState<{
+    code: string;
+    name: string;
+    um: string | null;
+    prmFree: number;
+    realeFree: number;
+    prmShelf: string;
+    realeShelf: string;
+    prmPlace?: string;
+    realePlace?: string;
+  } | null>(null);
+  const [mixedCartPrmQty, setMixedCartPrmQty] = useState("1");
+  const [mixedCartRealeQty, setMixedCartRealeQty] = useState("0");
 
   const [type, setType] = useState<"IN" | "OUT">("OUT");
   const [warehouse, setWarehouse] = useState<"PRM" | "REALE" | "MISTO">("PRM");
@@ -287,11 +300,15 @@ export default function MovimentiPage() {
   const [returnToPrm, setReturnToPrm] = useState<string>("0");
   const [returnToReale, setReturnToReale] = useState<string>("0");
   const [returnNote, setReturnNote] = useState<string>("");
+  const [openQtyEdit, setOpenQtyEdit] = useState<string>("0");
+  const [openQtySaving, setOpenQtySaving] = useState(false);
   const [referents, setReferents] = useState<ReferentRow[]>([]);
   const [selReferentId, setSelReferentId] = useState<string>("");
 
   const [editRectify, setEditRectify] = useState(false);
   const [groupEditState, setGroupEditState] = useState<Record<string, { returnQty: string; returnNote: string }>>({});
+  const [groupOpenQtyEditState, setGroupOpenQtyEditState] = useState<Record<string, string>>({});
+  const [groupOpenQtySavingId, setGroupOpenQtySavingId] = useState<string | null>(null);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deletingBulk, setDeletingBulk] = useState(false);
@@ -320,6 +337,7 @@ export default function MovimentiPage() {
   const [outboundStepMat, setOutboundStepMat] = useState<1 | 2>(1);
   /** Wizard prelievo materiali in popup */
   const [wizardMatOpen, setWizardMatOpen] = useState(false);
+  const [confirmCancelPickupOpen, setConfirmCancelPickupOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -389,6 +407,22 @@ export default function MovimentiPage() {
     fromReale: number;
     totalAvailable: number;
     enough: boolean;
+  } | null>(null);
+  const [mixedSplit, setMixedSplit] = useState<{
+    code: string | null;
+    fromPrm: number;
+    fromReale: number;
+    manual: boolean;
+  }>({
+    code: null,
+    fromPrm: 0,
+    fromReale: 0,
+    manual: false,
+  });
+  const [selectedStockInfo, setSelectedStockInfo] = useState<{
+    prmFree: number;
+    realeFree: number;
+    loading: boolean;
   } | null>(null);
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "single" | "bulk"; id?: string; count?: number } | null>(null);
@@ -664,6 +698,115 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
       toast.success("PDF scaricato");
     } catch (e: any) {
       console.error("PDF error:", e);
+      setMsg("Errore generazione PDF: " + (e?.message ?? "sconosciuto"));
+    }
+  }
+
+  async function downloadMovementDetailPDF() {
+    if (!closing) return;
+
+    try {
+      const pdf = new jsPDF("p", "mm", "a4");
+      const bannerDataUrl = await loadImageAsDataUrl("/terna-logo.svg");
+
+      const img = new Image();
+      img.src = bannerDataUrl;
+
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("Impossibile leggere il banner"));
+      });
+
+      const imgWidth = 55;
+      const imgHeight = (img.height * imgWidth) / img.width;
+      pdf.addImage(bannerDataUrl, "PNG", 10, 6, imgWidth, imgHeight);
+
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 12;
+      const contentWidth = pageWidth - margin * 2;
+      const headerBottom = 8 + imgHeight;
+      let y = headerBottom + 12;
+
+      const ensureSpace = (needed = 8) => {
+        if (y + needed <= pageHeight - 12) return;
+        pdf.addPage();
+        y = 18;
+      };
+
+      const addTitle = (text: string) => {
+        ensureSpace(10);
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(13);
+        pdf.setTextColor(20, 20, 20);
+        pdf.text(text, margin, y);
+        y += 8;
+      };
+
+      const addLine = (label: string, value: string) => {
+        const lines = pdf.splitTextToSize(`${label}: ${value || "-"}`, contentWidth);
+        ensureSpace(lines.length * 5 + 2);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(10);
+        pdf.setTextColor(35, 35, 35);
+        pdf.text(lines, margin, y);
+        y += lines.length * 5 + 2;
+      };
+
+      const addMovementBlock = (mov: MovementRow, index?: number) => {
+        const referentName =
+          (mov as any).referee_name ||
+          referents.find((r) => r.id === mov.referent_id)?.name ||
+          mov.referee_email ||
+          "-";
+        const status = (mov.status ?? (mov.type === "OUT" ? "OPEN" : "CLOSED")) === "OPEN" ? "APERTO" : "CHIUSO";
+        const detailName =
+          mov.id === closing.id
+            ? (closingMeta ? closingMeta.name : (nameMap[mov.code] ?? "-"))
+            : (nameMap[mov.code] ?? "-");
+        const detailUm = mov.id === closing.id ? (closingMeta?.um ?? "-") : "-";
+        const detailShelf = mov.id === closing.id
+          ? ((closingMeta?.shelf || closingMeta?.place) ? [closingMeta?.shelf, closingMeta?.place].filter(Boolean).join(" · ") : "-")
+          : "-";
+
+        addTitle(index ? `Riga ${index}` : "Dettaglio movimento");
+        addLine("Codice", mov.code);
+        addLine("Descrizione", detailName);
+        addLine("Unita di misura", detailUm);
+        addLine("Scaffale · Luogo", detailShelf);
+        addLine("Tipo", mov.type === "IN" ? "Entrata" : "Uscita");
+        addLine("Stato", status);
+        addLine("Data", fmtDate(mov.created_at));
+        addLine("Magazzino", mov.warehouse ?? "-");
+        addLine("Quantita uscita", String(Math.abs(n(mov.qty))));
+        addLine("Quantita rientro", mov.type === "OUT" ? String(n(mov.returned_qty)) : "-");
+        addLine(
+          "Quantita netta",
+          mov.type === "OUT" ? String(Math.max(0, Math.abs(n(mov.qty)) - n(mov.returned_qty))) : String(Math.abs(n(mov.qty)))
+        );
+        addLine("Nota apertura", mov.note ?? "-");
+        addLine("Nota rientro", mov.return_note ?? "-");
+        addLine("Referente", referentName);
+        addLine("Email referente", mov.referee_email ?? "-");
+        addLine("Inserito da", mov.created_by_name ?? "-");
+        addLine("Chiuso da", mov.closed_by ?? "-");
+        addLine("Data chiusura", mov.closed_at ? fmtDate(mov.closed_at) : "-");
+        y += 2;
+      };
+
+      addTitle(closingGroup.length > 1 ? `Prelievo multiplo (${closingGroup.length} articoli)` : `Movimento ${closing.code}`);
+      addLine("Generato da", userEmail ?? userId ?? "-");
+
+      if (closingGroup.length > 1) {
+        closingGroup.forEach((mov, idx) => addMovementBlock(mov, idx + 1));
+      } else {
+        addMovementBlock(closing);
+      }
+
+      pdf.save(closingGroup.length > 1 ? `movimento-gruppo-${closing.movement_group_id ?? closing.id}.pdf` : `movimento-${closing.code}-${closing.id}.pdf`);
+      toast.success("PDF scaricato");
+    } catch (e: any) {
+      console.error("PDF detail error:", e);
       setMsg("Errore generazione PDF: " + (e?.message ?? "sconosciuto"));
     }
   }
@@ -963,7 +1106,25 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
     setMsg(null);
 
     if (popup.forCart) {
-      const whPick = wh === "MISTO" ? "PRM" : wh;
+      if (wh === "MISTO") {
+        setScanInfo(null);
+        setMixedCartInfo({
+          code: popup.code,
+          name: popup.name,
+          um: popup.um,
+          prmFree: popup.prmFree,
+          realeFree: popup.realeFree,
+          prmShelf: popup.prmShelf,
+          realeShelf: popup.realeShelf,
+          prmPlace: popup.prmPlace,
+          realePlace: popup.realePlace,
+        });
+        setMixedCartPrmQty(popup.prmFree > 0 ? "1" : "0");
+        setMixedCartRealeQty("0");
+        return;
+      }
+
+      const whPick = wh;
       const info = await loadMaterialForScan(popup.code, whPick);
       if (info) {
         setScanInfo(info);
@@ -1199,6 +1360,119 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
 function removeCartRow(code: string, wh: "PRM" | "REALE") {
   setCart((prev) => prev.filter((r) => !(r.code === code && r.warehouse === wh)));
 }
+function updateCartRowQty(code: string, wh: "PRM" | "REALE", nextQty: number) {
+  setCart((prev) =>
+    prev.flatMap((row) => {
+      if (!(row.code === code && row.warehouse === wh)) return [row];
+      const clampedQty = Math.max(1, Math.min(row.qtyAvailable, Math.floor(nextQty)));
+      if (!Number.isFinite(clampedQty)) return [row];
+      return [{ ...row, qtyPick: clampedQty }];
+    })
+  );
+}
+function closeMixedCartModal() {
+  setMixedCartInfo(null);
+  setMixedCartPrmQty("1");
+  setMixedCartRealeQty("0");
+  if (cart.length > 0) setCartOpen(true);
+}
+
+function addMixedCartToCart() {
+  if (!mixedCartInfo) return;
+
+  const prmQty = Math.max(0, toNumber(mixedCartPrmQty));
+  const realeQty = Math.max(0, toNumber(mixedCartRealeQty));
+
+  if ((!Number.isFinite(prmQty) || prmQty < 0) || (!Number.isFinite(realeQty) || realeQty < 0)) {
+    setMsg("Quantità non valida.");
+    return;
+  }
+
+  if (prmQty <= 0 && realeQty <= 0) {
+    setMsg("Inserisci almeno una quantità da prelevare.");
+    return;
+  }
+
+  if (prmQty > mixedCartInfo.prmFree || realeQty > mixedCartInfo.realeFree) {
+    setMsg(`Quantità superiore alla disponibilità. PRM ${mixedCartInfo.prmFree}, REALE ${mixedCartInfo.realeFree}.`);
+    return;
+  }
+
+  setCart((prev) => {
+    let next = [...prev];
+
+    const mergeRow = (warehouse: "PRM" | "REALE", qtyPick: number, qtyAvailable: number, shelf?: string, place?: string) => {
+      if (qtyPick <= 0) return;
+      const idx = next.findIndex((row) => row.code === mixedCartInfo.code && row.warehouse === warehouse);
+      if (idx === -1) {
+        next.push({
+          code: mixedCartInfo.code,
+          name: mixedCartInfo.name,
+          um: mixedCartInfo.um,
+          warehouse,
+          qtyAvailable,
+          qtyPick,
+          shelf: shelf || undefined,
+          place: place || undefined,
+        });
+        return;
+      }
+
+      const mergedQty = next[idx].qtyPick + qtyPick;
+      if (mergedQty > next[idx].qtyAvailable) {
+        setMsg(`Totale richiesto superiore alla disponibilità in ${warehouse} (${next[idx].qtyAvailable}).`);
+        next = prev;
+        return;
+      }
+      next[idx] = { ...next[idx], qtyPick: mergedQty };
+    };
+
+    mergeRow("PRM", prmQty, mixedCartInfo.prmFree, mixedCartInfo.prmShelf, mixedCartInfo.prmPlace);
+    if (next !== prev) {
+      mergeRow("REALE", realeQty, mixedCartInfo.realeFree, mixedCartInfo.realeShelf, mixedCartInfo.realePlace);
+    }
+
+    return next;
+  });
+
+  setMsg(null);
+  setMixedCartInfo(null);
+  setMixedCartPrmQty("1");
+  setMixedCartRealeQty("0");
+  setCartOpen(true);
+}
+
+function switchPickupMode(mode: "NORMAL" | "CART") {
+  if (mode === scanMode) return;
+  stopScan();
+  setScanMode(mode);
+  setQty("");
+  setMixedSplit({ code: null, fromPrm: 0, fromReale: 0, manual: false });
+  setNote("");
+  setSearch("");
+  setSuggestions([]);
+  setPicked(null);
+  setOpen(false);
+  setActiveIndex(0);
+  setCart([]);
+  setCartOpen(mode === "CART");
+  setCartManualCode("");
+  setCartSuggestions([]);
+  setCartManualOpen(false);
+  setCartManualActiveIndex(0);
+  setCartNfcScanning(false);
+  setScanPopupOpen(false);
+  setScanInfo(null);
+  setScanQty("1");
+  setScanSource(null);
+  setMixedCartInfo(null);
+  setMixedCartPrmQty("1");
+  setMixedCartRealeQty("0");
+  setWarehouseChoicePopup(null);
+  setShelfInfoPopup(null);
+  setOutboundStepMat(1);
+  setMsg(null);
+}
 async function confirmCartPickup() {
   if (!userId) {
     setMsg("Devi essere loggato.");
@@ -1269,11 +1543,7 @@ async function confirmCartPickup() {
       });
     }
 
-    setCart([]);
-    setCartOpen(false);
-    setScanMode("NORMAL");
-    setOutboundStepMat(1);
-    setWizardMatOpen(false);
+    finalizeMaterialPickupSuccess();
     setMsg("Prelievo multiplo salvato ✅");
     toast.success("Prelievo multiplo salvato");
     await loadHistory();
@@ -1284,6 +1554,95 @@ async function confirmCartPickup() {
     setCartBusy(false);
   }
 }
+function setMixedSplitFromPrm(nextPrmRaw: string) {
+  if (!mixedPreview) return;
+  const requested = Math.max(0, toNumber(qty));
+  const maxPrm = Math.min(mixedPreview.prmFree, requested);
+  let nextPrm = Math.max(0, Math.min(maxPrm, toNumber(nextPrmRaw)));
+  let nextReale = Math.max(0, requested - nextPrm);
+  if (nextReale > mixedPreview.realeFree) {
+    nextReale = mixedPreview.realeFree;
+    nextPrm = Math.max(0, requested - nextReale);
+  }
+  setMixedSplit({
+    code: picked?.code ?? null,
+    fromPrm: nextPrm,
+    fromReale: nextReale,
+    manual: true,
+  });
+}
+
+function setMixedSplitFromReale(nextRealeRaw: string) {
+  if (!mixedPreview) return;
+  const requested = Math.max(0, toNumber(qty));
+  const maxReale = Math.min(mixedPreview.realeFree, requested);
+  let nextReale = Math.max(0, Math.min(maxReale, toNumber(nextRealeRaw)));
+  let nextPrm = Math.max(0, requested - nextReale);
+  if (nextPrm > mixedPreview.prmFree) {
+    nextPrm = mixedPreview.prmFree;
+    nextReale = Math.max(0, requested - nextPrm);
+  }
+  setMixedSplit({
+    code: picked?.code ?? null,
+    fromPrm: nextPrm,
+    fromReale: nextReale,
+    manual: true,
+  });
+}
+
+function resetMixedSplitToAuto() {
+  if (!mixedPreview) return;
+  setMixedSplit({
+    code: picked?.code ?? null,
+    fromPrm: mixedPreview.fromPrm,
+    fromReale: mixedPreview.fromReale,
+    manual: false,
+  });
+}
+
+function syncMixedPreviewState(code: string, prmFree: number, realeFree: number, loading: boolean) {
+  const requested = Math.max(0, toNumber(qty));
+  const totalAvailable = prmFree + realeFree;
+  const fromPrm = Math.min(prmFree, requested);
+  const fromReale = Math.max(0, requested - fromPrm);
+
+  setMixedPreviewLoading(loading);
+  setMixedPreview({
+    prmFree,
+    realeFree,
+    requested,
+    fromPrm,
+    fromReale,
+    totalAvailable,
+    enough: requested > 0 && totalAvailable >= requested,
+  });
+  setMixedSplit((prev) => {
+    const keepManual = prev.manual && prev.code === code;
+    if (!keepManual) {
+      return {
+        code,
+        fromPrm,
+        fromReale,
+        manual: false,
+      };
+    }
+
+    let nextPrm = Math.max(0, Math.min(prev.fromPrm, prmFree, requested));
+    let nextReale = Math.max(0, requested - nextPrm);
+    if (nextReale > realeFree) {
+      nextReale = realeFree;
+      nextPrm = Math.max(0, requested - nextReale);
+    }
+
+    return {
+      code,
+      fromPrm: nextPrm,
+      fromReale: nextReale,
+      manual: true,
+    };
+  });
+}
+
   function resetSearch() {
     stopScan();
     setSearch("");
@@ -1295,6 +1654,82 @@ async function confirmCartPickup() {
     setWarehouseChoicePopup(null);
     setShelfInfoPopup(null);
   }
+
+function cancelMaterialPickupDraft() {
+  stopScan();
+  setType("OUT");
+  setWarehouse("PRM");
+  setQty("");
+  setMixedSplit({ code: null, fromPrm: 0, fromReale: 0, manual: false });
+  setNote("");
+  setSearch("");
+  setSuggestions([]);
+  setPicked(null);
+  setOpen(false);
+  setActiveIndex(0);
+  setCart([]);
+  setCartOpen(false);
+  setCartManualCode("");
+  setCartSuggestions([]);
+  setCartManualOpen(false);
+  setCartManualActiveIndex(0);
+  setCartNfcScanning(false);
+  setScanMode("NORMAL");
+  setScanPopupOpen(false);
+  setScanInfo(null);
+  setScanQty("1");
+  setScanSource(null);
+  setMixedCartInfo(null);
+  setMixedCartPrmQty("1");
+  setMixedCartRealeQty("0");
+  setWarehouseChoicePopup(null);
+  setShelfInfoPopup(null);
+  setOutboundStepMat(1);
+  setWizardMatOpen(false);
+  setMsg(null);
+  setConfirmCancelPickupOpen(false);
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("magazzino_cart");
+    localStorage.removeItem("magazzino_movement_draft");
+  }
+}
+
+function finalizeMaterialPickupSuccess() {
+  stopScan();
+  setType("OUT");
+  setWarehouse("PRM");
+  setQty("");
+  setMixedSplit({ code: null, fromPrm: 0, fromReale: 0, manual: false });
+  setNote("");
+  setSearch("");
+  setSuggestions([]);
+  setPicked(null);
+  setOpen(false);
+  setActiveIndex(0);
+  setCart([]);
+  setCartOpen(false);
+  setCartManualCode("");
+  setCartSuggestions([]);
+  setCartManualOpen(false);
+  setCartManualActiveIndex(0);
+  setCartNfcScanning(false);
+  setScanMode("NORMAL");
+  setScanPopupOpen(false);
+  setScanInfo(null);
+  setScanQty("1");
+  setScanSource(null);
+  setMixedCartInfo(null);
+  setMixedCartPrmQty("1");
+  setMixedCartRealeQty("0");
+  setWarehouseChoicePopup(null);
+  setOutboundStepMat(1);
+  setWizardMatOpen(false);
+  setConfirmCancelPickupOpen(false);
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("magazzino_cart");
+    localStorage.removeItem("magazzino_movement_draft");
+  }
+}
 
   async function getOrCreateExcelLiveRow(code: string, wh: "PRM" | "REALE") {
     const { data: live, error: eLive } = await supabase
@@ -1451,8 +1886,20 @@ async function confirmCartPickup() {
         if (totalAvailable < qn) {
           return setMsg(`Quantità insufficiente. Disponibile: PRM ${prmFree} + REALE ${realeFree} = ${totalAvailable}, richiesta: ${qn}.`);
         }
-        const fromPRM = Math.min(prmFree, qn);
-        const fromREALE = qn - fromPRM;
+        const usingCurrentSplit = mixedSplit.code === picked.code;
+        const autoFromPrm = Math.min(prmFree, qn);
+        const fromPRM = usingCurrentSplit ? mixedSplit.fromPrm : autoFromPrm;
+        const fromREALE = usingCurrentSplit ? mixedSplit.fromReale : qn - autoFromPrm;
+        const splitTotal = fromPRM + fromREALE;
+        if (fromPRM < 0 || fromREALE < 0) {
+          return setMsg("La ripartizione del prelievo non è valida.");
+        }
+        if (fromPRM > prmFree || fromREALE > realeFree) {
+          return setMsg(`Ripartizione non valida. Disponibile: PRM ${prmFree}, REALE ${realeFree}.`);
+        }
+        if (Math.abs(splitTotal - qn) > 0.0001) {
+          return setMsg(`La ripartizione deve sommare la quantità richiesta (${qn}).`);
+        }
 
         const { data: prof } = await supabase.from("profiles").select("first_name,last_name").eq("id", userId).maybeSingle();
         const fullName = `${String((prof as any)?.first_name ?? "").trim()} ${String((prof as any)?.last_name ?? "").trim()}`.trim() || null;
@@ -1502,10 +1949,7 @@ async function confirmCartPickup() {
           await applyDeltaToExcelLive(picked.code, "REALE", -fromREALE);
         }
 
-        setQty("");
-        setNote("");
-        setOutboundStepMat(1);
-        setWizardMatOpen(false);
+        finalizeMaterialPickupSuccess();
         setMsg(`Prelievo misto salvato ✅ (PRM: ${fromPRM}, REALE: ${fromREALE})`);
         toast.success("Prelievo misto salvato");
         const shelfItems: { warehouse: "PRM" | "REALE"; shelf: string; place?: string | null }[] = [];
@@ -1594,11 +2038,11 @@ async function confirmCartPickup() {
       excelLiveOk = false;
     }
 
-    setQty("");
-    setNote("");
     if (type === "OUT") {
-      setOutboundStepMat(1);
-      setWizardMatOpen(false);
+      finalizeMaterialPickupSuccess();
+    } else {
+      setQty("");
+      setNote("");
     }
     setMsg(
       excelLiveOk
@@ -1732,6 +2176,20 @@ async function confirmCartPickup() {
     });
   }
 
+  function toggleSelectMany(ids: string[]) {
+    if (ids.length === 0) return;
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const allSelected = ids.every((id) => next.has(id));
+      if (allSelected) {
+        ids.forEach((id) => next.delete(id));
+      } else {
+        ids.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  }
+
   function toggleSelectAll() {
     if (!isAdmin) return;
     const allSelected = history.length > 0 && history.every((m) => selectedIds.has(m.id));
@@ -1826,16 +2284,20 @@ async function confirmCartPickup() {
     setSelectedClosedRowId(null);
 
     const initEdit: Record<string, { returnQty: string; returnNote: string }> = {};
+    const initOpenQtyEdit: Record<string, string> = {};
     for (const mov of group) {
       initEdit[mov.id] = {
         returnQty: String(n(mov.returned_qty)),
         returnNote: mov.return_note ?? "",
       };
+      initOpenQtyEdit[mov.id] = String(Math.abs(n(mov.qty)));
     }
     setGroupEditState(initEdit);
+    setGroupOpenQtyEditState(initOpenQtyEdit);
 
     const r = n(m.returned_qty);
     setReturnQty(String(r));
+    setOpenQtyEdit(String(Math.abs(n(m.qty))));
     const wh = m.warehouse ?? "PRM";
     setReturnToPrm(wh === "PRM" ? String(r) : "0");
     setReturnToReale(wh === "REALE" ? String(r) : "0");
@@ -1852,6 +2314,7 @@ async function confirmCartPickup() {
     setEditingMovementId(mov.id);
     const r = n(mov.returned_qty);
     setReturnQty(String(r));
+    setOpenQtyEdit(String(Math.abs(n(mov.qty))));
     const wh = mov.warehouse ?? "PRM";
     setReturnToPrm(wh === "PRM" ? String(r) : "0");
     setReturnToReale(wh === "REALE" ? String(r) : "0");
@@ -1917,6 +2380,180 @@ async function confirmCartPickup() {
     setEditRectify(false);
     setClosing(closingGroup[0] ?? mov);
     setMsg("Rettifica salvata. Conferma tutti gli articoli, poi seleziona il referente e chiudi il gruppo.");
+  }
+
+  async function saveOpenMovementQty() {
+    if (!closing || closingGroup.length > 1) return;
+    const st = (closing.status ?? (closing.type === "OUT" ? "OPEN" : "CLOSED")) as "OPEN" | "CLOSED";
+    if (closing.type !== "OUT" || st !== "OPEN") return;
+    if (!canEditRow(closing)) {
+      setMsg("Solo il creatore del movimento o l'admin può modificare la quantità.");
+      return;
+    }
+
+    const nextQty = toNumber(openQtyEdit);
+    if (!Number.isFinite(nextQty) || nextQty <= 0) {
+      setMsg("Quantità uscita non valida.");
+      return;
+    }
+
+    const currentQty = Math.abs(n(closing.qty));
+    if (Math.abs(nextQty - currentQty) < 0.0001) {
+      setMsg("La quantità uscita non è cambiata.");
+      return;
+    }
+
+    const warehouseKey = closing.warehouse as "PRM" | "REALE" | null;
+    if (!warehouseKey) {
+      setMsg("Magazzino del movimento non valido.");
+      return;
+    }
+
+    const deltaFree = currentQty - nextQty;
+    if (deltaFree < 0) {
+      const availableNow = await getWarehouseFreeQty(closing.code, warehouseKey);
+      if (availableNow < Math.abs(deltaFree)) {
+        setMsg(`Quantità insufficiente in ${warehouseKey}. Disponibile ora: ${availableNow}.`);
+        return;
+      }
+    }
+
+    setOpenQtySaving(true);
+    setMsg(null);
+
+    const storedNextQty = n(closing.qty) < 0 ? -nextQty : nextQty;
+    const { error } = await supabase
+      .from("movements")
+      .update({ qty: storedNextQty } as any)
+      .eq("id", closing.id);
+
+    if (error) {
+      setOpenQtySaving(false);
+      setMsg("Errore aggiornamento quantità uscita: " + ((error as any)?.message ?? "sconosciuto"));
+      return;
+    }
+
+    try {
+      const excelRes = await applyDeltaToExcelLive(closing.code, warehouseKey, deltaFree);
+      if (excelRes !== true) {
+        setMsg("Quantità aggiornata, ma non è stato possibile aggiornare correttamente la giacenza.");
+      } else {
+        setMsg("Quantità uscita aggiornata.");
+      }
+    } catch (e: any) {
+      console.error("open movement qty update error:", e);
+      setMsg("Quantità aggiornata, ma c'è stato un errore nell'aggiornamento giacenza.");
+    }
+
+    await writeAuditLog({
+      action: "MOVEMENT_UPDATED",
+      entity_type: "movement",
+      entity_id: closing.id,
+      code: closing.code,
+      warehouse: closing.warehouse,
+      details_json: {
+        previous_qty: currentQty,
+        next_qty: nextQty,
+        status: "OPEN",
+      },
+    });
+
+    setClosing((prev) => (prev ? { ...prev, qty: storedNextQty } : prev));
+    setClosingGroup((prev) => prev.map((row) => (row.id === closing.id ? { ...row, qty: storedNextQty } : row)));
+    setHistory((prev) => prev.map((row) => (row.id === closing.id ? { ...row, qty: storedNextQty } : row)));
+    setOpenQtyEdit(String(nextQty));
+    setOpenQtySaving(false);
+    await loadHistory(true);
+  }
+
+  async function saveGroupOpenMovementQty(mov: MovementRow) {
+    const st = (mov.status ?? (mov.type === "OUT" ? "OPEN" : "CLOSED")) as "OPEN" | "CLOSED";
+    if (mov.type !== "OUT" || st !== "OPEN") return;
+    if (!canEditRow(mov)) {
+      setMsg("Solo il creatore del movimento o l'admin può modificare la quantità.");
+      return;
+    }
+
+    const nextQtyRaw = groupOpenQtyEditState[mov.id] ?? String(Math.abs(n(mov.qty)));
+    const nextQty = toNumber(nextQtyRaw);
+    if (!Number.isFinite(nextQty) || nextQty <= 0) {
+      setMsg(`Quantità uscita non valida per ${mov.code}.`);
+      return;
+    }
+
+    const currentQty = Math.abs(n(mov.qty));
+    if (Math.abs(nextQty - currentQty) < 0.0001) {
+      setMsg(`La quantità uscita di ${mov.code} non è cambiata.`);
+      return;
+    }
+
+    if (n(mov.returned_qty) > nextQty) {
+      setMsg(`La nuova quantità di ${mov.code} non può essere inferiore al già rientrato (${n(mov.returned_qty)}).`);
+      return;
+    }
+
+    const warehouseKey = mov.warehouse as "PRM" | "REALE" | null;
+    if (!warehouseKey) {
+      setMsg(`Magazzino non valido per ${mov.code}.`);
+      return;
+    }
+
+    const deltaFree = currentQty - nextQty;
+    if (deltaFree < 0) {
+      const availableNow = await getWarehouseFreeQty(mov.code, warehouseKey);
+      if (availableNow < Math.abs(deltaFree)) {
+        setMsg(`Quantità insufficiente in ${warehouseKey} per ${mov.code}. Disponibile ora: ${availableNow}.`);
+        return;
+      }
+    }
+
+    setGroupOpenQtySavingId(mov.id);
+    setMsg(null);
+
+    const storedNextQty = n(mov.qty) < 0 ? -nextQty : nextQty;
+    const { error } = await supabase
+      .from("movements")
+      .update({ qty: storedNextQty } as any)
+      .eq("id", mov.id);
+
+    if (error) {
+      setGroupOpenQtySavingId(null);
+      setMsg(`Errore aggiornamento quantità uscita per ${mov.code}: ` + ((error as any)?.message ?? "sconosciuto"));
+      return;
+    }
+
+    try {
+      const excelRes = await applyDeltaToExcelLive(mov.code, warehouseKey, deltaFree);
+      if (excelRes !== true) {
+        setMsg(`Quantità aggiornata per ${mov.code}, ma non è stato possibile aggiornare correttamente la giacenza.`);
+      } else {
+        setMsg(`Quantità uscita aggiornata per ${mov.code}.`);
+      }
+    } catch (e: any) {
+      console.error("group open movement qty update error:", e);
+      setMsg(`Quantità aggiornata per ${mov.code}, ma c'è stato un errore nell'aggiornamento giacenza.`);
+    }
+
+    await writeAuditLog({
+      action: "MOVEMENT_UPDATED",
+      entity_type: "movement",
+      entity_id: mov.id,
+      code: mov.code,
+      warehouse: mov.warehouse,
+      details_json: {
+        previous_qty: currentQty,
+        next_qty: nextQty,
+        status: "OPEN",
+        mode: "group",
+      },
+    });
+
+    setClosing((prev) => (prev?.id === mov.id ? { ...prev, qty: storedNextQty } : prev));
+    setClosingGroup((prev) => prev.map((row) => (row.id === mov.id ? { ...row, qty: storedNextQty } : row)));
+    setHistory((prev) => prev.map((row) => (row.id === mov.id ? { ...row, qty: storedNextQty } : row)));
+    setGroupOpenQtyEditState((prev) => ({ ...prev, [mov.id]: String(nextQty) }));
+    setGroupOpenQtySavingId(null);
+    await loadHistory(true);
   }
 
   async function confirmClose() {
@@ -2031,6 +2668,7 @@ async function confirmCartPickup() {
             out_qty: outQty,
             returned_qty: r,
             net_qty: Math.max(0, outQty - r),
+            open_note: mov.note ?? null,
             return_note: noteVal || null,
             type: mov.type,
           };
@@ -2045,6 +2683,7 @@ async function confirmCartPickup() {
           out_qty: first?.out_qty,
           returned_qty: first?.returned_qty,
           net_qty: first?.net_qty,
+          open_note: first?.open_note,
           return_note: first?.return_note,
           type: first?.type,
           referent_name: ref?.name ?? null,
@@ -2229,6 +2868,7 @@ async function confirmCartPickup() {
           out_qty: outQty,
           returned_qty: r,
           net_qty: Math.max(0, outQty - r),
+          open_note: closing.note ?? null,
           return_note: (returnNote ?? "").trim() || null,
           referent_name: ref?.name ?? null,
           referent_email: ref?.email ?? null,
@@ -2404,48 +3044,61 @@ async function confirmCartPickup() {
     ) {
       setMixedPreview(null);
       setMixedPreviewLoading(false);
+      setMixedSplit({ code: null, fromPrm: 0, fromReale: 0, manual: false });
+      return;
+    }
+
+    if (!selectedStockInfo) {
+      setMixedPreview(null);
+      setMixedPreviewLoading(true);
+      return;
+    }
+    syncMixedPreviewState(
+      picked.code,
+      selectedStockInfo.prmFree ?? 0,
+      selectedStockInfo.realeFree ?? 0,
+      selectedStockInfo.loading
+    );
+  }, [type, warehouse, scanMode, picked?.code, qty, wizardMatOpen, outboundStepMat]);
+
+  useEffect(() => {
+    if (type !== "OUT" || scanMode !== "NORMAL" || !picked?.code) {
+      setSelectedStockInfo(null);
       return;
     }
 
     let cancelled = false;
+    setSelectedStockInfo((prev) => ({
+      prmFree: prev?.prmFree ?? 0,
+      realeFree: prev?.realeFree ?? 0,
+      loading: true,
+    }));
 
     (async () => {
-      setMixedPreviewLoading(true);
       try {
         const [prmFree, realeFree] = await Promise.all([
           getWarehouseFreeQty(picked.code, "PRM"),
           getWarehouseFreeQty(picked.code, "REALE"),
         ]);
         if (cancelled) return;
-
-        const requested = Math.max(0, toNumber(qty));
-        const totalAvailable = prmFree + realeFree;
-        const fromPrm = Math.min(prmFree, requested);
-        const fromReale = Math.max(0, requested - fromPrm);
-
-        setMixedPreview({
-          prmFree,
-          realeFree,
-          requested,
-          fromPrm,
-          fromReale,
-          totalAvailable,
-          enough: requested > 0 && totalAvailable >= requested,
-        });
-      } catch (error) {
-        if (!cancelled) {
-          console.error("mixed preview error:", error);
-          setMixedPreview(null);
+        setSelectedStockInfo({ prmFree, realeFree, loading: false });
+        if (type === "OUT" && warehouse === "MISTO" && scanMode === "NORMAL" && wizardMatOpen && outboundStepMat === 2) {
+          syncMixedPreviewState(picked.code, prmFree, realeFree, false);
         }
-      } finally {
-        if (!cancelled) setMixedPreviewLoading(false);
+      } catch (error) {
+        if (cancelled) return;
+        console.error("selected stock info error:", error);
+        setSelectedStockInfo({ prmFree: 0, realeFree: 0, loading: false });
+        if (type === "OUT" && warehouse === "MISTO" && scanMode === "NORMAL" && wizardMatOpen && outboundStepMat === 2) {
+          syncMixedPreviewState(picked.code, 0, 0, false);
+        }
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [type, warehouse, scanMode, picked?.code, qty, wizardMatOpen, outboundStepMat]);
+  }, [type, scanMode, picked?.code, warehouse, wizardMatOpen, outboundStepMat]);
 
   const hasMaterialWizardDraft = type === "OUT" && (outboundStepMat > 1 || cart.length > 0 || !!picked);
 
@@ -2460,15 +3113,44 @@ async function confirmCartPickup() {
   const active = useMemo(() => suggestions[activeIndex], [suggestions, activeIndex]);
 
   const displayHistory = useMemo(() => {
-    const seen = new Set<string>();
-    return history.filter((row) => {
-      const gid = (row as any).movement_group_id;
-      if (gid) {
-        if (seen.has(gid)) return false;
-        seen.add(gid);
+    const entries: Array<{
+      key: string;
+      lead: MovementRow;
+      rows: MovementRow[];
+      movementGroupId: string | null;
+    }> = [];
+    const groups = new Map<string, { key: string; lead: MovementRow; rows: MovementRow[]; movementGroupId: string }>();
+
+    for (const row of history) {
+      const gidRaw = (row as any).movement_group_id;
+      const gid = typeof gidRaw === "string" && gidRaw.trim() ? gidRaw : null;
+      if (!gid) {
+        entries.push({
+          key: row.id,
+          lead: row,
+          rows: [row],
+          movementGroupId: null,
+        });
+        continue;
       }
-      return true;
-    });
+
+      const existing = groups.get(gid);
+      if (existing) {
+        existing.rows.push(row);
+        continue;
+      }
+
+      const entry = {
+        key: gid,
+        lead: row,
+        rows: [row],
+        movementGroupId: gid,
+      };
+      groups.set(gid, entry);
+      entries.push(entry);
+    }
+
+    return entries;
   }, [history]);
 
   return (
@@ -2697,16 +3379,7 @@ async function confirmCartPickup() {
                 value={scanMode}
                 onChange={(e) => {
                   const mode = e.target.value as "NORMAL" | "CART";
-                  setScanMode(mode);
-
-                  if (mode === "CART") {
-                    setScanPopupOpen(false);
-                    setScanInfo(null);
-                    setCartOpen(true);
-                    setMsg(null);
-                  } else {
-                    setCartOpen(false);
-                  }
+                  switchPickupMode(mode);
                 }}
               >
                 <option value="NORMAL">Inserimento singolo</option>
@@ -2803,38 +3476,40 @@ async function confirmCartPickup() {
               )}
             </div>
 
-            <div style={{ marginTop: 12 }}>
-              <div className="mobileFormRow" style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
-                <div style={{ gridColumn: "span 8" }}>
-                  <label className="label" htmlFor="noteMove">
-                    Note *
-                  </label>
-                  <input id="noteMove" name="noteMove" className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="DDT / commessa / cliente (obbligatorio)" required />
-                </div>
+            {scanMode !== "CART" && (
+              <div style={{ marginTop: 12 }}>
+                <div className="mobileFormRow" style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
+                  <div style={{ gridColumn: "span 8" }}>
+                    <label className="label" htmlFor="noteMove">
+                      Note *
+                    </label>
+                    <input id="noteMove" name="noteMove" className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="DDT / commessa / cliente (obbligatorio)" required />
+                  </div>
 
-                <div style={{ gridColumn: "span 3" }}>
-                  <label className="label" htmlFor="qtyMove">
-                    Quantità
-                  </label>
-                  <input
-                    ref={qtyRef}
-                    id="qtyMove"
-                    name="qtyMove"
-                    className="input"
-                    value={qty}
-                    onChange={(e) => setQty(e.target.value)}
-                    inputMode="decimal"
-                    placeholder="es. 5"
-                  />
-                </div>
+                  <div style={{ gridColumn: "span 3" }}>
+                    <label className="label" htmlFor="qtyMove">
+                      Quantità
+                    </label>
+                    <input
+                      ref={qtyRef}
+                      id="qtyMove"
+                      name="qtyMove"
+                      className="input"
+                      value={qty}
+                      onChange={(e) => setQty(e.target.value)}
+                      inputMode="decimal"
+                      placeholder="es. 5"
+                    />
+                  </div>
 
-                <div style={{ gridColumn: "span 1", display: "flex", alignItems: "end" }}>
-                  <button className="btn btnPrimary" onClick={saveMovement} style={{ width: "100%" }}>
-                    Salva
-                  </button>
+                  <div style={{ gridColumn: "span 1", display: "flex", alignItems: "end" }}>
+                    <button className="btn btnPrimary" onClick={saveMovement} style={{ width: "100%" }}>
+                      Salva
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
             {picked && (
               <div style={{ marginTop: 12, fontSize: 13, opacity: 0.95 }}>
@@ -2938,23 +3613,23 @@ async function confirmCartPickup() {
 
             {outboundStepMat === 1 && (
               <>
+                <div style={{ marginBottom: 12 }}>
+                  <label className="label" htmlFor="scanModeWiz">Modalità uscita</label>
+                  <select
+                    id="scanModeWiz"
+                    className="input"
+                    value={scanMode}
+                    onChange={(e) => {
+                      const mode = e.target.value as "NORMAL" | "CART";
+                      switchPickupMode(mode);
+                    }}
+                  >
+                    <option value="NORMAL">Singolo</option>
+                    <option value="CART">Carrello {cart.length > 0 ? `(${cart.length})` : ""}</option>
+                  </select>
+                </div>
+
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
-                  {scanMode === "CART" && (
-                    <button
-                      className={`btn ${cartOpen ? "btnPrimary" : ""}`}
-                      type="button"
-                      onClick={() => setCartOpen((o) => !o)}
-                      style={{ display: "flex", alignItems: "center", gap: 6 }}
-                    >
-                      <CartIcon />
-                      <span>Carrello</span>
-                      {cart.length > 0 && (
-                        <span style={{ background: "rgba(0,0,0,0.15)", borderRadius: 10, padding: "2px 6px", fontSize: 11, fontWeight: 800 }}>
-                          {cart.length}
-                        </span>
-                      )}
-                    </button>
-                  )}
                   <button className="btn" type="button" onClick={() => (scanning ? stopScan() : startScan())} disabled={cartNfcScanning} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <BarcodeIcon />
                     Barcode
@@ -2966,19 +3641,6 @@ async function confirmCartPickup() {
                   <button className="btn" type="button" onClick={resetSearch}>
                     Pulisci
                   </button>
-                  <select
-                    className="input"
-                    value={scanMode}
-                    onChange={(e) => {
-                      const mode = e.target.value as "NORMAL" | "CART";
-                      setScanMode(mode);
-                      if (mode === "CART") setCartOpen(true);
-                      else setCartOpen(false);
-                    }}
-                  >
-                    <option value="NORMAL">Singolo</option>
-                    <option value="CART">Carrello</option>
-                  </select>
                 </div>
                 <div ref={boxRef} style={{ position: "relative", marginBottom: 12 }}>
                   <input
@@ -3073,6 +3735,28 @@ async function confirmCartPickup() {
                       <b>Magazzino prelievo:</b>{" "}
                       {warehouse === "MISTO" ? "MISTO (prima PRM, poi REALE se serve)" : warehouse}
                     </div>
+                    <div style={{ marginTop: 6, fontSize: 13, color: "#334155" }}>
+                      <b>Disponibilità:</b>{" "}
+                      {selectedStockInfo?.loading
+                        ? "calcolo in corso..."
+                        : warehouse === "PRM"
+                          ? `PRM ${selectedStockInfo?.prmFree ?? 0}`
+                          : warehouse === "REALE"
+                            ? `REALE ${selectedStockInfo?.realeFree ?? 0}`
+                            : `PRM ${selectedStockInfo?.prmFree ?? 0} · REALE ${selectedStockInfo?.realeFree ?? 0}`}
+                    </div>
+                    <div style={{ marginTop: 10 }}>
+                      <label className="label" htmlFor="qtyMoveStep1">Quantità da prelevare</label>
+                      <input
+                        ref={qtyRef}
+                        id="qtyMoveStep1"
+                        className="input"
+                        value={qty}
+                        onChange={(e) => setQty(e.target.value)}
+                        inputMode="decimal"
+                        placeholder="es. 5"
+                      />
+                    </div>
                   </div>
                 )}
                 {scanMode === "CART" && picked && (
@@ -3086,7 +3770,7 @@ async function confirmCartPickup() {
                     </button>
                   </div>
                 )}
-                {cart.length > 0 && (
+                {scanMode === "CART" && (
                   <div
                     style={{
                       marginBottom: 12,
@@ -3096,60 +3780,96 @@ async function confirmCartPickup() {
                       background: "rgba(15,23,42,0.03)",
                     }}
                   >
-                    <div style={{ fontWeight: 900, color: "#0f172a" }}>
+                    <div style={{ fontWeight: 900, color: "#0f172a", marginBottom: 6 }}>
                       Carrello attuale: {cart.length} {cart.length === 1 ? "articolo" : "articoli"}
                     </div>
-                    <div style={{ marginTop: 6, fontSize: 13, color: "#64748b" }}>
-                      Ogni riga mostra sempre da quale magazzino stai prelevando.
+                    <div style={{ fontSize: 13, color: "#64748b", marginBottom: 10 }}>
+                      Ogni riga mostra magazzino, disponibilità e quantità da prelevare.
                     </div>
-                    <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
-                      {cart.slice(-4).map((row) => (
-                        <div
-                          key={`${row.code}-${row.warehouse}`}
-                          style={{
-                            padding: "8px 10px",
-                            borderRadius: 10,
-                            background: "#fff",
-                            border: "1px solid rgba(15,23,42,0.08)",
-                            fontSize: 13,
-                          }}
-                        >
-                          <span style={{ fontWeight: 800 }}>{row.code}</span>
-                          {" · "}
-                          <span>{row.name}</span>
-                          {" · "}
-                          <span style={{ fontWeight: 700 }}>{row.warehouse}</span>
-                          {" · "}
-                          <span>Q.tà {row.qtyPick}</span>
-                        </div>
-                      ))}
-                      {cart.length > 4 && (
-                        <div style={{ fontSize: 12, color: "#64748b" }}>
-                          ...e altre {cart.length - 4} righe nel carrello
-                        </div>
-                      )}
+                    <div className="tableWrap" style={{ overflowX: "auto" }}>
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Codice</th>
+                            <th>Descrizione</th>
+                            <th>Mag.</th>
+                            <th>Disponibile</th>
+                            <th>Da prelevare</th>
+                            <th>Azioni</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {cart.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} style={{ padding: 12, color: "#64748b" }}>
+                                Carrello vuoto. Cerca un materiale e aggiungilo al carrello.
+                              </td>
+                            </tr>
+                          ) : (
+                            cart.map((row) => (
+                              <tr key={`${row.code}-${row.warehouse}`}>
+                                <td style={{ fontWeight: 900 }}>{row.code}</td>
+                                <td>{row.name}</td>
+                                <td>{row.warehouse}</td>
+                                <td>{row.qtyAvailable}</td>
+                                <td style={{ fontWeight: 900 }}>{row.qtyPick}</td>
+                                <td>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                    <button type="button" className="btn" style={{ padding: "6px 10px", minWidth: 32 }} onClick={() => updateCartRowQty(row.code, row.warehouse, row.qtyPick - 1)}>
+                                      -
+                                    </button>
+                                    <span style={{ minWidth: 34, textAlign: "center", fontWeight: 800 }}>{row.qtyPick}</span>
+                                    <button type="button" className="btn" style={{ padding: "6px 10px", minWidth: 32 }} onClick={() => updateCartRowQty(row.code, row.warehouse, row.qtyPick + 1)} disabled={row.qtyPick >= row.qtyAvailable}>
+                                      +
+                                    </button>
+                                    <button type="button" className="btn" onClick={() => removeCartRow(row.code, row.warehouse)}>
+                                      Rimuovi
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}
-                <button
-                  type="button"
-                  className="btn btnPrimary"
-                  onClick={() => setOutboundStepMat(2)}
-                  disabled={scanMode === "NORMAL" ? !picked : cart.length === 0}
-                >
-                  Avanti → Dettagli e conferma
-                </button>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button type="button" className="btn" onClick={() => setConfirmCancelPickupOpen(true)}>
+                    Annulla prelievo
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btnPrimary"
+                    onClick={() => setOutboundStepMat(2)}
+                    disabled={scanMode === "NORMAL" ? (!picked || !Number.isFinite(toNumber(qty)) || toNumber(qty) <= 0) : cart.length === 0}
+                  >
+                    Avanti → Dettagli e conferma
+                  </button>
+                </div>
               </>
             )}
 
             {outboundStepMat === 2 && (
               <>
-                <div style={{ marginBottom: 12 }}>
+                <div style={{ marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
                   <button type="button" className="btn" onClick={() => setOutboundStepMat(1)}>
                     ← Indietro
                   </button>
+                  <button type="button" className="btn" onClick={() => setConfirmCancelPickupOpen(true)}>
+                    Annulla prelievo
+                  </button>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 10, alignItems: "end", marginBottom: 12 }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr auto",
+                    gap: 10,
+                    alignItems: "end",
+                    marginBottom: 12,
+                  }}
+                >
                   <div>
                     <label className="label" htmlFor="noteMoveWiz">Note *</label>
                     <input
@@ -3158,17 +3878,6 @@ async function confirmCartPickup() {
                       value={note}
                       onChange={(e) => setNote(e.target.value)}
                       placeholder="DDT / commessa / cliente"
-                    />
-                  </div>
-                  <div>
-                    <label className="label" htmlFor="qtyMoveWiz">Quantità</label>
-                    <input
-                      id="qtyMoveWiz"
-                      className="input"
-                      value={qty}
-                      onChange={(e) => setQty(e.target.value)}
-                      inputMode="decimal"
-                      placeholder="es. 5"
                     />
                   </div>
                   <div>
@@ -3205,6 +3914,19 @@ async function confirmCartPickup() {
                       <b>Magazzino prelievo:</b>{" "}
                       {warehouse === "MISTO" ? "MISTO (prima PRM, poi REALE se serve)" : warehouse}
                     </div>
+                    <div style={{ marginTop: 6 }}>
+                      <b>Quantità da prelevare:</b> {qty || "0"}
+                    </div>
+                    <div style={{ marginTop: 6 }}>
+                      <b>Disponibilità:</b>{" "}
+                      {selectedStockInfo?.loading
+                        ? "calcolo in corso..."
+                        : warehouse === "PRM"
+                          ? `PRM ${selectedStockInfo?.prmFree ?? 0}`
+                          : warehouse === "REALE"
+                            ? `REALE ${selectedStockInfo?.realeFree ?? 0}`
+                            : `PRM ${selectedStockInfo?.prmFree ?? 0} · REALE ${selectedStockInfo?.realeFree ?? 0}`}
+                    </div>
                   </div>
                 )}
                 {picked && scanMode === "NORMAL" && warehouse === "MISTO" && (
@@ -3218,19 +3940,20 @@ async function confirmCartPickup() {
                     }}
                   >
                     <div style={{ fontWeight: 900, color: "#0f172a", marginBottom: 8 }}>Ripartizione prelievo</div>
-                    {mixedPreviewLoading ? (
-                      <div style={{ color: "#64748b" }}>Calcolo disponibilita in corso...</div>
-                    ) : mixedPreview ? (
+                    {mixedPreview ? (
                       <>
+                        {mixedPreviewLoading && (
+                          <div style={{ marginBottom: 8, color: "#64748b" }}>Aggiorno disponibilita e ripartizione...</div>
+                        )}
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
                           <div style={{ padding: 10, borderRadius: 10, background: "#fff", border: "1px solid rgba(2,132,199,0.18)" }}>
                             <div style={{ fontSize: 12, color: "#64748b" }}>Da PRM</div>
-                            <div style={{ fontWeight: 900, color: "#0284c7" }}>{mixedPreview.fromPrm}</div>
+                            <div style={{ fontWeight: 900, color: "#0284c7" }}>{mixedSplit.fromPrm}</div>
                             <div style={{ fontSize: 12, color: "#64748b" }}>Disponibili: {mixedPreview.prmFree}</div>
                           </div>
                           <div style={{ padding: 10, borderRadius: 10, background: "#fff", border: "1px solid rgba(124,58,237,0.18)" }}>
                             <div style={{ fontSize: 12, color: "#64748b" }}>Da REALE</div>
-                            <div style={{ fontWeight: 900, color: "#7c3aed" }}>{mixedPreview.fromReale}</div>
+                            <div style={{ fontWeight: 900, color: "#7c3aed" }}>{mixedSplit.fromReale}</div>
                             <div style={{ fontSize: 12, color: "#64748b" }}>Disponibili: {mixedPreview.realeFree}</div>
                           </div>
                           <div style={{ padding: 10, borderRadius: 10, background: "#fff", border: "1px solid rgba(15,23,42,0.08)" }}>
@@ -3247,12 +3970,43 @@ async function confirmCartPickup() {
                             </div>
                           </div>
                         </div>
+                        <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
+                          <div>
+                            <label className="label" htmlFor="mixedPrmQty">Quantità da PRM</label>
+                            <input
+                              id="mixedPrmQty"
+                              className="input"
+                              inputMode="decimal"
+                              value={mixedSplit.fromPrm}
+                              onChange={(e) => setMixedSplitFromPrm(e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <label className="label" htmlFor="mixedRealeQty">Quantità da REALE</label>
+                            <input
+                              id="mixedRealeQty"
+                              className="input"
+                              inputMode="decimal"
+                              value={mixedSplit.fromReale}
+                              onChange={(e) => setMixedSplitFromReale(e.target.value)}
+                            />
+                          </div>
+                          <div style={{ display: "flex", alignItems: "end" }}>
+                            <button type="button" className="btn" onClick={resetMixedSplitToAuto}>
+                              Ripristina automatico
+                            </button>
+                          </div>
+                        </div>
                         <div style={{ marginTop: 8, color: "#64748b" }}>
-                          Prelievo previsto: prima da <b>PRM</b>, poi da <b>REALE</b> per la quantita residua.
+                          {mixedSplit.manual
+                            ? "Ripartizione manuale attiva. Puoi decidere tu da quale magazzino prelevare e in che quantità."
+                            : "Prelievo previsto: prima da PRM, poi da REALE per la quantità residua."}
                         </div>
                       </>
                     ) : (
-                      <div style={{ color: "#64748b" }}>Impossibile calcolare la ripartizione in questo momento.</div>
+                      <div style={{ color: "#64748b" }}>
+                        {mixedPreviewLoading ? "Calcolo disponibilita in corso..." : "Impossibile calcolare la ripartizione in questo momento."}
+                      </div>
                     )}
                   </div>
                 )}
@@ -3269,6 +4023,9 @@ async function confirmCartPickup() {
                     <div style={{ fontWeight: 900, color: "#0f172a" }}>
                       Riepilogo carrello: {cart.length} righe
                     </div>
+                    <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
+                      In questo passo puoi solo verificare i dati. Per cambiare quantità o rimuovere righe torna al passo 1.
+                    </div>
                     <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
                       {cart.map((row) => (
                         <div
@@ -3278,15 +4035,23 @@ async function confirmCartPickup() {
                             borderRadius: 10,
                             background: "#fff",
                             border: "1px solid rgba(15,23,42,0.08)",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: 10,
                           }}
                         >
-                          <span style={{ fontWeight: 800 }}>{row.code}</span>
-                          {" · "}
-                          <span>{row.name}</span>
-                          {" · "}
-                          <span style={{ fontWeight: 700 }}>{row.warehouse}</span>
-                          {" · "}
-                          <span>Q.tà {row.qtyPick}</span>
+                          <div style={{ minWidth: 0, flex: 1, fontWeight: 700 }}>
+                            <span style={{ fontWeight: 800 }}>{row.code}</span>
+                            {" · "}
+                            <span>{row.name}</span>
+                            {" · "}
+                            <span style={{ fontWeight: 700 }}>{row.warehouse}</span>
+                            {" · "}
+                            <span>Disp. {row.qtyAvailable}</span>
+                            {" · "}
+                            <span>Q.tà {row.qtyPick}</span>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -3314,6 +4079,17 @@ async function confirmCartPickup() {
         danger
         onConfirm={() => void handleDeleteConfirm()}
         onCancel={() => setDeleteConfirm(null)}
+      />
+
+      <ConfirmModal
+        open={confirmCancelPickupOpen}
+        title="Annulla prelievo"
+        message="Vuoi annullare il prelievo in preparazione? Verranno rimossi carrello e dati inseriti."
+        confirmLabel="Annulla prelievo"
+        cancelLabel="Continua modifica"
+        danger
+        onConfirm={cancelMaterialPickupDraft}
+        onCancel={() => setConfirmCancelPickupOpen(false)}
       />
 
       {warehouseChoicePopup && (
@@ -3442,16 +4218,14 @@ async function confirmCartPickup() {
               )}
               {warehouseChoicePopup.mode === "BOTH" && (
                 <>
-                  {!warehouseChoicePopup.forCart && (
-                    <button
-                      type="button"
-                      className="btn btnPrimary"
-                      onClick={() => confirmWarehouseChoice("MISTO")}
-                      style={{ width: "100%" }}
-                    >
-                      Prelievo misto (PRM prima)
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="btn btnPrimary"
+                    onClick={() => confirmWarehouseChoice("MISTO")}
+                    style={{ width: "100%" }}
+                  >
+                    Prelievo misto
+                  </button>
                   <button
                     type="button"
                     className="btn"
@@ -3604,17 +4378,31 @@ async function confirmCartPickup() {
                   </td>
                 </tr>
               ) : (
-                displayHistory.map((m) => {
-                  const gid = (m as any).movement_group_id;
-                  const groupCount = gid ? history.filter((r) => (r as any).movement_group_id === gid).length : 1;
+                displayHistory.map((entry) => {
+                  const m = entry.lead;
+                  const groupCount = entry.rows.length;
+                  const isGroup = groupCount > 1;
                   const st = (m.status ?? (m.type === "OUT" ? "OPEN" : "CLOSED")) as "OPEN" | "CLOSED";
                   const isOpenOut = m.type === "OUT" && st === "OPEN";
-                  const outAbs = Math.abs(n(m.qty));
-                  const net = m.type === "OUT" ? Math.max(0, outAbs - n(m.returned_qty)) : null;
+                  const outAbs = isGroup
+                    ? entry.rows.reduce((sum, row) => sum + Math.abs(n(row.qty)), 0)
+                    : Math.abs(n(m.qty));
+                  const returnedQty = isGroup
+                    ? entry.rows.reduce((sum, row) => sum + (row.type === "OUT" ? n(row.returned_qty) : 0), 0)
+                    : (m.type === "OUT" ? n(m.returned_qty) : 0);
+                  const net = m.type === "OUT" ? Math.max(0, outAbs - returnedQty) : null;
+                  const groupWarehouses = isGroup
+                    ? Array.from(new Set(entry.rows.map((row) => row.warehouse).filter(Boolean)))
+                    : [];
+                  const rowIds = entry.rows.map((row) => row.id);
+                  const allSelected = rowIds.length > 0 && rowIds.every((id) => selectedIds.has(id));
+                  const groupNote = isGroup
+                    ? Array.from(new Set(entry.rows.map((row) => (row.note ?? "").trim()).filter(Boolean))).join(" · ")
+                    : (m.note ?? "");
 
                   return (
                     <tr
-                      key={m.id}
+                      key={entry.key}
                       onClick={() => openCloseModal(m)}
                       style={{
                         cursor: "pointer",
@@ -3626,10 +4414,10 @@ async function confirmCartPickup() {
                         <td onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
-                            checked={selectedIds.has(m.id)}
-                            onChange={() => toggleSelect(m.id)}
+                            checked={allSelected}
+                            onChange={() => toggleSelectMany(rowIds)}
                             onClick={(e) => e.stopPropagation()}
-                            aria-label={`Seleziona movimento ${m.code}`}
+                            aria-label={isGroup ? `Seleziona prelievo multiplo ${groupCount} articoli` : `Seleziona movimento ${m.code}`}
                           />
                         </td>
                       )}
@@ -3649,20 +4437,24 @@ async function confirmCartPickup() {
                       </td>
 
                       <td style={{ fontWeight: 900 }}>
-                        {groupCount > 1 ? `Prelievo multiplo (${groupCount} articoli)` : m.code}
+                        {isGroup ? `Prelievo multiplo (${groupCount} articoli)` : m.code}
                       </td>
-                      <td>{groupCount > 1 ? `${nameMap[m.code] ?? m.code} (+${groupCount - 1} altri)` : (nameMap[m.code] ?? "-")}</td>
+                      <td>{isGroup ? `${nameMap[m.code] ?? m.code} (+${groupCount - 1} altri)` : (nameMap[m.code] ?? "-")}</td>
 
-                      <td>{groupCount > 1 ? "-" : (m.warehouse ? <span style={pillStyle(m.warehouse)}>{m.warehouse}</span> : "-")}</td>
+                      <td>
+                        {isGroup
+                          ? (groupWarehouses.length > 0 ? groupWarehouses.join(" + ") : "-")
+                          : (m.warehouse ? <span style={pillStyle(m.warehouse)}>{m.warehouse}</span> : "-")}
+                      </td>
 
                       <td style={{ fontWeight: 900 }}>
-                        {groupCount > 1 ? "-" : `${m.type === "IN" ? "+" : "-"}${outAbs}`}
+                        {`${m.type === "IN" ? "+" : "-"}${outAbs}`}
                       </td>
 
-                      <td>{groupCount > 1 ? "-" : (m.type === "OUT" ? n(m.returned_qty) : "-")}</td>
-                      <td style={{ fontWeight: 900 }}>{groupCount > 1 ? "-" : (m.type === "OUT" ? net : "-")}</td>
+                      <td>{m.type === "OUT" ? returnedQty : "-"}</td>
+                      <td style={{ fontWeight: 900 }}>{m.type === "OUT" ? net : "-"}</td>
 
-                      <td>{m.note ?? ""}</td>
+                      <td>{groupNote}</td>
                       <td>{m.created_by_name ?? "-"}</td>
                     </tr>
                   );
@@ -3685,6 +4477,8 @@ async function confirmCartPickup() {
             setEditingMovementId(null);
             setSelectedClosedRowId(null);
             setGroupEditState({});
+            setGroupOpenQtyEditState({});
+            setGroupOpenQtySavingId(null);
           }}
           style={{
             position: "fixed",
@@ -3711,27 +4505,39 @@ async function confirmCartPickup() {
               padding: 12,
             }}
           >
-            <button
-              className="btn"
-              onClick={() => {
-                setCloseOpen(false);
-                setClosing(null);
-                setClosingGroup([]);
-                setClosingMeta(null);
-                setMsg(null);
-                setEditRectify(false);
-                setEditingMovementId(null);
-                setSelectedClosedRowId(null);
-                setGroupEditState({});
-              }}
+            <div
               style={{
                 position: "absolute",
                 top: 12,
                 right: 12,
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+                justifyContent: "flex-end",
               }}
             >
-              Chiudi
-            </button>
+              <button className="btn btnPrimary" type="button" onClick={() => void downloadMovementDetailPDF()}>
+                Scarica PDF
+              </button>
+              <button
+                className="btn"
+                onClick={() => {
+                  setCloseOpen(false);
+                  setClosing(null);
+                  setClosingGroup([]);
+                  setClosingMeta(null);
+                  setMsg(null);
+                  setEditRectify(false);
+                  setEditingMovementId(null);
+                  setSelectedClosedRowId(null);
+                  setGroupEditState({});
+                  setGroupOpenQtyEditState({});
+                  setGroupOpenQtySavingId(null);
+                }}
+              >
+                Chiudi
+              </button>
+            </div>
 
             {closingGroup.length > 1 && (
               <div style={{ marginBottom: 16, padding: 12, background: "#f8fafc", borderRadius: 10, border: "1px solid #e2e8f0" }}>
@@ -3768,7 +4574,37 @@ async function confirmCartPickup() {
                             <td style={{ fontWeight: 900 }}>{mov.code}</td>
                             <td>{nameMap[mov.code] ?? "-"}</td>
                             <td>{mov.warehouse ? <span style={pillStyle(mov.warehouse)}>{mov.warehouse}</span> : "-"}</td>
-                            <td>{outQty}</td>
+                            <td onClick={(e) => !isClosed && e.stopPropagation()}>
+                              {isClosed || !canEditRow(mov) ? (
+                                outQty
+                              ) : (
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    className="input"
+                                    value={groupOpenQtyEditState[mov.id] ?? String(outQty)}
+                                    onChange={(e) =>
+                                      setGroupOpenQtyEditState((prev) => ({
+                                        ...prev,
+                                        [mov.id]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="0"
+                                    style={{ width: 80, padding: "4px 8px", fontSize: 13 }}
+                                  />
+                                  <button
+                                    type="button"
+                                    className="btn"
+                                    style={{ padding: "4px 8px", fontSize: 12 }}
+                                    onClick={() => void saveGroupOpenMovementQty(mov)}
+                                    disabled={groupOpenQtySavingId === mov.id}
+                                  >
+                                    {groupOpenQtySavingId === mov.id ? "..." : "Salva"}
+                                  </button>
+                                </div>
+                              )}
+                            </td>
                             <td onClick={(e) => !isClosed && e.stopPropagation()}>
                               {isClosed ? (
                                 n(mov.returned_qty)
@@ -3820,7 +4656,7 @@ async function confirmCartPickup() {
                 <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>
                   {closingGroup.some((m) => (m.status ?? "OPEN") === "CLOSED")
                     ? "Clicca su una riga chiusa per vedere il dettaglio completo."
-                    : "Compila quantità rientro per ogni articolo aperto, seleziona il referente e conferma la chiusura."}
+                    : "Puoi correggere la quantità uscita sulle righe aperte, poi compilare il rientro, selezionare il referente e confermare la chiusura."}
                 </div>
                 {selectedClosedRowId && (() => {
                   const mov = closingGroup.find((m) => m.id === selectedClosedRowId);
@@ -4016,6 +4852,44 @@ async function confirmCartPickup() {
                   Compila i campi e conferma.
                 </div>
 
+                {canEditRow(closing) && (
+                  <div
+                    style={{
+                      marginTop: 12,
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid rgba(15,23,42,0.10)",
+                      background: "rgba(248,250,252,0.9)",
+                    }}
+                  >
+                    <div style={{ fontWeight: 800, marginBottom: 8 }}>Correzione quantità uscita</div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+                      Se hai sbagliato la quantità iniziale puoi correggerla finché il movimento è ancora aperto.
+                    </div>
+                    <div style={{ display: "flex", gap: 10, alignItems: "end", flexWrap: "wrap" }}>
+                      <div style={{ minWidth: 180 }}>
+                        <label className="label" htmlFor="openQtyEdit">Nuova quantità uscita</label>
+                        <input
+                          id="openQtyEdit"
+                          className="input"
+                          value={openQtyEdit}
+                          onChange={(e) => setOpenQtyEdit(e.target.value)}
+                          inputMode="decimal"
+                          placeholder="es. 5"
+                        />
+                      </div>
+                      <button
+                        className="btn"
+                        type="button"
+                        onClick={saveOpenMovementQty}
+                        disabled={openQtySaving}
+                      >
+                        {openQtySaving ? "Salvataggio..." : "Salva quantità"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
                   <div style={{ gridColumn: "span 3" }}>
                     <label className="label" htmlFor="outQtyAbs">
@@ -4167,7 +5041,9 @@ async function confirmCartPickup() {
               <div style={{ marginTop: 16, padding: 16, border: "1px solid #e2e8f0", borderRadius: 12, background: "#f8fafc" }}>
                 <div style={{ fontWeight: 900, marginBottom: 10 }}>Chiusura gruppo</div>
                 <div style={{ fontSize: 13, marginBottom: 12, color: "#64748b" }}>
-                  Compila le quantità rientro nella tabella sopra, seleziona il referente e conferma.
+                  {closingGroup.some((m) => (m.status ?? "OPEN") === "OPEN")
+                    ? "Compila le quantità rientro nella tabella sopra, seleziona il referente e conferma."
+                    : "Il gruppo è già chiuso: il referente è in sola lettura."}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                   <div style={{ minWidth: 200 }}>
@@ -4177,6 +5053,7 @@ async function confirmCartPickup() {
                       className="input"
                       value={selReferentId}
                       onChange={(e) => setSelReferentId(e.target.value)}
+                      disabled={!closingGroup.some((m) => (m.status ?? "OPEN") === "OPEN")}
                     >
                       <option value="">— Seleziona referente —</option>
                       {referents.map((r) => (
@@ -4184,11 +5061,17 @@ async function confirmCartPickup() {
                       ))}
                     </select>
                   </div>
-                  <div style={{ alignSelf: "flex-end" }}>
-                    <button className="btn btnPrimary" type="button" onClick={confirmClose}>
-                      Conferma chiusura gruppo
-                    </button>
-                  </div>
+                  {closingGroup.some((m) => (m.status ?? "OPEN") === "OPEN") && (
+                    <div style={{ alignSelf: "flex-end" }}>
+                      <button
+                        className="btn btnPrimary"
+                        type="button"
+                        onClick={confirmClose}
+                      >
+                        Conferma chiusura gruppo
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -4293,7 +5176,7 @@ async function confirmCartPickup() {
           </div>
         </div>
       )}
-      {(scanning || cartNfcScanning || (scanInfo && scanMode === "CART")) && (
+      {(scanning || cartNfcScanning || (scanInfo && scanMode === "CART") || (mixedCartInfo && scanMode === "CART")) && (
   <div
     style={{
       position: "fixed",
@@ -4311,7 +5194,7 @@ async function confirmCartPickup() {
         background: "white",
         borderRadius: 14,
         padding: 24,
-        maxWidth: scanning ? 420 : cartNfcScanning ? 420 : 640,
+        maxWidth: scanning ? 420 : cartNfcScanning ? 420 : mixedCartInfo ? 720 : 640,
         width: "100%",
         boxShadow: "0 24px 60px rgba(0,0,0,0.3)",
       }}
@@ -4361,11 +5244,66 @@ async function confirmCartPickup() {
             </button>
           </div>
         </>
+      ) : mixedCartInfo && scanMode === "CART" ? (
+        <>
+          <div style={{ fontWeight: 900, fontSize: 18 }}>Aggiungi al carrello con prelievo misto</div>
+          <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+            <div><b>Codice:</b> {mixedCartInfo.code}</div>
+            <div><b>Descrizione:</b> {mixedCartInfo.name}</div>
+            <div><b>UM:</b> {mixedCartInfo.um ?? "-"}</div>
+          </div>
+          <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+            <div style={{ padding: 12, borderRadius: 12, border: "1px solid rgba(2,132,199,0.18)", background: "#f8fafc" }}>
+              <div style={{ fontWeight: 900, color: "#0284c7" }}>PRM</div>
+              <div style={{ marginTop: 4, fontSize: 13 }}>Disponibili: {mixedCartInfo.prmFree}</div>
+              <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>
+                {mixedCartInfo.prmShelf ? `${mixedCartInfo.prmShelf}${mixedCartInfo.prmPlace ? ` · ${mixedCartInfo.prmPlace}` : ""}` : "Scaffale non assegnato"}
+              </div>
+            </div>
+            <div style={{ padding: 12, borderRadius: 12, border: "1px solid rgba(124,58,237,0.18)", background: "#f8fafc" }}>
+              <div style={{ fontWeight: 900, color: "#7c3aed" }}>REALE</div>
+              <div style={{ marginTop: 4, fontSize: 13 }}>Disponibili: {mixedCartInfo.realeFree}</div>
+              <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>
+                {mixedCartInfo.realeShelf ? `${mixedCartInfo.realeShelf}${mixedCartInfo.realePlace ? ` · ${mixedCartInfo.realePlace}` : ""}` : "Scaffale non assegnato"}
+              </div>
+            </div>
+          </div>
+          <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+            <div>
+              <label className="label" htmlFor="mixedCartPrmQty">Quantità da PRM</label>
+              <input
+                id="mixedCartPrmQty"
+                className="input"
+                value={mixedCartPrmQty}
+                onChange={(e) => setMixedCartPrmQty(e.target.value)}
+                inputMode="decimal"
+              />
+            </div>
+            <div>
+              <label className="label" htmlFor="mixedCartRealeQty">Quantità da REALE</label>
+              <input
+                id="mixedCartRealeQty"
+                className="input"
+                value={mixedCartRealeQty}
+                onChange={(e) => setMixedCartRealeQty(e.target.value)}
+                inputMode="decimal"
+              />
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+            <button className="btn" onClick={closeMixedCartModal}>
+              Chiudi
+            </button>
+            <button className="btn btnPrimary" onClick={addMixedCartToCart}>
+              Aggiungi
+            </button>
+          </div>
+        </>
       ) : null}
     </div>
   </div>
 )}
-{cartOpen && (
+{cartOpen && !wizardMatOpen && (
   <div
     onMouseDown={() => {
       if (cartBusy) return;

@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { BrowserMultiFormatReader } from "@zxing/browser";
+import jsPDF from "jspdf";
 
 type Movement = {
   id: string;
@@ -14,6 +15,24 @@ type Movement = {
   note: string | null;
   created_by_name: string | null;
   warehouse: "PRM" | "REALE" | null;
+  status?: "OPEN" | "CLOSED" | null;
+  returned_qty?: number | null;
+  return_note?: string | null;
+  referee_email?: string | null;
+  referee_name?: string | null;
+  closed_at?: string | null;
+  closed_by?: string | null;
+  movement_group_id?: string | null;
+};
+
+type DashboardMovementEntry = {
+  key: string;
+  lead: Movement;
+  rows: Movement[];
+  isGroup: boolean;
+  qty: number;
+  notes: string;
+  warehouses: string;
 };
 
 type DbItem = {
@@ -109,6 +128,8 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [itemsCount, setItemsCount] = useState<number>(0);
   const [movements, setMovements] = useState<Movement[]>([]);
+  const [nameMap, setNameMap] = useState<Record<string, string>>({});
+  const [selectedMovementEntry, setSelectedMovementEntry] = useState<DashboardMovementEntry | null>(null);
 
   const [warehouseFilter, setWarehouseFilter] = useState<"ALL" | "PRM" | "REALE">("ALL");
   const [search, setSearch] = useState("");
@@ -312,7 +333,7 @@ export default function Home() {
 
     const { data: movs, error: eMovs } = await supabase
       .from("movements")
-      .select("id,created_at,type,code,qty,note,created_by_name,warehouse")
+      .select("id,created_at,type,code,qty,note,created_by_name,warehouse,status,returned_qty,return_note,referee_email,referee_name,closed_at,closed_by,movement_group_id")
       .order("created_at", { ascending: false })
       .limit(100);
 
@@ -320,7 +341,26 @@ export default function Home() {
     if (eMovs) console.error(eMovs);
 
     setItemsCount(cItems ?? 0);
-    setMovements((movs ?? []) as Movement[]);
+    const nextMovements = (movs ?? []) as Movement[];
+    setMovements(nextMovements);
+
+    const codes = Array.from(new Set(nextMovements.map((m) => m.code).filter(Boolean)));
+    if (codes.length > 0) {
+      const { data: itemsData, error: itemsErr } = await supabase.from("items").select("code,name").in("code", codes);
+      if (itemsErr) {
+        console.error(itemsErr);
+        setNameMap({});
+      } else {
+        const nextNameMap: Record<string, string> = {};
+        for (const item of itemsData ?? []) {
+          const code = String((item as any).code ?? "");
+          if (code) nextNameMap[code] = String((item as any).name ?? "").trim();
+        }
+        setNameMap(nextNameMap);
+      }
+    } else {
+      setNameMap({});
+    }
     setLoading(false);
   }, []);
 
@@ -421,8 +461,150 @@ export default function Home() {
   }, [movements]);
 
   const lastMovement = movements[0] ?? null;
-  const last10 = movements.slice(0, 10);
+  const last10 = useMemo(() => {
+    const entries: Array<{ key: string; lead: Movement; rows: Movement[] }> = [];
+    const groups = new Map<string, { key: string; lead: Movement; rows: Movement[] }>();
+
+    for (const movement of movements) {
+      const gid = typeof movement.movement_group_id === "string" && movement.movement_group_id.trim()
+        ? movement.movement_group_id
+        : null;
+
+      if (!gid) {
+        entries.push({
+          key: movement.id,
+          lead: movement,
+          rows: [movement],
+        });
+        continue;
+      }
+
+      const existing = groups.get(gid);
+      if (existing) {
+        existing.rows.push(movement);
+        continue;
+      }
+
+      const entry = { key: gid, lead: movement, rows: [movement] };
+      groups.set(gid, entry);
+      entries.push(entry);
+    }
+
+    return entries.slice(0, 10).map((entry) => {
+      const isGroup = entry.rows.length > 1;
+      const qty = entry.rows.reduce((sum, row) => sum + Math.abs(Number(row.qty ?? 0)), 0);
+      const notes = Array.from(new Set(entry.rows.map((row) => (row.note ?? "").trim()).filter(Boolean))).join(" · ");
+      const warehouses = Array.from(new Set(entry.rows.map((row) => row.warehouse).filter(Boolean))).join(" + ") || "-";
+      return {
+        ...entry,
+        isGroup,
+        qty,
+        notes,
+        warehouses,
+      };
+    });
+  }, [movements]);
   const where = stock ? whereLabel(stock) : "";
+  const movementStatusLabel = useCallback((movement: Movement) => {
+    if (movement.type === "IN") return "CHIUSO";
+    return movement.status === "CLOSED" ? "CHIUSO" : "APERTO";
+  }, []);
+  const movementNetQty = useCallback((movement: Movement) => {
+    const outQty = Math.abs(n(movement.qty));
+    if (movement.type !== "OUT") return outQty;
+    return Math.max(0, outQty - n(movement.returned_qty));
+  }, []);
+  const movementReferent = useCallback((movement: Movement) => {
+    const parts = [movement.referee_name, movement.referee_email].map((v) => (v ?? "").trim()).filter(Boolean);
+    return parts.length > 0 ? parts.join(" · ") : "-";
+  }, []);
+  const downloadMovementPdf = useCallback((entry: DashboardMovementEntry) => {
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 14;
+    const contentWidth = pageWidth - margin * 2;
+    let y = margin;
+
+    const ensureSpace = (needed = 8) => {
+      if (y + needed <= pageHeight - margin) return;
+      doc.addPage();
+      y = margin;
+    };
+
+    const addTitle = (text: string) => {
+      ensureSpace(10);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.text(text, margin, y);
+      y += 8;
+    };
+
+    const addSection = (text: string) => {
+      ensureSpace(8);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text(text, margin, y);
+      y += 6;
+    };
+
+    const addLine = (label: string, value: string) => {
+      const safeValue = value.trim() || "-";
+      const lines = doc.splitTextToSize(`${label}: ${safeValue}`, contentWidth);
+      ensureSpace(lines.length * 5 + 1);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(lines, margin, y);
+      y += lines.length * 5 + 1;
+    };
+
+    addTitle(entry.isGroup ? `Prelievo multiplo (${entry.rows.length} articoli)` : `Movimento ${entry.lead.code}`);
+    addLine("Data", fmtDate(entry.lead.created_at));
+    addLine("Tipo", entry.lead.type === "IN" ? "Entrata" : "Uscita");
+    addLine("Magazzini", entry.warehouses);
+    addLine("Inserito da", entry.lead.created_by_name ?? "-");
+    if (entry.notes) addLine("Note", entry.notes);
+
+    if (entry.isGroup) {
+      entry.rows.forEach((row, index) => {
+        addSection(`Riga ${index + 1}`);
+        addLine("Codice", row.code);
+        addLine("Descrizione", nameMap[row.code] ?? "-");
+        addLine("Magazzino", row.warehouse ?? "-");
+        addLine("Quantita uscita", String(Math.abs(n(row.qty))));
+        addLine("Quantita rientro", row.type === "OUT" ? String(n(row.returned_qty)) : "-");
+        addLine("Quantita netta", String(movementNetQty(row)));
+        addLine("Stato", movementStatusLabel(row));
+        addLine("Referente", movementReferent(row));
+        addLine("Nota apertura", row.note ?? "-");
+        addLine("Nota rientro", row.return_note ?? "-");
+        addLine("Inserito da", row.created_by_name ?? "-");
+        addLine("Chiuso da", row.closed_by ?? "-");
+        addLine("Data chiusura", row.closed_at ? fmtDate(row.closed_at) : "-");
+        y += 2;
+      });
+    } else {
+      addSection("Dettaglio");
+      addLine("Codice", entry.lead.code);
+      addLine("Descrizione", nameMap[entry.lead.code] ?? "-");
+      addLine("Stato", movementStatusLabel(entry.lead));
+      addLine("Magazzino", entry.lead.warehouse ?? "-");
+      addLine("Quantita uscita", String(Math.abs(n(entry.lead.qty))));
+      addLine("Quantita rientro", entry.lead.type === "OUT" ? String(n(entry.lead.returned_qty)) : "-");
+      addLine("Quantita netta", String(movementNetQty(entry.lead)));
+      addLine("Nota apertura", entry.lead.note ?? "-");
+      addLine("Nota rientro", entry.lead.return_note ?? "-");
+      addLine("Referente", movementReferent(entry.lead));
+      addLine("Inserito da", entry.lead.created_by_name ?? "-");
+      addLine("Chiuso da", entry.lead.closed_by ?? "-");
+      addLine("Data chiusura", entry.lead.closed_at ? fmtDate(entry.lead.closed_at) : "-");
+    }
+
+    const fileName = entry.isGroup
+      ? `movimento-gruppo-${entry.key}.pdf`
+      : `movimento-${entry.lead.code}-${entry.lead.id}.pdf`;
+    doc.save(fileName);
+  }, [movementNetQty, movementReferent, movementStatusLabel, nameMap]);
 
   const filterHint = useMemo(() => {
     if (!picked || !stock) return null;
@@ -783,22 +965,27 @@ export default function Home() {
                     </td>
                   </tr>
                 ) : (
-                  last10.map((m) => (
-                    <tr key={m.id}>
-                      <td>{fmtDate(m.created_at)}</td>
+                  last10.map((entry) => (
+                    <tr
+                      key={entry.key}
+                      onClick={() => setSelectedMovementEntry(entry)}
+                      style={{ cursor: "pointer" }}
+                      title="Apri il dettaglio movimento"
+                    >
+                      <td>{fmtDate(entry.lead.created_at)}</td>
                       <td>
-                        <span className={m.type === "IN" ? "badgeIn" : "badgeOut"}>
-                          {m.type === "IN" ? "Entrata" : "Uscita"}
+                        <span className={entry.lead.type === "IN" ? "badgeIn" : "badgeOut"}>
+                          {entry.lead.type === "IN" ? "Entrata" : "Uscita"}
                         </span>
                       </td>
-                      <td>{m.code}</td>
-                      <td>{m.warehouse ?? "-"}</td>
+                      <td>{entry.isGroup ? `Prelievo multiplo (${entry.rows.length} articoli)` : entry.lead.code}</td>
+                      <td>{entry.warehouses}</td>
                       <td>
-                        {m.type === "IN" ? "+" : "-"}
-                        {m.qty}
+                        {entry.lead.type === "IN" ? "+" : "-"}
+                        {entry.qty}
                       </td>
-                      <td>{m.note ?? ""}</td>
-                      <td>{m.created_by_name ?? "-"}</td>
+                      <td>{entry.notes}</td>
+                      <td>{entry.lead.created_by_name ?? "-"}</td>
                     </tr>
                   ))
                 )}
@@ -811,6 +998,195 @@ export default function Home() {
           Suggerimento: usa “Nuovo movimento” per registrare rapidamente entrate/uscite.
         </div>
       </div>
+
+      {selectedMovementEntry && (
+        <div
+          onMouseDown={() => setSelectedMovementEntry(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            zIndex: 10050,
+          }}
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              width: "min(900px, 100%)",
+              maxHeight: "85vh",
+              overflow: "auto",
+              background: "#fff",
+              borderRadius: 16,
+              border: "1px solid rgba(15,23,42,0.12)",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.25)",
+              padding: 20,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 900 }}>
+                  {selectedMovementEntry.isGroup
+                    ? `Prelievo multiplo (${selectedMovementEntry.rows.length} articoli)`
+                    : `Movimento ${selectedMovementEntry.lead.code}`}
+                </div>
+                <div style={{ marginTop: 4, fontSize: 13, color: "#64748b" }}>
+                  {fmtDate(selectedMovementEntry.lead.created_at)} · {selectedMovementEntry.lead.type === "IN" ? "Entrata" : "Uscita"}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <button className="btn btnPrimary" type="button" onClick={() => downloadMovementPdf(selectedMovementEntry)}>
+                  Scarica PDF
+                </button>
+                <button className="btn" type="button" onClick={() => setSelectedMovementEntry(null)}>
+                  Chiudi
+                </button>
+              </div>
+            </div>
+
+            {selectedMovementEntry.isGroup ? (
+              <>
+                <div
+                  style={{
+                    marginBottom: 16,
+                    padding: 12,
+                    background: "#f8fafc",
+                    borderRadius: 12,
+                    border: "1px solid #e2e8f0",
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: 10,
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>Articoli</div>
+                    <div style={{ fontWeight: 900 }}>{selectedMovementEntry.rows.length}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>Magazzini</div>
+                    <div style={{ fontWeight: 900 }}>{selectedMovementEntry.warehouses}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>Quantità totale uscita</div>
+                    <div style={{ fontWeight: 900 }}>{selectedMovementEntry.qty}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>Inserito da</div>
+                    <div style={{ fontWeight: 900 }}>{selectedMovementEntry.lead.created_by_name ?? "-"}</div>
+                  </div>
+                </div>
+
+                <div className="tableWrap">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Codice</th>
+                        <th>Descrizione</th>
+                        <th>Magazzino</th>
+                        <th>Q.tà uscita</th>
+                        <th>Q.tà rientro</th>
+                        <th>Q.tà netta</th>
+                        <th>Stato</th>
+                        <th>Referente</th>
+                        <th>Nota apertura</th>
+                        <th>Nota rientro</th>
+                        <th>Inserito da</th>
+                        <th>Chiuso da</th>
+                        <th>Data chiusura</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedMovementEntry.rows.map((row) => (
+                        <tr key={row.id}>
+                          <td style={{ fontWeight: 900 }}>{row.code}</td>
+                          <td>{nameMap[row.code] ?? "-"}</td>
+                          <td>{row.warehouse ?? "-"}</td>
+                          <td>{Math.abs(n(row.qty))}</td>
+                          <td>{row.type === "OUT" ? n(row.returned_qty) : "-"}</td>
+                          <td>{movementNetQty(row)}</td>
+                          <td>{movementStatusLabel(row)}</td>
+                          <td>{movementReferent(row)}</td>
+                          <td>{row.note ?? "-"}</td>
+                          <td>{row.return_note ?? "-"}</td>
+                          <td>{row.created_by_name ?? "-"}</td>
+                          <td>{row.closed_by ?? "-"}</td>
+                          <td>{row.closed_at ? fmtDate(row.closed_at) : "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : (
+              <div className="tableWrap">
+                <table className="table">
+                  <tbody>
+                    <tr>
+                      <td style={{ width: 220, fontWeight: 800 }}>Codice</td>
+                      <td>{selectedMovementEntry.lead.code}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ fontWeight: 800 }}>Descrizione</td>
+                      <td>{nameMap[selectedMovementEntry.lead.code] ?? "-"}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ fontWeight: 800 }}>Tipo</td>
+                      <td>{selectedMovementEntry.lead.type === "IN" ? "Entrata" : "Uscita"}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ fontWeight: 800 }}>Stato</td>
+                      <td>{movementStatusLabel(selectedMovementEntry.lead)}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ fontWeight: 800 }}>Magazzino</td>
+                      <td>{selectedMovementEntry.lead.warehouse ?? "-"}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ fontWeight: 800 }}>Quantità uscita</td>
+                      <td>{Math.abs(n(selectedMovementEntry.lead.qty))}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ fontWeight: 800 }}>Quantità rientro</td>
+                      <td>{selectedMovementEntry.lead.type === "OUT" ? n(selectedMovementEntry.lead.returned_qty) : "-"}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ fontWeight: 800 }}>Quantità netta</td>
+                      <td>{movementNetQty(selectedMovementEntry.lead)}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ fontWeight: 800 }}>Nota apertura</td>
+                      <td>{selectedMovementEntry.lead.note ?? "-"}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ fontWeight: 800 }}>Nota rientro</td>
+                      <td>{selectedMovementEntry.lead.return_note ?? "-"}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ fontWeight: 800 }}>Referente</td>
+                      <td>{movementReferent(selectedMovementEntry.lead)}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ fontWeight: 800 }}>Inserito da</td>
+                      <td>{selectedMovementEntry.lead.created_by_name ?? "-"}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ fontWeight: 800 }}>Chiuso da</td>
+                      <td>{selectedMovementEntry.lead.closed_by ?? "-"}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ fontWeight: 800 }}>Data chiusura</td>
+                      <td>{selectedMovementEntry.lead.closed_at ? fmtDate(selectedMovementEntry.lead.closed_at) : "-"}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </main>
   );
 }

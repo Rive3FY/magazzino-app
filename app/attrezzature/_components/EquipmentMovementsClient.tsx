@@ -307,6 +307,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const [wizardOpen, setWizardOpen] = useState(false);
   /** Se impostato, mostriamo conferma "svuota carrello" prima di cambiare magazzino */
   const [confirmClearCartForWarehouse, setConfirmClearCartForWarehouse] = useState<string | null>(null);
+  const [confirmCancelPickupOpen, setConfirmCancelPickupOpen] = useState(false);
   const movementDraftRestoredRef = useRef(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -621,6 +622,68 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     setMsg(null);
   }
 
+  function switchPickupMode(nextMode: "NORMAL" | "CART") {
+    if (nextMode === scanMode) return;
+    setScanMode(nextMode);
+    setForm((prev) => ({
+      ...prev,
+      equipment_id: "",
+      note: "",
+      destination: "",
+    }));
+    setAssetSearch("");
+    setAssetCategoryFilter("");
+    setAssetOpen(false);
+    setAssetActiveIndex(0);
+    setCart([]);
+    setCartOpen(nextMode === "CART");
+    setCartNote("");
+    setCartDestination("");
+    setCartInterventionPlanEnabled(false);
+    setCartInterventionPlanNumber("");
+    setScanResult(null);
+    setCategorySelectModalOpen(false);
+    setCategorySelectModalCategory(null);
+    setCategorySelectModalSelected(new Set());
+    closeRemoteScanModal();
+    setMsg(null);
+  }
+
+  function cancelPickupDraft() {
+    resetPickupFields();
+    setWarehouseFilter("");
+    setOutboundStep(1);
+    setWizardOpen(false);
+    setCategorySelectModalOpen(false);
+    setCategorySelectModalCategory(null);
+    setCategorySelectModalSelected(new Set());
+    setConfirmClearCartForWarehouse(null);
+    closeRemoteScanModal();
+    setConfirmCancelPickupOpen(false);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(`equipment_cart_${area}`);
+      localStorage.removeItem(`equipment_cart_warehouse_${area}`);
+      localStorage.removeItem(`equipment_movement_draft_${area}`);
+    }
+  }
+
+  function finalizePickupSuccess() {
+    resetPickupFields();
+    setWarehouseFilter("");
+    setOutboundStep(1);
+    setWizardOpen(false);
+    setCategorySelectModalOpen(false);
+    setCategorySelectModalCategory(null);
+    setCategorySelectModalSelected(new Set());
+    setConfirmClearCartForWarehouse(null);
+    closeRemoteScanModal();
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(`equipment_cart_${area}`);
+      localStorage.removeItem(`equipment_cart_warehouse_${area}`);
+      localStorage.removeItem(`equipment_movement_draft_${area}`);
+    }
+  }
+
   const assetMap = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
   const selectedAsset = form.equipment_id ? assetMap.get(form.equipment_id) ?? null : null;
   const cartItems = useMemo(() => cart.map((id) => assetMap.get(id)).filter(Boolean) as EquipmentAssetRow[], [assetMap, cart]);
@@ -768,6 +831,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   }
 
   function openManualGroupSelection(asset: EquipmentAssetRow): boolean {
+    if (scanMode !== "CART") return false;
     const category = (asset.category ?? "").trim();
     if (!category || !groupCategorySet.has(normalizeCategoryKey(category))) return false;
     setCategorySelectModalCategory(category);
@@ -782,6 +846,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   }
 
   function openCategoryGroupSelection(category: string) {
+    if (scanMode !== "CART") return;
     const normalized = category.trim();
     if (!normalized || !canOpenCategorySelection(normalized)) return;
     setCategorySelectModalCategory(normalized);
@@ -804,6 +869,11 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     if (mode === "nfc") {
       const category = await checkNfcCategoryTag(value);
       if (category) {
+        if (scanMode !== "CART") {
+          setMsg("Il tag NFC di gruppo può essere usato solo in modalità Carrello.");
+          setScanResult(null);
+          return;
+        }
         setCategorySelectModalCategory(category);
         setCategorySelectModalSelected(new Set());
         setCategorySelectModalOpen(true);
@@ -996,6 +1066,10 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   }
 
   async function addAssetByNfcToCart(nfcTagId: string) {
+    if (scanMode !== "CART") {
+      setMsg("La selezione multipla NFC è disponibile solo in modalità Carrello.");
+      return;
+    }
     if (!warehouseSelected) return;
     const normalized = nfcTagId.trim().toLowerCase();
     if (!normalized) return;
@@ -1150,9 +1224,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         if (error) throw error;
       }
 
-      resetPickupFields();
-      setOutboundStep(2);
-      setWizardOpen(false);
+      finalizePickupSuccess();
       toast.success("Prelievo multiplo registrato");
       notifyEquipmentSync(area, "movements-cart-pickup");
       await loadData();
@@ -1235,9 +1307,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     }
 
     toast.success("Prelievo registrato");
-    resetPickupFields();
-    setOutboundStep(2);
-    setWizardOpen(false);
+    finalizePickupSuccess();
     notifyEquipmentSync(area, "movements-single-pickup");
     await loadData();
     setSaving(false);
@@ -1559,9 +1629,14 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 )}
 
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                  <button type="button" className="btn" onClick={() => setWizardOpen(false)}>
-                    Chiudi
-                  </button>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <button type="button" className="btn" onClick={() => setWizardOpen(false)}>
+                      Chiudi
+                    </button>
+                    <button type="button" className="btn" onClick={() => setConfirmCancelPickupOpen(true)}>
+                      Annulla prelievo
+                    </button>
+                  </div>
                   <button type="button" className="btn btnPrimary" onClick={() => setOutboundStep(2)} disabled={!warehouseSelected}>
                     Avanti →
                   </button>
@@ -1603,9 +1678,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                     value={scanMode}
                     onChange={(e) => {
                       const nextMode = e.target.value as "NORMAL" | "CART";
-                      setScanMode(nextMode);
-                      if (nextMode === "CART") setCartOpen(true);
-                      else setCartOpen(false);
+                      switchPickupMode(nextMode);
                     }}
                   >
                     <option value="NORMAL">Normale</option>
@@ -1959,11 +2032,6 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                     <div style={{ marginTop: 6, fontSize: 13, color: "#64748b" }}>
                       Aggiungi tutte le attrezzature che ti servono, poi passa ai dettagli finali.
                     </div>
-                    <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button type="button" className="btn" onClick={openRemoteScanModal}>
-                        Telefono
-                      </button>
-                    </div>
                     {cartItems.length > 0 && (
                       <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
                         {cartItems.slice(-4).map((item) => (
@@ -2009,6 +2077,9 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 }}>
                   <button type="button" className="btn" onClick={() => setOutboundStep(1)}>
                     ← Indietro
+                  </button>
+                  <button type="button" className="btn" onClick={() => setConfirmCancelPickupOpen(true)}>
+                    Annulla prelievo
                   </button>
                   {scanMode === "CART" && cartItems.length > 0 && (
                     <button
@@ -2060,11 +2131,6 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                   >
                     <div style={{ fontWeight: 900, color: "#0f172a" }}>
                       Riepilogo carrello: {cartItems.length} {cartItems.length === 1 ? "attrezzatura" : "attrezzature"}
-                    </div>
-                    <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button type="button" className="btn" onClick={openRemoteScanModal}>
-                        Telefono
-                      </button>
                     </div>
                     {cartItems.length > 0 ? (
                       <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
@@ -2165,6 +2231,9 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                   <button type="button" className="btn" onClick={() => setOutboundStep(2)}>
                     ← Indietro
                   </button>
+                  <button type="button" className="btn" onClick={() => setConfirmCancelPickupOpen(true)}>
+                    Annulla prelievo
+                  </button>
                   {scanMode === "CART" ? (
                     <button className="btn btnPrimary" onClick={confirmCartPickup} disabled={cartBusy || cartItems.length === 0 || !cartDestination.trim()} type="button">
                       {cartBusy ? "Salvataggio..." : "Conferma prelievo"}
@@ -2231,9 +2300,6 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
             <div style={{ fontWeight: 800 }}>Righe: {cartItems.length}</div>
-            <button className="btn" onClick={openRemoteScanModal} disabled={!warehouseSelected || cartBusy} type="button">
-              Telefono
-            </button>
             <button className="btn btnPrimary" onClick={confirmCartPickup} disabled={!warehouseSelected || cartBusy || cartItems.length === 0} type="button">
               {cartBusy ? "Salvataggio..." : "Conferma prelievo"}
             </button>
@@ -2942,16 +3008,31 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         onCancel={() => setConfirmClearCartForWarehouse(null)}
       />
 
+      <ConfirmModal
+        open={confirmCancelPickupOpen}
+        title="Annulla prelievo"
+        message="Vuoi annullare il prelievo in preparazione? Verranno rimossi carrello e dati inseriti."
+        confirmLabel="Annulla prelievo"
+        cancelLabel="Continua modifica"
+        danger
+        onConfirm={cancelPickupDraft}
+        onCancel={() => setConfirmCancelPickupOpen(false)}
+      />
+
       <RemoteNfcScanModal
         key={remoteScanSessionKey}
         open={remoteScanOpen}
         onClose={closeRemoteScanModal}
         context="movement_select"
         area={area}
-        allowMultiple
-        title="Aggiungi attrezzature con telefono"
+        allowMultiple={scanMode === "CART"}
+        title={scanMode === "CART" ? "Aggiungi attrezzature con telefono" : "Seleziona attrezzatura con telefono"}
         onTagReceived={(nfcTagId) => {
-          void addAssetByNfcToCart(nfcTagId);
+          if (scanMode === "CART") {
+            void addAssetByNfcToCart(nfcTagId);
+            return;
+          }
+          void applySearchResult(nfcTagId, "nfc");
         }}
       />
     </main>

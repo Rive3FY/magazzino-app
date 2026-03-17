@@ -44,6 +44,7 @@ export async function POST(request: Request) {
         const out_qty = m.out_qty ?? "-";
         const returned_qty = m.returned_qty ?? 0;
         const net_qty = m.net_qty ?? "-";
+        const open_note = m.open_note ?? "-";
         const return_note = m.return_note ?? "-";
         return `
           <tr>
@@ -54,6 +55,7 @@ export async function POST(request: Request) {
             <td style="padding: 6px; border: 1px solid #ddd;">${out_qty}</td>
             <td style="padding: 6px; border: 1px solid #ddd;">${returned_qty}</td>
             <td style="padding: 6px; border: 1px solid #ddd;">${net_qty}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${open_note}</td>
             <td style="padding: 6px; border: 1px solid #ddd;">${return_note}</td>
           </tr>`;
       }).join("");
@@ -73,7 +75,8 @@ export async function POST(request: Request) {
               <th style="padding: 6px; border: 1px solid #ddd;"><b>Uscita</b></th>
               <th style="padding: 6px; border: 1px solid #ddd;"><b>Rientro</b></th>
               <th style="padding: 6px; border: 1px solid #ddd;"><b>Netto</b></th>
-              <th style="padding: 6px; border: 1px solid #ddd;"><b>Nota</b></th>
+              <th style="padding: 6px; border: 1px solid #ddd;"><b>Nota apertura</b></th>
+              <th style="padding: 6px; border: 1px solid #ddd;"><b>Nota rettifica</b></th>
             </tr>
           </thead>
           <tbody>
@@ -101,6 +104,7 @@ export async function POST(request: Request) {
       const out_qty_val = body?.out_qty ?? firstMov?.out_qty ?? "-";
       const returned_qty_val = body?.returned_qty ?? firstMov?.returned_qty ?? 0;
       const net_qty_val = body?.net_qty ?? firstMov?.net_qty ?? "-";
+      const open_note_val = body?.open_note ?? firstMov?.open_note ?? "-";
       const return_note_val = body?.return_note ?? firstMov?.return_note ?? "-";
       const type_val = body?.type ?? firstMov?.type ?? "-";
 
@@ -120,6 +124,7 @@ export async function POST(request: Request) {
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Quantità uscita</b></td><td style="padding: 6px; border: 1px solid #ddd;">${out_qty_val}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Quantità rientrata</b></td><td style="padding: 6px; border: 1px solid #ddd;">${returned_qty_val}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Quantità netta</b></td><td style="padding: 6px; border: 1px solid #ddd;">${net_qty_val}</td></tr>
+          <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Nota apertura</b></td><td style="padding: 6px; border: 1px solid #ddd;">${open_note_val}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Nota rientro</b></td><td style="padding: 6px; border: 1px solid #ddd;">${return_note_val}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Referente</b></td><td style="padding: 6px; border: 1px solid #ddd;">${referent_name ?? "-"}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Chiuso da</b></td><td style="padding: 6px; border: 1px solid #ddd;">${closed_by ?? "-"}</td></tr>

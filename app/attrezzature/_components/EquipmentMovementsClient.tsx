@@ -20,6 +20,7 @@ import {
   equipmentStatusStyle,
 } from "../../_lib/equipment";
 import { equipmentMovementSchema } from "../../_lib/validations";
+import { isRelationMissingOrNotExposedError } from "../../_lib/postgrestErrors";
 import ConfirmModal from "../../_components/ConfirmModal";
 import RemoteNfcScanModal from "./RemoteNfcScanModal";
 import type {
@@ -59,6 +60,11 @@ type UserProfileInfo = {
 };
 
 type NfcCategoryTagRow = {
+  category: string;
+};
+
+type CategoryGroupRow = {
+  group_name: string;
   category: string;
 };
 
@@ -247,6 +253,13 @@ function getMovementResolution(row: EquipmentMovementRow) {
   return row.resolution_type ?? "RETURN";
 }
 
+/** Esito da usare nei form di chiusura: storico DISMISS non è più selezionabile. */
+function resolutionTypeForClosingForm(row: EquipmentMovementRow): EquipmentResolutionType {
+  const r = row.resolution_type;
+  if (r === "RETURN" || r === "MAINTENANCE") return r;
+  return "RETURN";
+}
+
 function isOpenMovementConflictError(error: unknown) {
   const message = describeError(error).toLowerCase();
   return message.includes("gia aperto") || message.includes("già aperto") || message.includes("already has an open movement");
@@ -264,6 +277,8 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const [history, setHistory] = useState<EquipmentMovementRow[]>([]);
   const [openHistory, setOpenHistory] = useState<EquipmentMovementRow[]>([]);
   const [groupCategories, setGroupCategories] = useState<string[]>([]);
+  const [categoryGroups, setCategoryGroups] = useState<CategoryGroupRow[]>([]);
+  const [assetGroupFilter, setAssetGroupFilter] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [cartBusy, setCartBusy] = useState(false);
@@ -313,6 +328,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const assetBoxRef = useRef<HTMLDivElement | null>(null);
+  const categoryGroupsTableMissingRef = useRef(false);
 
   useEffect(() => {
     if (authLoading) return;
@@ -358,6 +374,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         warehouseFilter?: string;
         assetSearch?: string;
         assetCategoryFilter?: string;
+        assetGroupFilter?: string;
         cartOpen?: boolean;
         cartNote?: string;
         cartDestination?: string;
@@ -371,6 +388,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       if (typeof draft.warehouseFilter === "string") setWarehouseFilter(draft.warehouseFilter);
       if (typeof draft.assetSearch === "string") setAssetSearch(draft.assetSearch);
       if (typeof draft.assetCategoryFilter === "string") setAssetCategoryFilter(draft.assetCategoryFilter);
+      if (typeof draft.assetGroupFilter === "string") setAssetGroupFilter(draft.assetGroupFilter);
       if (typeof draft.cartOpen === "boolean") setCartOpen(draft.cartOpen);
       if (typeof draft.cartNote === "string") setCartNote(draft.cartNote);
       if (typeof draft.cartDestination === "string") setCartDestination(draft.cartDestination);
@@ -411,6 +429,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     warehouseFilter.trim().length > 0 ||
     assetSearch.trim().length > 0 ||
     assetCategoryFilter.trim().length > 0 ||
+    assetGroupFilter.trim().length > 0 ||
     form.equipment_id.trim().length > 0 ||
     form.note.trim().length > 0 ||
     form.destination.trim().length > 0 ||
@@ -438,6 +457,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           warehouseFilter,
           assetSearch,
           assetCategoryFilter,
+          assetGroupFilter,
           cartOpen,
           cartNote,
           cartDestination,
@@ -455,6 +475,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     warehouseFilter,
     assetSearch,
     assetCategoryFilter,
+    assetGroupFilter,
     cartOpen,
     cartNote,
     cartDestination,
@@ -499,11 +520,16 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     setLoading(true);
     setMsg(null);
 
-    const [assetsRes, historyRes, openRes, groupTagsRes] = await Promise.all([
+    const categoryGroupsPromise = categoryGroupsTableMissingRef.current
+      ? Promise.resolve({ data: [], error: { message: "skip" } })
+      : supabase.from("equipment_category_groups").select("group_name,category").eq("equipment_area", area).order("group_name").order("category");
+
+    const [assetsRes, historyRes, openRes, groupTagsRes, categoryGroupsRes] = await Promise.all([
       supabase.from("equipment_assets").select("*").eq("equipment_area", area).order("serial_number", { ascending: true }),
       supabase.from("equipment_movements").select("*").eq("equipment_area", area).order("created_at", { ascending: false }).limit(300),
       supabase.from("equipment_movements").select("*").eq("equipment_area", area).eq("status", "OPEN").order("created_at", { ascending: false }),
       supabase.from("equipment_nfc_category_tags").select("category").eq("equipment_area", area),
+      categoryGroupsPromise,
     ]);
 
     if (assetsRes.error) {
@@ -542,6 +568,21 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         )
       ).sort();
       setGroupCategories(categories);
+    }
+
+    if (categoryGroupsRes.error) {
+      const err = categoryGroupsRes.error;
+      if (String((err as { message?: string }).message) === "skip") {
+        setCategoryGroups([]);
+      } else if (isRelationMissingOrNotExposedError(err)) {
+        categoryGroupsTableMissingRef.current = true;
+        setCategoryGroups([]);
+      } else {
+        console.error("equipment_category_groups:", err);
+        // non perdere i gruppi per errori transitori (rete, ecc.)
+      }
+    } else {
+      setCategoryGroups((categoryGroupsRes.data ?? []) as CategoryGroupRow[]);
     }
 
     setLoading(false);
@@ -609,6 +650,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     });
     setAssetSearch("");
     setAssetCategoryFilter("");
+    setAssetGroupFilter("");
     setAssetOpen(false);
     setAssetActiveIndex(0);
     setCart([]);
@@ -633,6 +675,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     }));
     setAssetSearch("");
     setAssetCategoryFilter("");
+    setAssetGroupFilter("");
     setAssetOpen(false);
     setAssetActiveIndex(0);
     setCart([]);
@@ -710,6 +753,31 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     }
     return Array.from(set).sort();
   }, [assetsByWarehouse]);
+
+  const groupedCategories = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const row of categoryGroups) {
+      const grp = (row.group_name ?? "").trim();
+      const cat = (row.category ?? "").trim();
+      if (!grp || !cat) continue;
+      const list = map.get(grp) ?? [];
+      list.push(cat);
+      map.set(grp, list);
+    }
+    for (const [, list] of map) list.sort();
+    return map;
+  }, [categoryGroups]);
+
+  const groupNames = useMemo(() => Array.from(new Set(groupedCategories.keys())).sort(), [groupedCategories]);
+
+  const ungroupedCategories = useMemo(() => {
+    const inGroup = new Set<string>();
+    for (const row of categoryGroups) {
+      const cat = (row.category ?? "").trim();
+      if (cat) inGroup.add(cat);
+    }
+    return assetCategories.filter((c) => !inGroup.has(c));
+  }, [assetCategories, categoryGroups]);
 
   const filteredAssets = useMemo(() => {
     let base = assetsByWarehouse;
@@ -1390,13 +1458,13 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
     setClosing(row);
     setClosingGroup(group);
-    setCloseResolutionType(getMovementResolution(row));
+    setCloseResolutionType(resolutionTypeForClosingForm(row));
     setCloseNote(row.close_note ?? "");
 
     const initState: GroupEditState = {};
     for (const movement of group) {
       initState[movement.id] = {
-        resolutionType: getMovementResolution(movement),
+        resolutionType: resolutionTypeForClosingForm(movement),
         closeNote: movement.close_note ?? "",
       };
     }
@@ -1601,6 +1669,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                       setWarehouseFilter(value);
                       setForm((prev) => ({ ...prev, equipment_id: "" }));
                       setAssetCategoryFilter("");
+                      setAssetGroupFilter("");
                       setAssetSearch("");
                       if (cart.length > 0) {
                         setCart([]);
@@ -1704,7 +1773,59 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 <div style={{ marginTop: 8, paddingTop: 12, borderTop: "1px solid rgba(15,23,42,0.08)" }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginBottom: 8 }}>Oppure selezione manuale</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {assetCategories.length > 0 && (
+                    {assetCategories.length > 0 && (groupNames.length > 0 || ungroupedCategories.length > 0) ? (
+                      <>
+                        <div>
+                          <label className="label" htmlFor={`move-group-wiz-${area}`}>Gruppo categoria</label>
+                          <select
+                            id={`move-group-wiz-${area}`}
+                            className="input"
+                            value={assetGroupFilter}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setAssetGroupFilter(value);
+                              setAssetCategoryFilter("");
+                              setForm((prev) => ({ ...prev, equipment_id: "" }));
+                              setAssetSearch("");
+                              setAssetOpen(false);
+                              setMsg(null);
+                            }}
+                          >
+                            <option value="">Tutte le categorie</option>
+                            {groupNames.map((gn) => (
+                              <option key={gn} value={gn}>{gn}</option>
+                            ))}
+                            {ungroupedCategories.length > 0 && (
+                              <option value="__OTHER__">Altre categorie</option>
+                            )}
+                          </select>
+                        </div>
+                        {assetGroupFilter && assetGroupFilter !== "" && (
+                          <div>
+                            <label className="label" htmlFor={`move-category-wiz-${area}`}>Categoria</label>
+                            <select
+                              id={`move-category-wiz-${area}`}
+                              className="input"
+                              value={assetCategoryFilter}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                setAssetCategoryFilter(value);
+                                setForm((prev) => ({ ...prev, equipment_id: "" }));
+                                setAssetSearch("");
+                                setAssetOpen(false);
+                                if (canOpenCategorySelection(value)) openCategoryGroupSelection(value);
+                                setMsg(null);
+                              }}
+                            >
+                              <option value="">— Seleziona —</option>
+                              {(assetGroupFilter === "__OTHER__" ? ungroupedCategories : (groupedCategories.get(assetGroupFilter) ?? [])).map((c) => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </>
+                    ) : assetCategories.length > 0 ? (
                       <div>
                         <label className="label" htmlFor={`move-category-wiz-${area}`}>Categoria</label>
                         <select
@@ -1726,7 +1847,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                           ))}
                         </select>
                       </div>
-                    )}
+                    ) : null}
                     <div ref={assetBoxRef} style={{ position: "relative" }}>
                       <label className="label" htmlFor={`move-search-wiz-${area}`}>Cerca attrezzatura (seriale o nome)</label>
                       <ClearableInput
@@ -2728,7 +2849,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                       </div>
 
                       <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-                        Dopo la chiusura lo stato passa a <b>CHIUSO</b> e l&apos;asset viene aggiornato secondo l&apos;esito scelto.
+                        Dopo la chiusura lo stato del movimento passa a <b>CHIUSO</b> con l&apos;esito registrato (rientro o manutenzione).
                       </div>
                     </div>
                   )}
@@ -2767,6 +2888,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                       <tbody>
                         {closingGroup.map((row) => {
                           const asset = assetMap.get(row.equipment_id);
+                          const rowOpen = getMovementStatus(row) === "OPEN";
                           const state = groupEditState[row.id] ?? {
                             resolutionType: "RETURN" as EquipmentResolutionType,
                             closeNote: "",
@@ -2776,24 +2898,30 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                               <td style={{ fontWeight: 900 }}>{asset?.serial_number || asset?.asset_code || row.equipment_id}</td>
                               <td>{asset?.name || "—"}</td>
                               <td>
-                                <select
-                                  className="input"
-                                  value={state.resolutionType}
-                                  onChange={(e) =>
-                                    setGroupEditState((prev) => ({
-                                      ...prev,
-                                      [row.id]: {
-                                        ...state,
-                                        resolutionType: e.target.value as EquipmentResolutionType,
-                                      },
-                                    }))
-                                  }
-                                  disabled={!canEditRow(row)}
-                                >
-                                  {EQUIPMENT_RESOLUTION_TYPE_OPTIONS.map((option) => (
-                                    <option key={option} value={option}>{EQUIPMENT_RESOLUTION_LABELS[option]}</option>
-                                  ))}
-                                </select>
+                                {rowOpen ? (
+                                  <select
+                                    className="input"
+                                    value={state.resolutionType}
+                                    onChange={(e) =>
+                                      setGroupEditState((prev) => ({
+                                        ...prev,
+                                        [row.id]: {
+                                          ...state,
+                                          resolutionType: e.target.value as EquipmentResolutionType,
+                                        },
+                                      }))
+                                    }
+                                    disabled={!canEditRow(row)}
+                                  >
+                                    {EQUIPMENT_RESOLUTION_TYPE_OPTIONS.map((option) => (
+                                      <option key={option} value={option}>{EQUIPMENT_RESOLUTION_LABELS[option]}</option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <span style={{ fontWeight: 700 }}>
+                                    {row.resolution_type ? EQUIPMENT_RESOLUTION_LABELS[row.resolution_type] : "—"}
+                                  </span>
+                                )}
                               </td>
                               <td>
                                 <ClearableInput

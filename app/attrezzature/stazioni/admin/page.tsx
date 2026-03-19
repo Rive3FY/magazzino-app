@@ -3,6 +3,7 @@
 import { useState } from "react";
 import ScopedRoleAdminUsersClient from "../../../_components/ScopedRoleAdminUsersClient";
 import EquipmentNfcCategoryTagsClient from "../../_components/EquipmentNfcCategoryTagsClient";
+import EquipmentCategoryGroupsClient from "../../_components/EquipmentCategoryGroupsClient";
 import ConfirmWithInputModal from "../../../_components/ConfirmWithInputModal";
 import { useIsAdmin } from "../../../_lib/hooks/useIsAdmin";
 import { useToast } from "../../../_lib/ToastContext";
@@ -52,6 +53,7 @@ export default function StazioniAdminPage() {
           intro="Da qui puoi scegliere chi gestisce le funzioni admin dell'area Attrezzature Stazioni."
         />
         <EquipmentNfcCategoryTagsClient area="STAZIONI" />
+        <EquipmentCategoryGroupsClient area="STAZIONI" />
       </div>
 
       <ConfirmWithInputModal

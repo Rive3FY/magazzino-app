@@ -180,13 +180,10 @@ export default function EquipmentNfcCategoryTagsClient({ area }: Props) {
       </button>
       {!collapsed && (
         <div style={{ padding: "0 16px 16px", borderTop: "1px solid var(--border)" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
-            <p style={{ margin: 0, fontSize: 13, color: "var(--muted)", flex: 1, minWidth: 200 }}>
-              Associa un tag NFC a una categoria (es. 380kV, 150kV, 60kV). Scansionando il tag sul rack si filtra la lista attrezzature.
-            </p>
+          <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
             <button
               type="button"
-              className="btn"
+              className="btn btnPrimary"
               onClick={() => void startNfcScan()}
               disabled={scanning}
               style={{ padding: "8px 14px", fontSize: 13 }}
@@ -198,11 +195,11 @@ export default function EquipmentNfcCategoryTagsClient({ area }: Props) {
           {loading ? (
             <div style={{ padding: 16, textAlign: "center", color: "var(--muted)" }}>Caricamento…</div>
           ) : rows.length === 0 ? (
-            <div style={{ padding: 16, border: "1px dashed var(--border)", borderRadius: 8, color: "var(--muted)", fontSize: 13 }}>
+            <div style={{ marginTop: 16, padding: 16, border: "1px dashed var(--border)", borderRadius: 8, color: "var(--muted)", fontSize: 13 }}>
               Nessun tag registrato. Clicca &quot;Aggiungi tag NFC&quot; e scansiona un tag sul rack.
             </div>
           ) : (
-            <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
+            <ul style={{ margin: "16px 0 0", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
               {rows.map((r) => (
                 <li
                   key={r.id}
@@ -210,7 +207,7 @@ export default function EquipmentNfcCategoryTagsClient({ area }: Props) {
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
-                    padding: "10px 12px",
+                    padding: "8px 10px",
                     background: "var(--panel)",
                     border: "1px solid var(--border)",
                     borderRadius: 8,

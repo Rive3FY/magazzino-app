@@ -25,11 +25,8 @@ export const EQUIPMENT_MOVEMENT_TYPE_OPTIONS: EquipmentMovementType[] = [
   "OUT",
 ];
 
-export const EQUIPMENT_RESOLUTION_TYPE_OPTIONS: EquipmentResolutionType[] = [
-  "RETURN",
-  "MAINTENANCE",
-  "DISMISS",
-];
+/** Esiti selezionabili in chiusura movimento (niente dismissione da qui). */
+export const EQUIPMENT_RESOLUTION_TYPE_OPTIONS: EquipmentResolutionType[] = ["RETURN", "MAINTENANCE"];
 
 export const EQUIPMENT_STATUS_LABELS: Record<EquipmentStatus, string> = {
   AVAILABLE: "Disponibile",
@@ -55,16 +52,6 @@ export const EQUIPMENT_RESOLUTION_LABELS: Record<EquipmentResolutionType, string
 
 export function buildEquipmentStatusUpdate(status: EquipmentStatus, maintenanceNote?: string): Record<string, unknown> {
   const payload: Record<string, unknown> = { status };
-
-  if (status === "DISMISSED") {
-    payload.assigned_to_name = null;
-    payload.assigned_to_email = null;
-    payload.assigned_to_badge = null;
-    payload.assigned_at = null;
-    payload.maintenance_note = null;
-    payload.dismissed_at = new Date().toISOString();
-    return payload;
-  }
 
   if (status === "MAINTENANCE") {
     payload.assigned_to_name = null;

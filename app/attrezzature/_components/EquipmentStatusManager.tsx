@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { EQUIPMENT_STATUS_LABELS, equipmentStatusStyle } from "../../_lib/equipment";
 import type { EquipmentAssetRow, EquipmentStatus } from "../../_lib/types";
 
-type AllowedTargetStatus = "AVAILABLE" | "MAINTENANCE" | "DISMISSED";
+type AllowedTargetStatus = "AVAILABLE" | "MAINTENANCE";
 
 type Props = {
   asset: EquipmentAssetRow | null;
@@ -23,11 +23,6 @@ const STATUS_OPTIONS: Array<{
     value: "MAINTENANCE",
     title: "Invia in manutenzione",
     hint: "Toglie l'attrezzatura dalla disponibilita' e la segna come in manutenzione.",
-  },
-  {
-    value: "DISMISSED",
-    title: "Dismetti",
-    hint: "Rimuove definitivamente l'attrezzatura dalla disponibilita'.",
   },
   {
     value: "AVAILABLE",

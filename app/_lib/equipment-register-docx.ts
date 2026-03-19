@@ -2,6 +2,9 @@ import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
 
 const WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
+/** Capacità righe dati per pagina: il template originale prevede 23 righe. */
+const REGISTER_PAGE_CAPACITY = 23;
+
 export type EquipmentRegisterArea = "LINEE" | "STAZIONI";
 
 export type EquipmentRegisterAsset = {
@@ -56,15 +59,7 @@ function formatDateOnly(iso: string | null) {
   }).format(new Date(iso));
 }
 
-function compactJoin(values: Array<string | null | undefined>, separator = " / ") {
-  return values
-    .map((value) => String(value ?? "").trim())
-    .filter(Boolean)
-    .join(separator);
-}
-
 export function buildEquipmentRegisterRows(args: {
-  area: EquipmentRegisterArea;
   assets: EquipmentRegisterAsset[];
   movements: EquipmentRegisterMovement[];
   createdByNameMap?: Record<string, string>;
@@ -72,74 +67,64 @@ export function buildEquipmentRegisterRows(args: {
 }) {
   const { assets, movements, createdByNameMap = {}, closedByNameMap = {} } = args;
   const assetMap = new Map(assets.map((asset) => [asset.id, asset]));
-  const grouped = new Map<string, EquipmentRegisterMovement[]>();
 
-  for (const movement of movements) {
-    const key = movement.movement_group_id || movement.id;
-    const rows = grouped.get(key) ?? [];
-    rows.push(movement);
-    grouped.set(key, rows);
-  }
+  // Una riga per ogni movimento (anche con carrello: ogni item nel carrello = una riga)
+  const sorted = movements.slice().sort((a, b) => a.created_at.localeCompare(b.created_at));
 
-  return Array.from(grouped.values())
-    .map((group) => group.slice().sort((a, b) => a.created_at.localeCompare(b.created_at)))
-    .sort((a, b) => a[0]!.created_at.localeCompare(b[0]!.created_at))
-    .map((group) => {
-      const first = group[0]!;
-      const assetsInGroup = group
-        .map((movement) => assetMap.get(movement.equipment_id))
-        .filter(Boolean) as EquipmentRegisterAsset[];
-      const latestClosed = group
-        .filter((movement) => (movement.status ?? "OPEN") === "CLOSED")
-        .sort((a, b) => (a.closed_at ?? "").localeCompare(b.closed_at ?? ""))
-        .at(-1) ?? null;
-      const serialList = compactJoin(
-        assetsInGroup.map((asset) => asset.serial_number || asset.asset_code),
-        " ; "
-      );
-      const isGroupPickup = group.length > 1;
-      const prelievoItem = isGroupPickup
-        ? first.intervention_plan_number || serialList
-        : (assetsInGroup[0]?.serial_number || assetsInGroup[0]?.asset_code || "");
+  return sorted.map((movement) => {
+    const asset = assetMap.get(movement.equipment_id);
+    const prelievoItem =
+      asset?.serial_number || asset?.asset_code || movement.intervention_plan_number || "";
 
-      const prelievoNominativo =
-        (first.created_by ? createdByNameMap[first.created_by] ?? "" : "") ||
-        first.assigned_to_name ||
-        first.created_by_name ||
-        "";
+    const prelievoNominativo =
+      (movement.created_by ? createdByNameMap[movement.created_by] ?? "" : "") ||
+      movement.assigned_to_name ||
+      movement.created_by_name ||
+      "";
 
-      const riconsegnaNominativo = latestClosed
-        ? (latestClosed.closed_by ? closedByNameMap[latestClosed.closed_by] ?? "" : "") ||
-          latestClosed.assigned_to_name ||
-          latestClosed.created_by_name ||
-          ""
-        : "";
+    const isClosed = (movement.status ?? "OPEN") === "CLOSED";
+    const riconsegnaNominativo = isClosed
+      ? (movement.closed_by ? closedByNameMap[movement.closed_by] ?? "" : "") ||
+        movement.assigned_to_name ||
+        movement.created_by_name ||
+        ""
+      : "";
 
-      return {
-        prelievoItem,
-        prelievoNominativo,
-        prelievoData: formatDateOnly(first.created_at),
-        destinazione: first.destination || first.note || "",
-        riconsegnaNominativo,
-        riconsegnaData: latestClosed?.closed_at ? formatDateOnly(latestClosed.closed_at) : "",
-      } satisfies EquipmentRegisterRow;
-    });
+    return {
+      prelievoItem,
+      prelievoNominativo,
+      prelievoData: formatDateOnly(movement.created_at),
+      destinazione: movement.destination || movement.note || "",
+      riconsegnaNominativo,
+      riconsegnaData: isClosed && movement.closed_at ? formatDateOnly(movement.closed_at) : "",
+    } satisfies EquipmentRegisterRow;
+  });
 }
 
 function nodeListToArray<T>(list: ArrayLike<T>) {
   return Array.from({ length: list.length }, (_, index) => list[index]!);
 }
 
+function isTableRow(node: Node): node is Element {
+  if (!node || node.nodeType !== 1) return false;
+  const el = node as Element;
+  const tag = (el.tagName || el.localName || "").toLowerCase();
+  return tag === "w:tr" || tag === "tr";
+}
+
 function getDirectTableRows(table: Element) {
-  return nodeListToArray(table.childNodes).filter(
-    (node): node is Element => Boolean(node) && node.nodeType === 1 && (node as Element).tagName === "w:tr"
-  );
+  return nodeListToArray(table.childNodes).filter(isTableRow);
+}
+
+function isTableCell(node: Node): node is Element {
+  if (!node || node.nodeType !== 1) return false;
+  const el = node as Element;
+  const tag = (el.tagName || el.localName || "").toLowerCase();
+  return tag === "w:tc" || tag === "tc";
 }
 
 function getRowCells(row: Element) {
-  return nodeListToArray(row.childNodes).filter(
-    (node): node is Element => Boolean(node) && node.nodeType === 1 && (node as Element).tagName === "w:tc"
-  );
+  return nodeListToArray(row.childNodes).filter(isTableCell);
 }
 
 function clearCellContent(cell: Element) {
@@ -209,15 +194,18 @@ function fillRegisterTablePage(args: {
   if (headerCells[1]) setCellText(doc, headerCells[1], `Sede di: ${header.sedeDi}`);
 
   const templateRow = tableRows[4]!.cloneNode(true) as Element;
-  const pageCapacity = tableRows.length - 4;
+  const pageCapacity = Math.max(tableRows.length - 4, REGISTER_PAGE_CAPACITY);
 
   for (let index = tableRows.length - 1; index >= 4; index -= 1) {
     table.removeChild(tableRows[index]!);
   }
 
-  const pageRows =
-    rows.length > 0 ? rows.slice(0, pageCapacity) : [emptyRegisterRow()];
-  for (const rowValues of pageRows) {
+  const dataRows = rows.length > 0 ? rows.slice(0, pageCapacity) : [emptyRegisterRow()];
+  const paddedRows = [...dataRows];
+  while (paddedRows.length < pageCapacity) {
+    paddedRows.push(emptyRegisterRow());
+  }
+  for (const rowValues of paddedRows) {
     const row = templateRow.cloneNode(true) as Element;
     setRowValues(doc, row, rowValues);
     table.appendChild(row);
@@ -250,7 +238,7 @@ export function getEquipmentRegisterPageCount(args: {
     throw new Error("Struttura tabella DOCX non valida.");
   }
 
-  const pageCapacity = templatePageRows.length - 4;
+  const pageCapacity = Math.max(templatePageRows.length - 4, REGISTER_PAGE_CAPACITY);
   const effectiveRowCount = Math.max(1, args.rowCount);
   return Math.max(1, Math.ceil(effectiveRowCount / pageCapacity));
 }
@@ -277,7 +265,7 @@ export function fillEquipmentRegisterDocumentXml(args: {
     throw new Error("Struttura tabella DOCX non valida.");
   }
 
-  const pageCapacity = templatePageRows.length - 4;
+  const pageCapacity = Math.max(templatePageRows.length - 4, REGISTER_PAGE_CAPACITY);
   const effectiveRows = args.rows.length > 0 ? args.rows : [emptyRegisterRow()];
   const pageCount = Math.max(1, Math.ceil(effectiveRows.length / pageCapacity));
 
@@ -343,7 +331,7 @@ export function fillEquipmentRegisterDocumentXmlMultiWarehouse(args: {
     throw new Error("Struttura tabella DOCX non valida.");
   }
 
-  const pageCapacity = templatePageRows.length - 4;
+  const pageCapacity = Math.max(templatePageRows.length - 4, REGISTER_PAGE_CAPACITY);
   let isFirst = true;
 
   for (const section of args.sections) {

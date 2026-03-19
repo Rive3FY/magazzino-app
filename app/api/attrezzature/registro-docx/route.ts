@@ -148,7 +148,6 @@ export async function GET(request: Request) {
         }
 
         const registerRows = buildEquipmentRegisterRows({
-          area: areaParam,
           assets,
           movements,
           createdByNameMap,
@@ -249,7 +248,6 @@ export async function GET(request: Request) {
       }
 
       const registerRows = buildEquipmentRegisterRows({
-        area: areaParam,
         assets,
         movements,
         createdByNameMap,

@@ -19,6 +19,7 @@ import {
   equipmentMovementPillStyle,
   equipmentStatusStyle,
 } from "../../_lib/equipment";
+import { isRelationMissingOrNotExposedError } from "../../_lib/postgrestErrors";
 import EquipmentStatusManager from "./EquipmentStatusManager";
 import ConfirmModal from "../../_components/ConfirmModal";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentMovementRow, EquipmentStatus } from "../../_lib/types";
@@ -182,6 +183,8 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   const [quickSearch, setQuickSearch] = useState("");
   const [quickSelectedId, setQuickSelectedId] = useState("");
   const [quickCategoryFilter, setQuickCategoryFilter] = useState<string>("");
+  const [quickGroupFilter, setQuickGroupFilter] = useState<string>("");
+  const [categoryGroups, setCategoryGroups] = useState<{ group_name: string; category: string }[]>([]);
   const [quickWarehouseFilter, setQuickWarehouseFilter] = useState<string>("ALL");
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickActiveIndex, setQuickActiveIndex] = useState(0);
@@ -197,6 +200,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const quickBoxRef = useRef<HTMLDivElement | null>(null);
+  const categoryGroupsTableMissingRef = useRef(false);
 
   useEffect(() => {
     if (authLoading) return;
@@ -214,7 +218,11 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     setLoading(true);
     setMsg(null);
 
-    const [assetsRes, historyRes] = await Promise.all([
+    const categoryGroupsPromise = categoryGroupsTableMissingRef.current
+      ? Promise.resolve({ data: [], error: { message: "skip" } })
+      : supabase.from("equipment_category_groups").select("group_name,category").eq("equipment_area", area).order("group_name").order("category");
+
+    const [assetsRes, historyRes, categoryGroupsRes] = await Promise.all([
       supabase
         .from("equipment_assets")
         .select("*")
@@ -226,6 +234,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
         .eq("equipment_area", area)
         .order("created_at", { ascending: false })
         .limit(300),
+      categoryGroupsPromise,
     ]);
 
     if (assetsRes.error) {
@@ -242,6 +251,20 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
       setMsg((prev) => prev ?? "Errore caricamento storico movimenti.");
     } else {
       setHistory((historyRes.data ?? []) as EquipmentMovementRow[]);
+    }
+
+    if (categoryGroupsRes.error) {
+      const err = categoryGroupsRes.error;
+      if (String((err as { message?: string }).message) === "skip") {
+        setCategoryGroups([]);
+      } else if (isRelationMissingOrNotExposedError(err)) {
+        categoryGroupsTableMissingRef.current = true;
+        setCategoryGroups([]);
+      } else {
+        console.error("equipment_category_groups:", err);
+      }
+    } else {
+      setCategoryGroups((categoryGroupsRes.data ?? []) as { group_name: string; category: string }[]);
     }
 
     setLoading(false);
@@ -333,6 +356,31 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     }
     return Array.from(set).sort();
   }, [rows]);
+
+  const quickGroupedCategories = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const row of categoryGroups) {
+      const grp = (row.group_name ?? "").trim();
+      const cat = (row.category ?? "").trim();
+      if (!grp || !cat) continue;
+      const list = map.get(grp) ?? [];
+      list.push(cat);
+      map.set(grp, list);
+    }
+    for (const [, list] of map) list.sort();
+    return map;
+  }, [categoryGroups]);
+
+  const quickGroupNames = useMemo(() => Array.from(new Set(quickGroupedCategories.keys())).sort(), [quickGroupedCategories]);
+
+  const quickUngroupedCategories = useMemo(() => {
+    const inGroup = new Set<string>();
+    for (const row of categoryGroups) {
+      const cat = (row.category ?? "").trim();
+      if (cat) inGroup.add(cat);
+    }
+    return quickCategories.filter((c) => !inGroup.has(c));
+  }, [quickCategories, categoryGroups]);
 
   const quickWarehouses = useMemo(() => {
     const set = new Set<string>();
@@ -641,20 +689,61 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
           </div>
 
           <div className="equipmentFilterGrid mobileGrid1">
-            <div style={{ minWidth: 0 }}>
-              <label className="label" htmlFor={`equipment-quick-category-${area}`}>Categoria</label>
-              <ClearableSelect
-                id={`equipment-quick-category-${area}`}
-                value={quickCategoryFilter}
-                onChange={setQuickCategoryFilter}
-                clearValue=""
-              >
-                <option value="">Tutte</option>
-                {quickCategories.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </ClearableSelect>
-            </div>
+            {quickGroupNames.length > 0 || quickUngroupedCategories.length > 0 ? (
+              <>
+                <div style={{ minWidth: 0 }}>
+                  <label className="label" htmlFor={`equipment-quick-group-${area}`}>Gruppo categoria</label>
+                  <ClearableSelect
+                    id={`equipment-quick-group-${area}`}
+                    value={quickGroupFilter}
+                    onChange={(v) => {
+                      setQuickGroupFilter(v);
+                      setQuickCategoryFilter("");
+                    }}
+                    clearValue=""
+                  >
+                    <option value="">Tutte</option>
+                    {quickGroupNames.map((gn) => (
+                      <option key={gn} value={gn}>{gn}</option>
+                    ))}
+                    {quickUngroupedCategories.length > 0 && (
+                      <option value="__OTHER__">Altre</option>
+                    )}
+                  </ClearableSelect>
+                </div>
+                {quickGroupFilter && (
+                  <div style={{ minWidth: 0 }}>
+                    <label className="label" htmlFor={`equipment-quick-category-${area}`}>Categoria</label>
+                    <ClearableSelect
+                      id={`equipment-quick-category-${area}`}
+                      value={quickCategoryFilter}
+                      onChange={setQuickCategoryFilter}
+                      clearValue=""
+                    >
+                      <option value="">Tutte</option>
+                      {(quickGroupFilter === "__OTHER__" ? quickUngroupedCategories : (quickGroupedCategories.get(quickGroupFilter) ?? [])).map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </ClearableSelect>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ minWidth: 0 }}>
+                <label className="label" htmlFor={`equipment-quick-category-${area}`}>Categoria</label>
+                <ClearableSelect
+                  id={`equipment-quick-category-${area}`}
+                  value={quickCategoryFilter}
+                  onChange={setQuickCategoryFilter}
+                  clearValue=""
+                >
+                  <option value="">Tutte</option>
+                  {quickCategories.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </ClearableSelect>
+              </div>
+            )}
             <div style={{ minWidth: 0 }}>
               <label className="label" htmlFor={`equipment-quick-warehouse-${area}`}>Magazzino</label>
               <ClearableSelect

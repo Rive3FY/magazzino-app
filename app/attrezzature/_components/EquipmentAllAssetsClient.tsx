@@ -1,6 +1,8 @@
 "use client";
 
 import { BrowserMultiFormatReader } from "@zxing/browser";
+import JSZip from "jszip";
+import * as XLSX from "xlsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../../_lib/supabase/client";
 import { useAuth } from "../../_lib/hooks/useAuth";
@@ -21,6 +23,24 @@ import RemoteNfcScanModal from "./RemoteNfcScanModal";
 import { equipmentAssetSchema } from "../../_lib/validations";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentStatus } from "../../_lib/types";
 
+const EQUIPMENT_TABLE_SORT_STATUS_ORDER: Record<EquipmentStatus, number> = EQUIPMENT_STATUS_OPTIONS.reduce(
+  (acc, s, i) => {
+    acc[s] = i;
+    return acc;
+  },
+  {} as Record<EquipmentStatus, number>
+);
+
+function equipmentShelfSortLabel(row: EquipmentAssetRow) {
+  return [row.shelf, row.place].filter(Boolean).join(" · ");
+}
+
+function equipmentAssignedSortLabel(row: EquipmentAssetRow) {
+  return [row.assigned_to_name, row.assigned_to_badge ? `Badge ${row.assigned_to_badge}` : null]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 type Props = {
   area: EquipmentArea;
   basePath: string;
@@ -36,6 +56,49 @@ type AssetFormState = {
 };
 
 const supabase = createClient();
+
+function sanitizeFilePart(raw: string): string {
+  const s = raw
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "-")
+    .replace(/\s+/g, " ")
+    .slice(0, 80);
+  return s || "export";
+}
+
+const EQUIPMENT_EXPORT_COLS = ["Seriale", "Nome", "Magazzino", "Note"] as const;
+/** Larghezza massima colonna (caratteri) per non esplodere il foglio su note lunghissime */
+const EQUIPMENT_EXPORT_COL_MAX: Record<(typeof EQUIPMENT_EXPORT_COLS)[number], number> = {
+  Seriale: 48,
+  Nome: 56,
+  Magazzino: 36,
+  Note: 120,
+};
+
+function applyEquipmentExportColumnWidths(ws: XLSX.WorkSheet, data: Array<Record<string, string>>) {
+  const cols = EQUIPMENT_EXPORT_COLS.map((key) => {
+    const headerLen = key.length;
+    const dataLen = data.reduce((m, row) => Math.max(m, String(row[key] ?? "").length), 0);
+    const raw = Math.max(headerLen, dataLen, 14) + 3;
+    const cap = EQUIPMENT_EXPORT_COL_MAX[key];
+    return { wch: Math.min(raw, cap) };
+  });
+  ws["!cols"] = cols;
+}
+
+function workbookForEquipmentExport(rows: EquipmentAssetRow[]) {
+  const data = rows.map((r) => ({
+    Seriale: (r.serial_number ?? "").trim() || r.asset_code || "",
+    Nome: r.name ?? "",
+    Magazzino: (r.warehouse ?? "").trim(),
+    Note: r.notes ?? "",
+  }));
+  const ws = XLSX.utils.json_to_sheet(data);
+  applyEquipmentExportColumnWidths(ws, data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Attrezzature");
+  return wb;
+}
 
 const emptyForm: AssetFormState = {
   serial_number: "",
@@ -101,6 +164,8 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const [searchActiveIndex, setSearchActiveIndex] = useState(0);
   const [statusFilter, setStatusFilter] = useState<"ALL" | EquipmentStatus>("ALL");
   const [warehouseFilter, setWarehouseFilter] = useState<string>("ALL");
+  const [tableSortKey, setTableSortKey] = useState("");
+  const [tableSortDir, setTableSortDir] = useState<"none" | "asc" | "desc">("none");
   const [msg, setMsg] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageInput, setPageInput] = useState("");
@@ -117,7 +182,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const [techSheetTargetRow, setTechSheetTargetRow] = useState<EquipmentAssetRow | null>(null);
   const [actionMenuOpenRowId, setActionMenuOpenRowId] = useState<string | null>(null);
   const [remoteScanRow, setRemoteScanRow] = useState<EquipmentAssetRow | null>(null);
-  const [remoteScanRows, setRemoteScanRows] = useState<EquipmentAssetRow[] | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
@@ -258,12 +322,68 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     });
   }, [q, rows, statusFilter, warehouseFilter]);
 
+  const sortedFiltered = useMemo(() => {
+    if (tableSortDir === "none" || !tableSortKey) return filtered;
+    const copy = [...filtered];
+    const mul = tableSortDir === "asc" ? 1 : -1;
+    copy.sort((a, b) => {
+      switch (tableSortKey) {
+        case "serial": {
+          const va = (a.serial_number ?? "").trim() || a.asset_code || "";
+          const vb = (b.serial_number ?? "").trim() || b.asset_code || "";
+          return va.localeCompare(vb, "it", { sensitivity: "base" }) * mul;
+        }
+        case "name":
+          return String(a.name ?? "").localeCompare(String(b.name ?? ""), "it", { sensitivity: "base" }) * mul;
+        case "category":
+          return String(a.category ?? "").localeCompare(String(b.category ?? ""), "it", { sensitivity: "base" }) * mul;
+        case "warehouse":
+          return String((a.warehouse ?? "").trim()).localeCompare(String((b.warehouse ?? "").trim()), "it", { sensitivity: "base" }) * mul;
+        case "notes":
+          return String(a.notes ?? "").localeCompare(String(b.notes ?? ""), "it", { sensitivity: "base" }) * mul;
+        case "status":
+          return (EQUIPMENT_TABLE_SORT_STATUS_ORDER[a.status] - EQUIPMENT_TABLE_SORT_STATUS_ORDER[b.status]) * mul;
+        case "shelf":
+          return equipmentShelfSortLabel(a).localeCompare(equipmentShelfSortLabel(b), "it", { sensitivity: "base" }) * mul;
+        case "assigned":
+          return equipmentAssignedSortLabel(a).localeCompare(equipmentAssignedSortLabel(b), "it", { sensitivity: "base" }) * mul;
+        case "updatedAt": {
+          const ta = new Date(a.updated_at).getTime();
+          const tb = new Date(b.updated_at).getTime();
+          return (ta - tb) * mul;
+        }
+        default:
+          return 0;
+      }
+    });
+    return copy;
+  }, [filtered, tableSortKey, tableSortDir]);
+
+  function cycleTableSort(clickedKey: string) {
+    setPage(1);
+    if (tableSortKey !== clickedKey) {
+      setTableSortKey(clickedKey);
+      setTableSortDir("asc");
+      return;
+    }
+    setTableSortDir((prev) => {
+      if (prev === "none") return "asc";
+      if (prev === "asc") return "desc";
+      return "none";
+    });
+  }
+
+  function tableSortIcon(col: string) {
+    if (tableSortKey !== col || tableSortDir === "none") return "↕";
+    return tableSortDir === "asc" ? "↑" : "↓";
+  }
+
   const ROWS_PER_PAGE = 15;
   const paginatedRows = useMemo(() => {
     const start = (page - 1) * ROWS_PER_PAGE;
-    return filtered.slice(start, start + ROWS_PER_PAGE);
-  }, [filtered, page]);
-  const totalPages = Math.max(1, Math.ceil(filtered.length / ROWS_PER_PAGE));
+    return sortedFiltered.slice(start, start + ROWS_PER_PAGE);
+  }, [sortedFiltered, page]);
+  const totalPages = Math.max(1, Math.ceil(sortedFiltered.length / ROWS_PER_PAGE));
 
   function goToPage(p: number) {
     const target = Math.max(1, Math.min(totalPages, p));
@@ -666,6 +786,65 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deletingBulk, setDeletingBulk] = useState(false);
   const [excelImportOpen, setExcelImportOpen] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
+
+  async function exportFilteredToExcel() {
+    if (sortedFiltered.length === 0) {
+      toast.error("Nessun dato da esportare con i filtri attuali.");
+      return;
+    }
+
+    const groups = new Map<string, EquipmentAssetRow[]>();
+    for (const row of sortedFiltered) {
+      const w = (row.warehouse ?? "").trim();
+      const key = w || "__NONE__";
+      const list = groups.get(key) ?? [];
+      list.push(row);
+      groups.set(key, list);
+    }
+
+    const entries = Array.from(groups.entries()).sort((a, b) => {
+      if (a[0] === "__NONE__") return 1;
+      if (b[0] === "__NONE__") return -1;
+      return a[0].localeCompare(b[0], "it");
+    });
+
+    const date = new Date().toISOString().slice(0, 10);
+    const areaSlug = area === "LINEE" ? "linee" : "stazioni";
+
+    setExportingExcel(true);
+    try {
+      if (entries.length === 1) {
+        const [whKey, groupRows] = entries[0];
+        const label = whKey === "__NONE__" ? "senza-magazzino" : sanitizeFilePart(whKey);
+        const wb = workbookForEquipmentExport(groupRows);
+        XLSX.writeFile(wb, `attrezzature-${areaSlug}-${label}-${date}.xlsx`);
+        toast.success("Export completato");
+        return;
+      }
+
+      const zip = new JSZip();
+      for (const [whKey, groupRows] of entries) {
+        const label = whKey === "__NONE__" ? "senza-magazzino" : sanitizeFilePart(whKey);
+        const wb = workbookForEquipmentExport(groupRows);
+        const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as Uint8Array;
+        zip.file(`attrezzature-${label}-${date}.xlsx`, buf);
+      }
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `attrezzature-${areaSlug}-${date}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Export: ${entries.length} file nel pacchetto ZIP`);
+    } catch (e) {
+      console.error(e);
+      toast.error("Errore durante l'export Excel.");
+    } finally {
+      setExportingExcel(false);
+    }
+  }
 
   function toggleSelect(id: string) {
     setSelectedIds((prev) => {
@@ -793,6 +972,15 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                   </button>
                 </>
               )}
+              <button
+                type="button"
+                className="btn"
+                disabled={loading || exportingExcel || sortedFiltered.length === 0}
+                onClick={() => void exportFilteredToExcel()}
+                style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+              >
+                {exportingExcel ? "Export…" : "Esporta Excel"}
+              </button>
             </div>
           </div>
 
@@ -996,20 +1184,15 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
         <div className="equipmentSectionHeader" style={{ flexDirection: "column", alignItems: "stretch", gap: 10 }}>
           <div>
             <div className="equipmentSectionTitle">Elenco completo {areaLabel}</div>
-            <div className="equipmentSectionHint">{filtered.length} risultati · Pagina {page} di {totalPages}</div>
+            <div className="equipmentSectionHint">
+              {sortedFiltered.length} risultati · Pagina {page} di {totalPages}
+              <span style={{ opacity: 0.75, marginLeft: 8 }}>· Ordinamento: clic sull&apos;intestazione di colonna (↑ ↓ ↕)</span>
+            </div>
           </div>
           {(totalPages > 1 || (isAdmin && selectedIds.size > 0)) && (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
               {isAdmin && selectedIds.size > 0 && (
                 <>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => setRemoteScanRows(paginatedRows.filter((r) => selectedIds.has(r.id)))}
-                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-                  >
-                    📱 Associa NFC (ordine)
-                  </button>
                   <button
                     type="button"
                     className="btn"
@@ -1103,20 +1286,101 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                     />
                   )}
                 </th>
-                <th>Seriale</th>
-                <th>Nome</th>
-                <th>Categoria</th>
-                <th>Magazzino</th>
-                <th>Note</th>
-                <th>Stato</th>
-                <th>Scaffale</th>
-                <th>Assegnata a</th>
-                <th>Ultimo agg.</th>
+                <th
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    cycleTableSort("serial");
+                  }}
+                  style={{ cursor: "pointer", userSelect: "none" }}
+                  title="Ordina"
+                >
+                  Seriale <span style={{ opacity: 0.7 }}>{tableSortIcon("serial")}</span>
+                </th>
+                <th
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    cycleTableSort("name");
+                  }}
+                  style={{ cursor: "pointer", userSelect: "none" }}
+                  title="Ordina"
+                >
+                  Nome <span style={{ opacity: 0.7 }}>{tableSortIcon("name")}</span>
+                </th>
+                <th
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    cycleTableSort("category");
+                  }}
+                  style={{ cursor: "pointer", userSelect: "none" }}
+                  title="Ordina"
+                >
+                  Categoria <span style={{ opacity: 0.7 }}>{tableSortIcon("category")}</span>
+                </th>
+                <th
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    cycleTableSort("warehouse");
+                  }}
+                  style={{ cursor: "pointer", userSelect: "none" }}
+                  title="Ordina"
+                >
+                  Magazzino <span style={{ opacity: 0.7 }}>{tableSortIcon("warehouse")}</span>
+                </th>
+                <th
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    cycleTableSort("notes");
+                  }}
+                  style={{ cursor: "pointer", userSelect: "none" }}
+                  title="Ordina"
+                >
+                  Note <span style={{ opacity: 0.7 }}>{tableSortIcon("notes")}</span>
+                </th>
+                <th
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    cycleTableSort("status");
+                  }}
+                  style={{ cursor: "pointer", userSelect: "none" }}
+                  title="Ordina"
+                >
+                  Stato <span style={{ opacity: 0.7 }}>{tableSortIcon("status")}</span>
+                </th>
+                <th
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    cycleTableSort("shelf");
+                  }}
+                  style={{ cursor: "pointer", userSelect: "none" }}
+                  title="Ordina"
+                >
+                  Scaffale <span style={{ opacity: 0.7 }}>{tableSortIcon("shelf")}</span>
+                </th>
+                <th
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    cycleTableSort("assigned");
+                  }}
+                  style={{ cursor: "pointer", userSelect: "none" }}
+                  title="Ordina"
+                >
+                  Assegnata a <span style={{ opacity: 0.7 }}>{tableSortIcon("assigned")}</span>
+                </th>
+                <th
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    cycleTableSort("updatedAt");
+                  }}
+                  style={{ cursor: "pointer", userSelect: "none" }}
+                  title="Ordina"
+                >
+                  Ultimo agg. <span style={{ opacity: 0.7 }}>{tableSortIcon("updatedAt")}</span>
+                </th>
                 <th>Azioni</th>
               </tr>
             </thead>
             <tbody>
-              {!loading && filtered.length === 0 && (
+              {!loading && sortedFiltered.length === 0 && (
                 <tr>
                   <td colSpan={11}>Nessuna attrezzatura trovata.</td>
                 </tr>
@@ -1283,6 +1547,29 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                                   Modifica
                                 </button>
                               )}
+                              {isAdmin && (
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  style={{
+                                    width: "100%",
+                                    justifyContent: "flex-start",
+                                    borderRadius: 0,
+                                    borderTop: "1px solid rgba(15,23,42,0.08)",
+                                    borderColor: "rgba(239,68,68,0.35)",
+                                    background: "rgba(239,68,68,0.08)",
+                                    color: "#991b1b",
+                                  }}
+                                  onClick={() => {
+                                    setActionMenuOpenRowId(null);
+                                    openDeleteAssetConfirm(row);
+                                  }}
+                                  disabled={saving}
+                                  title="Elimina attrezzatura"
+                                >
+                                  Elimina
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1299,14 +1586,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(15,23,42,0.08)" }}>
             {isAdmin && selectedIds.size > 0 && (
               <>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => setRemoteScanRows(paginatedRows.filter((r) => selectedIds.has(r.id)))}
-                  style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-                >
-                  📱 Associa NFC (ordine)
-                </button>
                 <button
                   type="button"
                   className="btn"
@@ -1572,6 +1851,24 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                       Telefono
                     </button>
                   )}
+                  {isAdmin && (
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        openDeleteAssetConfirm(editingRow);
+                        closeModal();
+                      }}
+                      disabled={saving}
+                      title="Elimina attrezzatura"
+                      style={{
+                        borderColor: "rgba(239,68,68,0.5)",
+                        background: "rgba(239,68,68,0.1)",
+                        color: "#991b1b",
+                      }}
+                    >
+                      Elimina
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -1757,27 +2054,20 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
       )}
 
       <RemoteNfcScanModal
-        open={!!remoteScanRow || !!(remoteScanRows && remoteScanRows.length > 0)}
+        open={!!remoteScanRow}
         onClose={() => {
           setRemoteScanRow(null);
-          setRemoteScanRows(null);
         }}
         context="equipment_associate"
         equipmentId={remoteScanRow?.id}
-        equipmentIds={remoteScanRows?.map((r) => r.id)}
         area={area}
-        allowMultiple={!!remoteScanRows?.length}
         title={
-          remoteScanRows?.length
-            ? `Associa NFC a ${remoteScanRows.length} attrezzature (nell'ordine della tabella)`
-            : remoteScanRow
-              ? `Associa NFC a ${remoteScanRow.serial_number || remoteScanRow.asset_code}`
-              : "Usa telefono come lettore NFC"
+          remoteScanRow
+            ? `Associa NFC a ${remoteScanRow.serial_number || remoteScanRow.asset_code}`
+            : "Usa telefono come lettore NFC"
         }
         onTagReceived={async (nfcTagId, ctx) => {
-          const row = ctx?.equipmentId
-            ? remoteScanRows?.find((r) => r.id === ctx.equipmentId)
-            : remoteScanRow;
+          const row = remoteScanRow;
           if (row) {
             try {
               await saveNfcAssociation(row, nfcTagId);

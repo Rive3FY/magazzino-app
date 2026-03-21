@@ -190,7 +190,7 @@ export default function LoginPage() {
       return;
     }
 
-    const { error } = await supabase.auth.signUp({
+    const { data: signUpData, error } = await supabase.auth.signUp({
       email: email.trim(),
       password,
       options: {
@@ -206,6 +206,22 @@ export default function LoginPage() {
       setMsg(error.message);
       setWorking(false);
       return;
+    }
+
+    // Con sessione immediata (es. email già confermata): allinea subito `profiles` ai dati del modulo.
+    // Con conferma email non c'è sessione: i dati restano nei metadata e /profilo li sincronizza al login.
+    const sessionUser = signUpData.session?.user;
+    if (sessionUser) {
+      const { error: profileErr } = await supabase.from("profiles").upsert(
+        {
+          id: sessionUser.id,
+          first_name: nome,
+          last_name: cognome,
+          badge_number: badge,
+        },
+        { onConflict: "id" }
+      );
+      if (profileErr) console.error("profilo dopo signUp:", profileErr);
     }
 
     setMsg("Utente creato ✅ In attesa approvazione amministratore.");

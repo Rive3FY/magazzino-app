@@ -219,6 +219,7 @@ DROP POLICY IF EXISTS "Enable read for users" ON profiles;
 DROP POLICY IF EXISTS "Enable update for users" ON profiles;
 CREATE POLICY "profiles_select_own" ON profiles FOR SELECT TO authenticated USING (id = auth.uid());
 CREATE POLICY "profiles_select_admin" ON profiles FOR SELECT TO authenticated USING (is_super_admin());
+CREATE POLICY "profiles_insert_own" ON profiles FOR INSERT TO authenticated WITH CHECK (id = auth.uid());
 CREATE POLICY "profiles_update_own" ON profiles FOR UPDATE TO authenticated USING (id = auth.uid()) WITH CHECK (id = auth.uid());
 
 -- -----------------------------------------------------------------------------

@@ -3,6 +3,11 @@
 import { useEffect, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 
+function metaStr(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  return String(v).trim();
+}
+
 export default function ProfiloPage() {
   const supabase = createClient();
 
@@ -43,10 +48,34 @@ export default function ProfiloPage() {
         setMsg("Errore caricamento profilo: " + error.message);
       }
 
+      const meta = (user.user_metadata ?? {}) as Record<string, unknown>;
+      const mBadge = metaStr(meta.badge_number);
+      const mFirst = metaStr(meta.first_name);
+      const mLast = metaStr(meta.last_name);
+
+      const dbBadge = metaStr(p?.badge_number);
+      const dbFirst = metaStr(p?.first_name);
+      const dbLast = metaStr(p?.last_name);
+
+      const outBadge = dbBadge || mBadge;
+      const outFirst = dbFirst || mFirst;
+      const outLast = dbLast || mLast;
+
+      setBadge(outBadge);
+      setFirst(outFirst);
+      setLast(outLast);
+
+      // Registrazione: i dati stanno spesso solo in user_metadata; la tabella profiles può essere vuota
+      // se il trigger DB non li ha copiati. Sincronizza sulla riga esistente senza toccare altri campi.
       if (p) {
-        setBadge(p.badge_number ?? "");
-        setFirst(p.first_name ?? "");
-        setLast(p.last_name ?? "");
+        const patch: { badge_number?: string; first_name?: string; last_name?: string } = {};
+        if (!dbBadge && mBadge) patch.badge_number = mBadge;
+        if (!dbFirst && mFirst) patch.first_name = mFirst;
+        if (!dbLast && mLast) patch.last_name = mLast;
+        if (Object.keys(patch).length > 0) {
+          const { error: syncErr } = await supabase.from("profiles").update(patch).eq("id", user.id);
+          if (syncErr) console.error("profilo sync da metadata:", syncErr);
+        }
       }
 
       setLoading(false);

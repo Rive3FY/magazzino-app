@@ -1966,7 +1966,7 @@ function finalizeMaterialPickupSuccess() {
 
     let excelLiveOk = true;
     try {
-      const delta = type === "IN" ? qn : -qn;
+      const delta = -qn;
       const res = await applyDeltaToExcelLive(picked.code, wh, delta);
       excelLiveOk = res === true;
     } catch (e: any) {

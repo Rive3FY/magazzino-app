@@ -23,14 +23,34 @@ export async function POST(request: Request) {
     const movements = body?.movements;
     const isMulti = Array.isArray(movements) && movements.length > 0;
 
-    const referent_email = body?.referent_email;
+    const referent_emails_raw = body?.referent_emails;
+    const referent_email_single = body?.referent_email;
     const referent_name = body?.referent_name;
+    const referent_names = body?.referent_names;
     const closed_by = body?.closed_by;
     const closed_at = body?.closed_at;
 
-    if (!referent_email) {
-      return NextResponse.json({ error: "referent_email richiesto" }, { status: 400 });
+    let toList: string[] = [];
+    if (Array.isArray(referent_emails_raw) && referent_emails_raw.length > 0) {
+      toList = [
+        ...new Set(
+          referent_emails_raw
+            .map((e: unknown) => String(e ?? "").trim().toLowerCase())
+            .filter((e) => e.length > 0 && e.includes("@"))
+        ),
+      ];
+    } else if (typeof referent_email_single === "string" && referent_email_single.trim()) {
+      toList = [referent_email_single.trim().toLowerCase()];
     }
+
+    if (toList.length === 0) {
+      return NextResponse.json({ error: "Almeno un indirizzo email referente richiesto" }, { status: 400 });
+    }
+
+    const referentDisplay =
+      typeof referent_names === "string" && referent_names.trim()
+        ? referent_names.trim()
+        : (typeof referent_name === "string" && referent_name.trim() ? referent_name.trim() : "-");
 
     let subject: string;
     let html: string;
@@ -85,7 +105,7 @@ export async function POST(request: Request) {
         </table>
 
         <table style="border-collapse: collapse; width: 100%; max-width: 720px; margin-top: 16px; background: #f8fafc;">
-          <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Referente</b></td><td style="padding: 6px; border: 1px solid #ddd;">${referent_name ?? "-"}</td></tr>
+          <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Referenti</b></td><td style="padding: 6px; border: 1px solid #ddd;">${referentDisplay}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Chiuso da</b></td><td style="padding: 6px; border: 1px solid #ddd;">${closed_by ?? "-"}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Data chiusura</b></td><td style="padding: 6px; border: 1px solid #ddd;">${closed_at ?? "-"}</td></tr>
         </table>
@@ -126,7 +146,7 @@ export async function POST(request: Request) {
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Quantità netta</b></td><td style="padding: 6px; border: 1px solid #ddd;">${net_qty_val}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Nota apertura</b></td><td style="padding: 6px; border: 1px solid #ddd;">${open_note_val}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Nota rientro</b></td><td style="padding: 6px; border: 1px solid #ddd;">${return_note_val}</td></tr>
-          <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Referente</b></td><td style="padding: 6px; border: 1px solid #ddd;">${referent_name ?? "-"}</td></tr>
+          <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Referenti</b></td><td style="padding: 6px; border: 1px solid #ddd;">${referentDisplay}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Chiuso da</b></td><td style="padding: 6px; border: 1px solid #ddd;">${closed_by ?? "-"}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Data chiusura</b></td><td style="padding: 6px; border: 1px solid #ddd;">${closed_at ?? "-"}</td></tr>
         </table>
@@ -146,7 +166,7 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         from: FROM_EMAIL,
-        to: [referent_email],
+        to: toList,
         subject,
         html,
       }),

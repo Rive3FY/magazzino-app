@@ -577,7 +577,7 @@ export default function AdminPanelClient() {
           </div>
           <div className="field">
             <label>Tipo</label>
-            <select className="select" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as any)}>
+            <select className="input" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as any)}>
               <option value="ALL">Tutti</option>
               <option value="IN">Entrata</option>
               <option value="OUT">Uscita</option>

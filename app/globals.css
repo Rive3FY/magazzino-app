@@ -1055,20 +1055,6 @@ body:has(.appLogin) {
   margin-bottom: 6px;
 }
 
-.input, .select{
-  width: 100%;
-  padding: 9px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: #ffffff;
-  color: var(--text);
-  outline: none;
-}
-
-.input:focus, .select:focus{
-  border-color: #9fb7c6;
-}
-
 /* Azioni */
 .actionsRow{
   padding: 10px 12px;
@@ -1439,7 +1425,8 @@ a.btn.btnPrimary{
   letter-spacing:0.2px;
 }
 
-.input{
+.input,
+.select{
   width:100%;
   height:40px;
   padding:0 12px;
@@ -1454,22 +1441,27 @@ a.btn.btnPrimary{
   transition:all .15s ease;
 }
 
-.input:focus{
+.input:focus,
+.select:focus{
   border-color:rgba(59,130,246,0.55);
   box-shadow:0 0 0 4px rgba(59,130,246,0.12);
 }
 
-.input:disabled{
+.input:disabled,
+.select:disabled{
   background:#f1f5f9;
   color:#64748b;
   cursor:not-allowed;
 }
 
 /* Select: look coerente + freccia custom */
-select.input{
+select.input,
+select.select{
   -webkit-appearance:none;
   -moz-appearance:none;
   appearance:none;
+  cursor:pointer;
+  color-scheme: light;
 
   padding-right:38px; /* spazio freccia */
   background-image:

@@ -251,7 +251,7 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
                       {required && <span style={{ color: "#dc2626", marginLeft: 4 }}>*</span>}
                     </label>
                     <select
-                      className="select"
+                      className="input"
                       value={columnMapping[key] !== undefined ? String(columnMapping[key]) : ""}
                       onChange={(e) => {
                         const v = e.target.value;

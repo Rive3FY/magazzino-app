@@ -1,0 +1,31 @@
+function setCookie(name, value, days) {
+    let d = new Date();
+    d.setTime(d.getTime() + (days*24*60*60*1000));
+    let expires = "expires=" + d.toUTCString();
+    value = encodeURIComponent(value);
+    document.cookie = name + "=" + value + ";" + expires + ";path=/";
+}
+
+function clearCookie(cookieName) {
+    document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`; 
+    document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=${location.pathname};`; 
+    document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=${location.hostname};`; 
+    document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; Secure;`;
+}
+
+function getCookie(name) {
+
+    const nameEQ = name + "="; 
+    const decodedCookies = decodeURIComponent(document.cookie); 
+    const cookiesArray = decodedCookies.split(';'); 
+
+    
+    for (let i = 0; i < cookiesArray.length; i++) {
+        let cookie = cookiesArray[i].trim(); 
+        
+        if (cookie.indexOf(nameEQ) === 0) {
+            return cookie.substring(nameEQ.length); 
+        }
+    }
+    return null;
+}

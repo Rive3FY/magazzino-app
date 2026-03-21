@@ -303,7 +303,8 @@ export default function MovimentiPage() {
   const [openQtyEdit, setOpenQtyEdit] = useState<string>("0");
   const [openQtySaving, setOpenQtySaving] = useState(false);
   const [referents, setReferents] = useState<ReferentRow[]>([]);
-  const [selReferentId, setSelReferentId] = useState<string>("");
+  /** Referenti selezionati per chiusura: tutti ricevono l'email; il primo è salvato su DB come referente principale. */
+  const [selReferentIds, setSelReferentIds] = useState<Set<string>>(() => new Set());
 
   const [editRectify, setEditRectify] = useState(false);
   const [groupEditState, setGroupEditState] = useState<Record<string, { returnQty: string; returnNote: string }>>({});
@@ -510,6 +511,16 @@ export default function MovimentiPage() {
 
     setReferents((data ?? []) as ReferentRow[]);
   }
+
+  function toggleReferentSelection(id: string) {
+    setSelReferentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
 //NFC 
 async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<QuickMaterialInfo | null> {
   const { data: stock, error: stockErr } = await supabase
@@ -2235,7 +2246,7 @@ function finalizeMaterialPickupSuccess() {
     setReturnToPrm(wh === "PRM" ? String(r) : "0");
     setReturnToReale(wh === "REALE" ? String(r) : "0");
     setReturnNote(m.return_note ?? "");
-    setSelReferentId(m.referent_id ?? "");
+    setSelReferentIds(m.referent_id ? new Set([m.referent_id]) : new Set());
     setEditRectify(false);
 
     const meta = await loadItemMetaWithFallback(m.code, (m.warehouse ?? null) as any);
@@ -2252,7 +2263,7 @@ function finalizeMaterialPickupSuccess() {
     setReturnToPrm(wh === "PRM" ? String(r) : "0");
     setReturnToReale(wh === "REALE" ? String(r) : "0");
     setReturnNote(mov.return_note ?? "");
-    setSelReferentId(mov.referent_id ?? "");
+    setSelReferentIds(mov.referent_id ? new Set([mov.referent_id]) : new Set());
     setEditRectify(true);
     setClosing(mov);
     loadItemMetaWithFallback(mov.code, (mov.warehouse ?? null) as any).then(setClosingMeta);
@@ -2312,7 +2323,7 @@ function finalizeMaterialPickupSuccess() {
     setEditingMovementId(null);
     setEditRectify(false);
     setClosing(closingGroup[0] ?? mov);
-    setMsg("Rettifica salvata. Conferma tutti gli articoli, poi seleziona il referente e chiudi il gruppo.");
+    setMsg("Rettifica salvata. Conferma tutti gli articoli, poi seleziona i referenti e chiudi il gruppo.");
   }
 
   async function saveOpenMovementQty() {
@@ -2521,11 +2532,14 @@ function finalizeMaterialPickupSuccess() {
       return;
     }
 
-    const ref = referents.find((x) => x.id === selReferentId) ?? null;
-    if (!ref?.email) {
-      setMsg("Seleziona un referente valido prima di confermare la chiusura.");
+    const selectedRefs = referents.filter((r) => selReferentIds.has(r.id) && String(r.email ?? "").trim().length > 0);
+    if (selectedRefs.length === 0) {
+      setMsg("Seleziona almeno un referente con email valida prima di confermare la chiusura.");
       return;
     }
+    const ref = selectedRefs[0];
+    const referentEmails = [...new Set(selectedRefs.map((r) => String(r.email).trim().toLowerCase()))];
+    const referentNamesLabel = selectedRefs.map((r) => r.name).join(", ");
 
     const closedAtIso = new Date().toISOString();
 
@@ -2581,6 +2595,8 @@ function finalizeMaterialPickupSuccess() {
             referent_id: ref?.id ?? null,
             referent_name: ref?.name ?? null,
             referent_email: ref?.email ?? null,
+            referent_emails: referentEmails,
+            referent_names: referentNamesLabel,
             closed_at: closedAtIso,
           },
         });
@@ -2620,7 +2636,9 @@ function finalizeMaterialPickupSuccess() {
           return_note: first?.return_note,
           type: first?.type,
           referent_name: ref?.name ?? null,
+          referent_names: referentNamesLabel,
           referent_email: ref?.email ?? null,
+          referent_emails: referentEmails,
           closed_by: user?.email ?? null,
           closed_at: closedAtIso,
         };
@@ -2784,6 +2802,8 @@ function finalizeMaterialPickupSuccess() {
         referent_id: ref?.id ?? null,
         referent_name: ref?.name ?? null,
         referent_email: ref?.email ?? null,
+        referent_emails: referentEmails,
+        referent_names: referentNamesLabel,
         closed_at: closedAtIso,
       },
     });
@@ -2804,7 +2824,9 @@ function finalizeMaterialPickupSuccess() {
           open_note: closing.note ?? null,
           return_note: (returnNote ?? "").trim() || null,
           referent_name: ref?.name ?? null,
+          referent_names: referentNamesLabel,
           referent_email: ref?.email ?? null,
+          referent_emails: referentEmails,
           closed_by: userEmail ?? null,
           closed_at: closedAtIso,
           type: closing.type,
@@ -4917,28 +4939,52 @@ function finalizeMaterialPickupSuccess() {
                   )}
 
                   {closingGroup.length <= 1 && (
-                    <div style={{ gridColumn: "span 6" }}>
-                      <label className="label" htmlFor="refSel">
-                        Referente
-                      </label>
-                      <select
-                        id="refSel"
-                        name="refSel"
-                        className="input"
-                        value={selReferentId}
-                        onChange={(e) => setSelReferentId(e.target.value)}
+                    <div style={{ gridColumn: "span 12" }}>
+                      <div className="label" id="refSelLabel">
+                        Referenti (notifica email a tutti i selezionati)
+                      </div>
+                      <div
+                        role="group"
+                        aria-labelledby="refSelLabel"
+                        style={{
+                          marginTop: 8,
+                          maxHeight: 220,
+                          overflow: "auto",
+                          border: "1px solid rgba(15,23,42,0.12)",
+                          borderRadius: 10,
+                          padding: 10,
+                          background: "#fff",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 8,
+                        }}
                       >
-                        <option value="">— Seleziona referente —</option>
-                        {referents.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.name}
-                          </option>
-                        ))}
-                      </select>
+                        {referents.length === 0 ? (
+                          <span style={{ fontSize: 13, color: "#64748b" }}>Nessun referente attivo. Configurali in Materiali → Admin → Referenti.</span>
+                        ) : (
+                          referents.map((r) => (
+                            <label
+                              key={r.id}
+                              style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", fontSize: 14 }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selReferentIds.has(r.id)}
+                                onChange={() => toggleReferentSelection(r.id)}
+                                style={{ marginTop: 3 }}
+                              />
+                              <span>
+                                <b>{r.name}</b>
+                                <span style={{ display: "block", fontSize: 12, color: "#64748b" }}>{r.email}</span>
+                              </span>
+                            </label>
+                          ))
+                        )}
+                      </div>
                       <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
-                        {selReferentId
-                          ? `Email: ${referents.find((x) => x.id === selReferentId)?.email ?? "-"}`
-                          : "Seleziona il referente per associarlo alla chiusura."}
+                        {selReferentIds.size > 0
+                          ? `${selReferentIds.size} destinatario/i email · sul movimento resta associato il primo della lista come referente principale.`
+                          : "Seleziona almeno un referente con email per chiudere."}
                       </div>
                     </div>
                   )}
@@ -4970,24 +5016,61 @@ function finalizeMaterialPickupSuccess() {
                 <div style={{ fontWeight: 900, marginBottom: 10 }}>Chiusura gruppo</div>
                 <div style={{ fontSize: 13, marginBottom: 12, color: "#64748b" }}>
                   {closingGroup.some((m) => (m.status ?? "OPEN") === "OPEN")
-                    ? "Compila le quantità rientro nella tabella sopra, seleziona il referente e conferma."
-                    : "Il gruppo è già chiuso: il referente è in sola lettura."}
+                    ? "Compila le quantità rientro nella tabella sopra, seleziona i referenti (email a tutti) e conferma."
+                    : "Il gruppo è già chiuso: i referenti sono in sola lettura."}
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                  <div style={{ minWidth: 200 }}>
-                    <label className="label" htmlFor="refSelGroup">Referente</label>
-                    <select
-                      id="refSelGroup"
-                      className="input"
-                      value={selReferentId}
-                      onChange={(e) => setSelReferentId(e.target.value)}
-                      disabled={!closingGroup.some((m) => (m.status ?? "OPEN") === "OPEN")}
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
+                  <div style={{ flex: "1 1 280px", minWidth: 260 }}>
+                    <div className="label" id="refSelGroupLabel">
+                      Referenti (email a tutti i selezionati)
+                    </div>
+                    <div
+                      role="group"
+                      aria-labelledby="refSelGroupLabel"
+                      style={{
+                        marginTop: 8,
+                        maxHeight: 200,
+                        overflow: "auto",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: 10,
+                        padding: 10,
+                        background: "#fff",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8,
+                        opacity: closingGroup.some((m) => (m.status ?? "OPEN") === "OPEN") ? 1 : 0.7,
+                      }}
                     >
-                      <option value="">— Seleziona referente —</option>
-                      {referents.map((r) => (
-                        <option key={r.id} value={r.id}>{r.name}</option>
-                      ))}
-                    </select>
+                      {referents.length === 0 ? (
+                        <span style={{ fontSize: 13, color: "#64748b" }}>Nessun referente attivo.</span>
+                      ) : (
+                        referents.map((r) => (
+                          <label
+                            key={r.id}
+                            style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: closingGroup.some((m) => (m.status ?? "OPEN") === "OPEN") ? "pointer" : "default", fontSize: 14 }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selReferentIds.has(r.id)}
+                              onChange={() => toggleReferentSelection(r.id)}
+                              disabled={!closingGroup.some((m) => (m.status ?? "OPEN") === "OPEN")}
+                              style={{ marginTop: 3 }}
+                            />
+                            <span>
+                              <b>{r.name}</b>
+                              <span style={{ display: "block", fontSize: 12, color: "#64748b" }}>{r.email}</span>
+                            </span>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                    {closingGroup.some((m) => (m.status ?? "OPEN") === "OPEN") && (
+                      <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
+                        {selReferentIds.size > 0
+                          ? `${selReferentIds.size} destinatario/i · referente principale sul DB: ordine elenco admin.`
+                          : "Seleziona almeno un referente."}
+                      </div>
+                    )}
                   </div>
                   {closingGroup.some((m) => (m.status ?? "OPEN") === "OPEN") && (
                     <div style={{ alignSelf: "flex-end" }}>

@@ -41,26 +41,26 @@ export default function TopBar({ email, displayName, displayBadge, showHamburger
       </div>
 
       <div className="userArea">
-          <div className="hideOnMobile">
-            <NotificationBell />
-          </div>
-          <Link href="/profilo" className="userPill userPillLink" title={`${name || "Utente"} - Vai al profilo`}>
-            <span className="userPillIcon" aria-hidden="true">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                <circle cx="12" cy="7" r="4" />
-              </svg>
-            </span>
-            {name || "Utente"}
-            {badge ? ` · ${badge}` : ""}
-          </Link>
-
-          <form action="/logout" method="POST" style={{ margin: 0 }} className="hideOnMobile">
-            <button className="btn" type="submit">
-              Logout
-            </button>
-          </form>
+        <div className="hideOnMobile">
+          <NotificationBell />
         </div>
+        <Link href="/profilo" className="userPill userPillLink" title={`${name || "Utente"} - Vai al profilo`}>
+          <span className="userPillIcon" aria-hidden="true">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+          </span>
+          {name || "Utente"}
+          {badge ? ` · ${badge}` : ""}
+        </Link>
+
+        <form action="/logout" method="POST" style={{ margin: 0 }} className="hideOnMobile">
+          <button className="btn" type="submit">
+            Logout
+          </button>
+        </form>
+      </div>
     </header>
   );
 }

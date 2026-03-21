@@ -311,7 +311,7 @@ export default function EquipmentLabelsClient({ area, basePath }: Props) {
         const barcodeHtml = svg.outerHTML;
         tmp.removeChild(svg);
         const shelfLine = [row.shelf, row.place].filter(Boolean).join(" · ");
-        return `<div class="etichetta-label"><div class="etichetta-content"><div class="etichetta-text"><div class="etichetta-code">${esc(row.serial_number || row.asset_code)}</div><div class="etichetta-name">${esc(row.name)}</div><div class="etichetta-shelf">${esc(EQUIPMENT_AREA_LABELS[row.equipment_area])}</div><div class="etichetta-shelf">${esc(EQUIPMENT_STATUS_LABELS[row.status])}</div>${shelfLine ? `<div class="etichetta-shelf">Scaffale: ${esc(shelfLine)}</div>` : ""}</div><div class="etichetta-barcode">${barcodeHtml}</div></div></div>`;
+        return `<div class="etichetta-label"><div class="etichetta-content"><div class="etichetta-text"><div class="etichetta-code">${esc(row.serial_number || row.asset_code)}</div><div class="etichetta-name">${esc(row.name)}</div><div class="etichetta-shelf">${esc(EQUIPMENT_AREA_LABELS[row.equipment_area])}</div>${shelfLine ? `<div class="etichetta-shelf">Scaffale: ${esc(shelfLine)}</div>` : ""}</div><div class="etichetta-barcode">${barcodeHtml}</div></div></div>`;
       })
       .join("");
 
@@ -617,7 +617,6 @@ body{margin:0;padding:0;background:#fff}
                     <div className="etichetta-name">{row.name}</div>
                     <div className="etichetta-shelf">{row.serial_number || "Nessun seriale"}</div>
                     <div className="etichetta-shelf">{areaLabel}</div>
-                    <div className="etichetta-shelf">{EQUIPMENT_STATUS_LABELS[row.status]}</div>
                   </div>
                   <div className="etichetta-barcode">
                     <BarcodeSvg value={row.barcode_value} />

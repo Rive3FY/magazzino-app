@@ -4,7 +4,7 @@ import { BrowserMultiFormatReader } from "@zxing/browser";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../../_lib/supabase/client";
-import { notifyEquipmentSync, subscribeEquipmentSync } from "../../_lib/equipmentSync";
+import { notifyEquipmentMaintenance, notifyEquipmentSync, subscribeEquipmentSync } from "../../_lib/equipmentSync";
 import { useAuth } from "../../_lib/hooks/useAuth";
 import { useIsAdmin } from "../../_lib/hooks/useIsAdmin";
 import { useToast } from "../../_lib/ToastContext";
@@ -862,6 +862,86 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
   const scanResultCanPickup = !!scanResult && scanResult.asset.status === "AVAILABLE" && !scanResultHasOpenMovement;
 
+  /** Passo 2 → 3: stessa logica di saveMovement / carrello (solo disponibili, nessun movimento aperto). */
+  const selectedAssetEligibleForOutboundStep3 = useMemo(() => {
+    if (!selectedAsset) return false;
+    return selectedAsset.status === "AVAILABLE" && !openMovementAssetIds.has(selectedAsset.id);
+  }, [selectedAsset, openMovementAssetIds]);
+
+  const cartMissingResolvedAssets = useMemo(() => {
+    if (cart.length === 0) return false;
+    return cartItems.length !== cart.length;
+  }, [cart.length, cartItems.length]);
+
+  const ineligibleCartItemsForOutboundStep3 = useMemo(() => {
+    return cartItems.filter((a) => a.status !== "AVAILABLE" || openMovementAssetIds.has(a.id));
+  }, [cartItems, openMovementAssetIds]);
+
+  const canAdvancePickupWizardToStep3 = useMemo(() => {
+    if (scanMode === "NORMAL") {
+      if (!form.equipment_id.trim()) return false;
+      if (!selectedAsset) return false;
+      return selectedAssetEligibleForOutboundStep3;
+    }
+    if (cart.length === 0) return false;
+    if (cartMissingResolvedAssets) return false;
+    return ineligibleCartItemsForOutboundStep3.length === 0;
+  }, [
+    scanMode,
+    form.equipment_id,
+    selectedAsset,
+    selectedAssetEligibleForOutboundStep3,
+    cart.length,
+    cartMissingResolvedAssets,
+    ineligibleCartItemsForOutboundStep3.length,
+  ]);
+
+  function advancePickupWizardToStep3() {
+    if (scanMode === "NORMAL") {
+      if (!form.equipment_id.trim()) {
+        setMsg("Seleziona un'attrezzatura prima di continuare.");
+        return;
+      }
+      if (!selectedAsset) {
+        setMsg("Attrezzatura non trovata nell'elenco del magazzino selezionato. Ricarica la pagina o scegli di nuovo.");
+        return;
+      }
+      if (selectedAsset.status !== "AVAILABLE") {
+        const label = EQUIPMENT_STATUS_LABELS[selectedAsset.status] ?? selectedAsset.status;
+        setMsg(
+          `Non puoi andare al passo 3: questa attrezzatura non è disponibile per il prelievo (stato: ${label}). Scegli un'altra unità o aggiorna lo stato da Tutte le attrezzature.`
+        );
+        return;
+      }
+      if (openMovementAssetIds.has(selectedAsset.id)) {
+        setMsg("Non puoi andare al passo 3: c'è già un movimento aperto su questa attrezzatura. Chiudilo prima di prelevare.");
+        return;
+      }
+    } else {
+      if (cart.length === 0) {
+        setMsg("Aggiungi almeno un'attrezzatura al carrello prima di continuare.");
+        return;
+      }
+      if (cartMissingResolvedAssets) {
+        setMsg("Una o più voci del carrello non sono più nell'elenco (magazzino o dati aggiornati). Torna indietro, svuota o ricomponi il carrello.");
+        return;
+      }
+      if (ineligibleCartItemsForOutboundStep3.length > 0) {
+        const n = ineligibleCartItemsForOutboundStep3.length;
+        const first = ineligibleCartItemsForOutboundStep3[0];
+        const code = first.serial_number || first.asset_code || first.name || "—";
+        setMsg(
+          n === 1
+            ? `Non puoi andare al passo 3: ${code} non è disponibile per il prelievo (stato o movimento aperto). Rimuovila dal carrello dal passo 2.`
+            : `Non puoi andare al passo 3: ${n} attrezzature nel carrello non sono disponibili per il prelievo. Rimuovile o risolvi i blocchi dal passo 2.`
+        );
+        return;
+      }
+    }
+    setMsg(null);
+    setOutboundStep(3);
+  }
+
   function getResumeOutboundStep(): 1 | 2 | 3 {
     if (outboundStep === 3) {
       if (warehouseSelected && (cartItems.length > 0 || !!selectedAsset)) return 3;
@@ -1486,6 +1566,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     setMsg(null);
 
     try {
+      let closedMaintenance = false;
       for (const row of targetRows) {
         if (getMovementStatus(row) === "CLOSED") continue;
         const resolutionType = targetRows.length > 1 ? groupEditState[row.id]?.resolutionType : closeResolutionType;
@@ -1509,9 +1590,11 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           .eq("id", row.id);
 
         if (error) throw error;
+        if (resolutionType === "MAINTENANCE") closedMaintenance = true;
       }
 
       toast.success(targetRows.length > 1 ? "Gruppo chiuso" : "Movimento chiuso");
+      if (closedMaintenance) notifyEquipmentMaintenance(area);
       notifyEquipmentSync(area, "movements-close");
       await loadData();
       closeModal();
@@ -2195,6 +2278,48 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                   </div>
                 )}
 
+                {scanMode === "NORMAL" && form.equipment_id.trim() && !selectedAsset && (
+                  <div style={{ padding: 10, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 12, fontWeight: 700, color: "#b45309" }}>
+                    L&apos;attrezzatura selezionata non è più nell&apos;elenco del magazzino. Scegline un&apos;altra o ricarica la pagina.
+                  </div>
+                )}
+
+                {scanMode === "NORMAL" && selectedAsset && !selectedAssetEligibleForOutboundStep3 && (
+                  <div style={{ padding: 10, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.35)", borderRadius: 12, fontWeight: 700, color: "#b91c1c" }}>
+                    {selectedAsset.status !== "AVAILABLE" ? (
+                      <>
+                        Non puoi proseguire: stato attuale{" "}
+                        <span style={equipmentStatusStyle(selectedAsset.status)}>{EQUIPMENT_STATUS_LABELS[selectedAsset.status]}</span>
+                        . Solo attrezzature disponibili possono essere prelevate.
+                      </>
+                    ) : (
+                      <>Non puoi proseguire: c&apos;è già un movimento aperto su questa attrezzatura. Chiudilo prima di prelevare.</>
+                    )}
+                  </div>
+                )}
+
+                {scanMode === "CART" && cart.length > 0 && cartMissingResolvedAssets && (
+                  <div style={{ padding: 10, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 12, fontWeight: 700, color: "#b45309" }}>
+                    Il carrello contiene attrezzature non trovate nell&apos;elenco attuale. Rimuovi le voci obsolete o ricomponi il carrello dal passo 2.
+                  </div>
+                )}
+
+                {scanMode === "CART" && cart.length > 0 && !cartMissingResolvedAssets && ineligibleCartItemsForOutboundStep3.length > 0 && (
+                  <div style={{ padding: 10, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.35)", borderRadius: 12, fontWeight: 700, color: "#b91c1c" }}>
+                    {ineligibleCartItemsForOutboundStep3.length === 1 ? (
+                      <>
+                        Una voce nel carrello non è prelevabile (stato o movimento aperto):{" "}
+                        <strong>{ineligibleCartItemsForOutboundStep3[0].serial_number || ineligibleCartItemsForOutboundStep3[0].asset_code}</strong>.
+                        Rimuovila per continuare.
+                      </>
+                    ) : (
+                      <>
+                        {ineligibleCartItemsForOutboundStep3.length} attrezzature nel carrello non sono prelevabili (stato o movimento aperto). Rimuovile dal passo 2 per continuare.
+                      </>
+                    )}
+                  </div>
+                )}
+
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 }}>
                   <button type="button" className="btn" onClick={() => setOutboundStep(1)}>
                     ← Indietro
@@ -2217,8 +2342,8 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                   <button
                     type="button"
                     className="btn btnPrimary"
-                    onClick={() => setOutboundStep(3)}
-                    disabled={scanMode === "NORMAL" ? !form.equipment_id : cart.length === 0}
+                    onClick={advancePickupWizardToStep3}
+                    disabled={!canAdvancePickupWizardToStep3}
                   >
                     Avanti → Dettagli e conferma
                   </button>
@@ -2419,12 +2544,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
             </table>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
-            <div style={{ fontWeight: 800 }}>Righe: {cartItems.length}</div>
-            <button className="btn btnPrimary" onClick={confirmCartPickup} disabled={!warehouseSelected || cartBusy || cartItems.length === 0} type="button">
-              {cartBusy ? "Salvataggio..." : "Conferma prelievo"}
-            </button>
-          </div>
+          <div style={{ marginTop: 12, fontWeight: 800 }}>Righe: {cartItems.length}</div>
         </div>
       )}
 

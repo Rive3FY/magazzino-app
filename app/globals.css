@@ -2603,3 +2603,12 @@ html, body {
   display: flex;
   align-items: center;
 }
+
+/* Manutenzioni attrezzature: righe tabella apribili */
+tr.maintenanceRowClickable:hover {
+  background: rgba(59, 130, 246, 0.08);
+}
+tr.maintenanceRowClickable:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.55);
+  outline-offset: -2px;
+}

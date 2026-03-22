@@ -19,6 +19,7 @@ import {
   equipmentMovementPillStyle,
   equipmentStatusStyle,
 } from "../../_lib/equipment";
+import { applyEquipmentMaintenanceReintegration } from "../../_lib/equipmentMaintenanceReintegration";
 import { isRelationMissingOrNotExposedError } from "../../_lib/postgrestErrors";
 import EquipmentStatusManager from "./EquipmentStatusManager";
 import ConfirmModal from "../../_components/ConfirmModal";
@@ -329,11 +330,41 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
       return;
     }
 
+    if (row.status === "MAINTENANCE" && newStatus === "AVAILABLE") {
+      try {
+        await applyEquipmentMaintenanceReintegration(supabase, {
+          equipmentId: row.id,
+          userId: user?.id ?? null,
+          userEmail: user?.email ?? null,
+          userDisplayName: null,
+        });
+      } catch (e: unknown) {
+        setStatusChanging(false);
+        setMsg(e instanceof Error ? e.message : "Reintegro non riuscito.");
+        return;
+      }
+      setStatusChanging(false);
+      toast.success(`Stato aggiornato a ${EQUIPMENT_STATUS_LABELS[newStatus]}`);
+      notifyEquipmentSync(area, "registry-status-change");
+      await loadAssets();
+      setStatusModalOpen(false);
+      return;
+    }
+
     const payload = buildEquipmentStatusUpdate(newStatus, maintenanceNote);
-    const { error } = await supabase.from("equipment_assets").update(payload).eq("id", row.id).eq("equipment_area", area);
+    const { data: updatedAsset, error } = await supabase
+      .from("equipment_assets")
+      .update(payload as never)
+      .eq("id", row.id)
+      .select("id, status")
+      .maybeSingle();
     setStatusChanging(false);
     if (error) {
       setMsg("Errore aggiornamento stato: " + error.message);
+      return;
+    }
+    if (!updatedAsset) {
+      setMsg("Nessuna riga aggiornata. Verifica permessi o che l'attrezzatura esista ancora.");
       return;
     }
     toast.success(`Stato aggiornato a ${EQUIPMENT_STATUS_LABELS[newStatus]}`);

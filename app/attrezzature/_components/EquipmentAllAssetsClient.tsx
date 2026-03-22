@@ -16,6 +16,7 @@ import {
   EQUIPMENT_STATUS_OPTIONS,
   equipmentStatusStyle,
 } from "../../_lib/equipment";
+import { applyEquipmentMaintenanceReintegration } from "../../_lib/equipmentMaintenanceReintegration";
 import EquipmentStatusManager from "./EquipmentStatusManager";
 import EquipmentExcelImportClient from "./EquipmentExcelImportClient";
 import ConfirmModal from "../../_components/ConfirmModal";
@@ -769,11 +770,41 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
       return;
     }
 
+    if (row.status === "MAINTENANCE" && newStatus === "AVAILABLE") {
+      try {
+        await applyEquipmentMaintenanceReintegration(supabase, {
+          equipmentId: row.id,
+          userId: user?.id ?? null,
+          userEmail: user?.email ?? null,
+          userDisplayName: null,
+        });
+      } catch (e: unknown) {
+        setSaving(false);
+        setMsg(e instanceof Error ? e.message : "Reintegro non riuscito.");
+        return;
+      }
+      setSaving(false);
+      await writeAuditLog("EQUIPMENT_STATUS_CHANGED", row.id, { status: newStatus });
+      toast.success(`Stato aggiornato a ${EQUIPMENT_STATUS_LABELS[newStatus]}`);
+      await loadAssets();
+      setStatusModalRow(null);
+      return;
+    }
+
     const payload = buildEquipmentStatusUpdate(newStatus, maintenanceNote);
-    const { error } = await supabase.from("equipment_assets").update(payload).eq("id", row.id).eq("equipment_area", area);
+    const { data: updatedAsset, error } = await supabase
+      .from("equipment_assets")
+      .update(payload as never)
+      .eq("id", row.id)
+      .select("id, status")
+      .maybeSingle();
     setSaving(false);
     if (error) {
       setMsg("Errore aggiornamento stato: " + error.message);
+      return;
+    }
+    if (!updatedAsset) {
+      setMsg("Nessuna riga aggiornata. Verifica permessi o che l'attrezzatura esista ancora.");
       return;
     }
     await writeAuditLog("EQUIPMENT_STATUS_CHANGED", row.id, { status: newStatus });

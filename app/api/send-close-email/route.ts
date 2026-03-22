@@ -1,6 +1,13 @@
 import { createClient } from "../../_lib/supabase/server";
 import { NextResponse } from "next/server";
 
+function formatItRome(iso: unknown): string {
+  if (typeof iso !== "string" || !iso.trim()) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("it-IT", { timeZone: "Europe/Rome", dateStyle: "short", timeStyle: "short" });
+}
+
 export async function POST(request: Request) {
   try {
     const supabase = await createClient();
@@ -61,6 +68,7 @@ export async function POST(request: Request) {
         const code = m.code ?? "-";
         const name = m.name ?? code;
         const warehouse = m.warehouse ?? "-";
+        const opened = formatItRome(m.created_at) || "—";
         const out_qty = m.out_qty ?? "-";
         const returned_qty = m.returned_qty ?? 0;
         const net_qty = m.net_qty ?? "-";
@@ -72,6 +80,7 @@ export async function POST(request: Request) {
             <td style="padding: 6px; border: 1px solid #ddd;">${code}</td>
             <td style="padding: 6px; border: 1px solid #ddd;">${name}</td>
             <td style="padding: 6px; border: 1px solid #ddd;">${warehouse}</td>
+            <td style="padding: 6px; border: 1px solid #ddd;">${opened}</td>
             <td style="padding: 6px; border: 1px solid #ddd;">${out_qty}</td>
             <td style="padding: 6px; border: 1px solid #ddd;">${returned_qty}</td>
             <td style="padding: 6px; border: 1px solid #ddd;">${net_qty}</td>
@@ -92,6 +101,7 @@ export async function POST(request: Request) {
               <th style="padding: 6px; border: 1px solid #ddd;"><b>Codice</b></th>
               <th style="padding: 6px; border: 1px solid #ddd;"><b>Materiale</b></th>
               <th style="padding: 6px; border: 1px solid #ddd;"><b>Mag.</b></th>
+              <th style="padding: 6px; border: 1px solid #ddd;"><b>Apertura prelievo</b></th>
               <th style="padding: 6px; border: 1px solid #ddd;"><b>Uscita</b></th>
               <th style="padding: 6px; border: 1px solid #ddd;"><b>Rientro</b></th>
               <th style="padding: 6px; border: 1px solid #ddd;"><b>Netto</b></th>
@@ -121,6 +131,10 @@ export async function POST(request: Request) {
       const code_val = body?.code ?? firstMov?.code ?? "-";
       const name_val = body?.name ?? firstMov?.name ?? code_val;
       const warehouse_val = body?.warehouse ?? firstMov?.warehouse ?? "-";
+      const opened_label = formatItRome(body?.created_at ?? firstMov?.created_at);
+      const reference_val = opened_label
+        ? `${code_val} · mag. ${warehouse_val} · apertura ${opened_label}`
+        : `${code_val} · mag. ${warehouse_val}`;
       const out_qty_val = body?.out_qty ?? firstMov?.out_qty ?? "-";
       const returned_qty_val = body?.returned_qty ?? firstMov?.returned_qty ?? 0;
       const net_qty_val = body?.net_qty ?? firstMov?.net_qty ?? "-";
@@ -136,7 +150,8 @@ export async function POST(request: Request) {
         <p>È stata confermata una rettifica di movimento materiale.</p>
 
         <table style="border-collapse: collapse; width: 100%; max-width: 720px;">
-          <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>ID movimento</b></td><td style="padding: 6px; border: 1px solid #ddd;">${movement_id_val}</td></tr>
+          <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Riferimento</b></td><td style="padding: 6px; border: 1px solid #ddd;">${reference_val}</td></tr>
+          <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>ID interno (supporto)</b></td><td style="padding: 6px; border: 1px solid #ddd; font-size: 12px; color: #64748b;">${movement_id_val}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Codice</b></td><td style="padding: 6px; border: 1px solid #ddd;">${code_val}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Materiale</b></td><td style="padding: 6px; border: 1px solid #ddd;">${name_val}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Tipo</b></td><td style="padding: 6px; border: 1px solid #ddd;">${type_val}</td></tr>

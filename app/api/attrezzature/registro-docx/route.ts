@@ -5,7 +5,6 @@ import JSZip from "jszip";
 import { createClient as createServerClient } from "../../../_lib/supabase/server";
 import {
   buildEquipmentRegisterRows,
-  getEquipmentRegisterPageCount,
   fillEquipmentRegisterDocumentXml,
   fillEquipmentRegisterHeaderXml,
   type EquipmentRegisterArea,
@@ -64,7 +63,6 @@ export async function GET(request: Request) {
     const allWarehouses = !warehouseParam || warehouseParam === "__ALL__";
 
     let updatedDocumentXml: string;
-    let pageCount: number;
     let filename: string;
 
     if (allWarehouses) {
@@ -154,10 +152,6 @@ export async function GET(request: Request) {
           closedByNameMap,
         });
 
-        const whPageCount = getEquipmentRegisterPageCount({
-          documentXml,
-          rowCount: registerRows.length > 0 ? registerRows.length : 1,
-        });
         const whDocumentXml = fillEquipmentRegisterDocumentXml({
           documentXml,
           area: areaParam,
@@ -167,7 +161,6 @@ export async function GET(request: Request) {
         const whHeaderXml = fillEquipmentRegisterHeaderXml({
           headerXml,
           year: new Date().getFullYear(),
-          pageCount: whPageCount,
         });
 
         const whZip = await JSZip.loadAsync(templateBuffer);
@@ -254,10 +247,6 @@ export async function GET(request: Request) {
         closedByNameMap,
       });
 
-      pageCount = getEquipmentRegisterPageCount({
-        documentXml,
-        rowCount: registerRows.length,
-      });
       updatedDocumentXml = fillEquipmentRegisterDocumentXml({
         documentXml,
         area: areaParam,
@@ -270,7 +259,6 @@ export async function GET(request: Request) {
     const updatedHeaderXml = fillEquipmentRegisterHeaderXml({
       headerXml,
       year: new Date().getFullYear(),
-      pageCount,
     });
     zip.file("word/document.xml", updatedDocumentXml);
     zip.file("word/header1.xml", updatedHeaderXml);

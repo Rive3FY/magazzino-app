@@ -40,6 +40,55 @@ export function notifyEquipmentSync(area: EquipmentArea, source: string) {
   window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: payload }));
 }
 
+const MAINTENANCE_STORAGE_KEY = "equipment-maintenance-sync";
+const MAINTENANCE_EVENT = "equipment-maintenance-sync";
+
+/** Notifica altre schede / listener: nuova chiusura con invio in manutenzione. */
+export function notifyEquipmentMaintenance(area: EquipmentArea) {
+  if (typeof window === "undefined") return;
+  const payload = { area, timestamp: Date.now() };
+  const serialized = JSON.stringify(payload);
+  window.localStorage.setItem(MAINTENANCE_STORAGE_KEY, serialized);
+  window.dispatchEvent(new CustomEvent(MAINTENANCE_EVENT, { detail: payload }));
+}
+
+export function subscribeEquipmentMaintenance(callback: () => void) {
+  if (typeof window === "undefined") return () => {};
+
+  type MaintPayload = { area: EquipmentArea; timestamp: number };
+
+  const parse = (raw: string | null): MaintPayload | null => {
+    if (!raw) return null;
+    try {
+      const p = JSON.parse(raw) as Partial<MaintPayload>;
+      if ((p.area === "LINEE" || p.area === "STAZIONI") && typeof p.timestamp === "number") {
+        return p as MaintPayload;
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+  };
+
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== MAINTENANCE_STORAGE_KEY) return;
+    if (parse(event.newValue)) callback();
+  };
+
+  const onCustom = (event: Event) => {
+    const e = event as CustomEvent<MaintPayload>;
+    if (e.detail?.area) callback();
+  };
+
+  window.addEventListener("storage", onStorage);
+  window.addEventListener(MAINTENANCE_EVENT, onCustom);
+
+  return () => {
+    window.removeEventListener("storage", onStorage);
+    window.removeEventListener(MAINTENANCE_EVENT, onCustom);
+  };
+}
+
 export function subscribeEquipmentSync(
   area: EquipmentArea,
   callback: () => void

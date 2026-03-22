@@ -5,6 +5,43 @@ const WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 /** Capacità righe dati per pagina: il template originale prevede 23 righe. */
 const REGISTER_PAGE_CAPACITY = 23;
 
+/**
+ * Il template ha 4 righe di intestazione + fino a 23 righe dati. In Word, una tabella
+ * così alta viene spesso spezzata su due pagine fisiche; noi inseriamo anche un'interruzione
+ * di pagina esplicita prima della tabella successiva → si ottiene una pagina vuota (o quasi)
+ * tra i blocchi. Manteniamo un tetto conservativo sotto l'altezza utile del foglio.
+ */
+const REGISTER_PAGE_PHYSICAL_ROW_CAP = 20;
+
+function getRegisterDataRowCapacity(templateTableRowCount: number) {
+  const uncapped = Math.max(templateTableRowCount - 4, REGISTER_PAGE_CAPACITY);
+  return Math.min(uncapped, REGISTER_PAGE_PHYSICAL_ROW_CAP);
+}
+
+function removeTrailingParagraphsBeforeSect(doc: Document) {
+  const body = doc.getElementsByTagName("w:body")[0];
+  if (!body) return;
+  const children = nodeListToArray(body.childNodes);
+  const sectIndex = children.findIndex((n) => {
+    if (n.nodeType !== 1) return false;
+    const el = n as Element;
+    const tag = (el.tagName || el.localName || "").toLowerCase();
+    return tag === "w:sectpr" || tag === "sectpr";
+  });
+  if (sectIndex <= 0) return;
+  for (let i = sectIndex - 1; i >= 0; i -= 1) {
+    const node = children[i]!;
+    if (node.nodeType !== 1) continue;
+    const el = node as Element;
+    const tag = (el.tagName || el.localName || "").toLowerCase();
+    if (tag === "w:p" || tag === "p") {
+      body.removeChild(node);
+    } else {
+      break;
+    }
+  }
+}
+
 export type EquipmentRegisterArea = "LINEE" | "STAZIONI";
 
 export type EquipmentRegisterAsset = {
@@ -148,6 +185,78 @@ function setCellText(doc: Document, cell: Element, text: string) {
   cell.appendChild(paragraph);
 }
 
+function appendHeaderBoldRun(doc: Document, paragraph: Element, text: string) {
+  const run = doc.createElementNS(WORD_NS, "w:r");
+  const rPr = doc.createElementNS(WORD_NS, "w:rPr");
+  rPr.appendChild(doc.createElementNS(WORD_NS, "w:b"));
+  run.appendChild(rPr);
+  const t = doc.createElementNS(WORD_NS, "w:t");
+  t.setAttribute("xml:space", "preserve");
+  t.appendChild(doc.createTextNode(text));
+  run.appendChild(t);
+  paragraph.appendChild(run);
+}
+
+/** Campo Word (PAGE, NUMPAGES, …) con risultato segnaposto per anteprima. */
+function appendWordField(doc: Document, paragraph: Element, instruction: string, placeholder: string) {
+  let run = doc.createElementNS(WORD_NS, "w:r");
+  const fldBegin = doc.createElementNS(WORD_NS, "w:fldChar");
+  fldBegin.setAttribute("w:fldCharType", "begin");
+  run.appendChild(fldBegin);
+  paragraph.appendChild(run);
+
+  run = doc.createElementNS(WORD_NS, "w:r");
+  const instr = doc.createElementNS(WORD_NS, "w:instrText");
+  instr.setAttribute("xml:space", "preserve");
+  instr.appendChild(doc.createTextNode(` ${instruction} `));
+  run.appendChild(instr);
+  paragraph.appendChild(run);
+
+  run = doc.createElementNS(WORD_NS, "w:r");
+  const fldSep = doc.createElementNS(WORD_NS, "w:fldChar");
+  fldSep.setAttribute("w:fldCharType", "separate");
+  run.appendChild(fldSep);
+  paragraph.appendChild(run);
+
+  run = doc.createElementNS(WORD_NS, "w:r");
+  const rPr = doc.createElementNS(WORD_NS, "w:rPr");
+  rPr.appendChild(doc.createElementNS(WORD_NS, "w:b"));
+  run.appendChild(rPr);
+  const t = doc.createElementNS(WORD_NS, "w:t");
+  t.appendChild(doc.createTextNode(placeholder));
+  run.appendChild(t);
+  paragraph.appendChild(run);
+
+  run = doc.createElementNS(WORD_NS, "w:r");
+  const fldEnd = doc.createElementNS(WORD_NS, "w:fldChar");
+  fldEnd.setAttribute("w:fldCharType", "end");
+  run.appendChild(fldEnd);
+  paragraph.appendChild(run);
+}
+
+/** N° Foglio: pagina corrente / totale (campi Word, aggiornati da Word/PDF). */
+function setCellFoglioWithPageFields(doc: Document, cell: Element) {
+  clearCellContent(cell);
+  const paragraph = doc.createElementNS(WORD_NS, "w:p");
+  const pPr = doc.createElementNS(WORD_NS, "w:pPr");
+  const pStyle = doc.createElementNS(WORD_NS, "w:pStyle");
+  pStyle.setAttribute("w:val", "Intestazione");
+  pPr.appendChild(pStyle);
+  const jc = doc.createElementNS(WORD_NS, "w:jc");
+  jc.setAttribute("w:val", "left");
+  pPr.appendChild(jc);
+  const pRPr = doc.createElementNS(WORD_NS, "w:rPr");
+  pRPr.appendChild(doc.createElementNS(WORD_NS, "w:b"));
+  pPr.appendChild(pRPr);
+  paragraph.appendChild(pPr);
+
+  appendHeaderBoldRun(doc, paragraph, "N° Foglio: ");
+  appendWordField(doc, paragraph, "PAGE", "1");
+  appendHeaderBoldRun(doc, paragraph, " / ");
+  appendWordField(doc, paragraph, "NUMPAGES", "1");
+  cell.appendChild(paragraph);
+}
+
 function setRowValues(doc: Document, row: Element, values: EquipmentRegisterRow) {
   const cells = getRowCells(row);
   const ordered = [
@@ -181,8 +290,9 @@ function fillRegisterTablePage(args: {
   area: EquipmentRegisterArea;
   rows: EquipmentRegisterRow[];
   sedeDi?: string;
+  dataRowCapacity: number;
 }) {
-  const { doc, table, area, rows, sedeDi } = args;
+  const { doc, table, area, rows, sedeDi, dataRowCapacity: pageCapacity } = args;
   const tableRows = getDirectTableRows(table);
   if (tableRows.length < 5) {
     throw new Error("Struttura tabella DOCX non valida.");
@@ -194,7 +304,6 @@ function fillRegisterTablePage(args: {
   if (headerCells[1]) setCellText(doc, headerCells[1], `Sede di: ${header.sedeDi}`);
 
   const templateRow = tableRows[4]!.cloneNode(true) as Element;
-  const pageCapacity = Math.max(tableRows.length - 4, REGISTER_PAGE_CAPACITY);
 
   for (let index = tableRows.length - 1; index >= 4; index -= 1) {
     table.removeChild(tableRows[index]!);
@@ -238,7 +347,7 @@ export function getEquipmentRegisterPageCount(args: {
     throw new Error("Struttura tabella DOCX non valida.");
   }
 
-  const pageCapacity = Math.max(templatePageRows.length - 4, REGISTER_PAGE_CAPACITY);
+  const pageCapacity = getRegisterDataRowCapacity(templatePageRows.length);
   const effectiveRowCount = Math.max(1, args.rowCount);
   return Math.max(1, Math.ceil(effectiveRowCount / pageCapacity));
 }
@@ -265,7 +374,7 @@ export function fillEquipmentRegisterDocumentXml(args: {
     throw new Error("Struttura tabella DOCX non valida.");
   }
 
-  const pageCapacity = Math.max(templatePageRows.length - 4, REGISTER_PAGE_CAPACITY);
+  const pageCapacity = getRegisterDataRowCapacity(templatePageRows.length);
   const effectiveRows = args.rows.length > 0 ? args.rows : [emptyRegisterRow()];
   const pageCount = Math.max(1, Math.ceil(effectiveRows.length / pageCapacity));
 
@@ -278,6 +387,7 @@ export function fillEquipmentRegisterDocumentXml(args: {
       area: args.area,
       rows: pageRows,
       sedeDi: args.sedeDi,
+      dataRowCapacity: pageCapacity,
     });
 
     if (pageIndex > 0) {
@@ -287,6 +397,7 @@ export function fillEquipmentRegisterDocumentXml(args: {
   }
 
   parent.removeChild(table);
+  removeTrailingParagraphsBeforeSect(doc);
 
   return serializer.serializeToString(doc);
 }
@@ -331,7 +442,7 @@ export function fillEquipmentRegisterDocumentXmlMultiWarehouse(args: {
     throw new Error("Struttura tabella DOCX non valida.");
   }
 
-  const pageCapacity = Math.max(templatePageRows.length - 4, REGISTER_PAGE_CAPACITY);
+  const pageCapacity = getRegisterDataRowCapacity(templatePageRows.length);
   let isFirst = true;
 
   for (const section of args.sections) {
@@ -347,6 +458,7 @@ export function fillEquipmentRegisterDocumentXmlMultiWarehouse(args: {
         area: args.area,
         rows: pageRows,
         sedeDi: section.warehouse,
+        dataRowCapacity: pageCapacity,
       });
 
       if (!isFirst || pageIndex > 0) {
@@ -358,6 +470,7 @@ export function fillEquipmentRegisterDocumentXmlMultiWarehouse(args: {
   }
 
   parent.removeChild(table);
+  removeTrailingParagraphsBeforeSect(doc);
 
   return serializer.serializeToString(doc);
 }
@@ -365,7 +478,6 @@ export function fillEquipmentRegisterDocumentXmlMultiWarehouse(args: {
 export function fillEquipmentRegisterHeaderXml(args: {
   headerXml: string;
   year?: number;
-  pageCount?: number;
 }) {
   const doc = new DOMParser().parseFromString(args.headerXml, "application/xml");
   const serializer = new XMLSerializer();
@@ -384,7 +496,7 @@ export function fillEquipmentRegisterHeaderXml(args: {
   const secondRowCells = getRowCells(rows[1]!);
 
   if (firstRowCells[2]) setCellText(doc, firstRowCells[2], `Anno: ${headerYear}`);
-  if (secondRowCells[2]) setCellText(doc, secondRowCells[2], `N° Foglio: 1 / ${String(args.pageCount ?? 1)}`);
+  if (secondRowCells[2]) setCellFoglioWithPageFields(doc, secondRowCells[2]);
 
   return serializer.serializeToString(doc);
 }

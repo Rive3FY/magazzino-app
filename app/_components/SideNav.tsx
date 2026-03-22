@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
+import { useEquipmentMaintenanceNotifications } from "../_lib/hooks/useEquipmentMaintenanceNotifications";
 import { useSidebar } from "../_lib/SidebarContext";
 
 type Props = { hideSidebar?: boolean };
@@ -20,6 +21,7 @@ type NavIconName =
   | "assegnatari"
   | "tutteAttrezzature"
   | "registri"
+  | "manutenzione"
   | "logout";
 
 function NavIcon({ name }: { name: NavIconName }) {
@@ -114,6 +116,12 @@ function NavIcon({ name }: { name: NavIconName }) {
           <path d="M10 9H8" />
         </svg>
       );
+    case "manutenzione":
+      return (
+        <svg className="sideLinkIcon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+        </svg>
+      );
     case "logout":
       return (
         <svg className="sideLinkIcon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -122,6 +130,8 @@ function NavIcon({ name }: { name: NavIconName }) {
           <path d="M21 12H9" />
         </svg>
       );
+    default:
+      return null;
   }
 }
 
@@ -146,6 +156,18 @@ export default function SideNav({ hideSidebar = false }: Props) {
   const { isOpen, setIsOpen } = useSidebar();
   const checked = !loading;
 
+  const inLinee = pathname.startsWith("/attrezzature/linee");
+  const inStazioni = pathname.startsWith("/attrezzature/stazioni");
+
+  const lineeMaintenance = useEquipmentMaintenanceNotifications(
+    "LINEE",
+    checked && canManageEquipmentLinee && inLinee
+  );
+  const stazioniMaintenance = useEquipmentMaintenanceNotifications(
+    "STAZIONI",
+    checked && canManageEquipmentStazioni && inStazioni
+  );
+
   const isActive = (href: string) =>
     pathname === href || (href !== "/" && pathname.startsWith(href));
 
@@ -160,8 +182,6 @@ export default function SideNav({ hideSidebar = false }: Props) {
     }
   };
 
-  const inLinee = pathname.startsWith("/attrezzature/linee");
-  const inStazioni = pathname.startsWith("/attrezzature/stazioni");
   const inMaterials =
     pathname.startsWith("/materiali") ||
     pathname.startsWith("/movimenti") ||
@@ -264,6 +284,39 @@ export default function SideNav({ hideSidebar = false }: Props) {
               <Link className={clsExact("/attrezzature/linee")} href="/attrezzature/linee" onClick={handleLinkClick} prefetch={false}><NavLabel icon="dashboard" label="Dashboard" /></Link>
               <Link className={cls("/attrezzature/linee/tutte-attrezzature")} href="/attrezzature/linee/tutte-attrezzature" onClick={handleLinkClick} prefetch={false}><NavLabel icon="tutteAttrezzature" label="Tutte le attrezzature" /></Link>
               <Link className={cls("/attrezzature/linee/movimenti")} href="/attrezzature/linee/movimenti" onClick={handleLinkClick} prefetch={false}><NavLabel icon="movimenti" label="Movimenti" /></Link>
+              {canManageEquipmentLinee && (
+                <Link
+                  className={cls("/attrezzature/linee/manutenzioni")}
+                  href="/attrezzature/linee/manutenzioni"
+                  onClick={handleLinkClick}
+                  prefetch={false}
+                  style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+                >
+                  <NavIcon name="manutenzione" />
+                  <span>Manutenzioni</span>
+                  {lineeMaintenance.count > 0 ? (
+                    <span
+                      style={{
+                        marginLeft: 8,
+                        minWidth: 20,
+                        height: 20,
+                        padding: "0 6px",
+                        borderRadius: 999,
+                        background: "#ef4444",
+                        color: "#fff",
+                        fontSize: 11,
+                        fontWeight: 900,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                      aria-label={`${lineeMaintenance.count} nuovi invii in manutenzione`}
+                    >
+                      {lineeMaintenance.count > 99 ? "99+" : lineeMaintenance.count}
+                    </span>
+                  ) : null}
+                </Link>
+              )}
               <Link className={cls("/attrezzature/linee/assegnatari")} href="/attrezzature/linee/assegnatari" onClick={handleLinkClick} prefetch={false}><NavLabel icon="assegnatari" label="Assegnatari" /></Link>
               {canManageEquipmentLinee && <Link className={cls("/attrezzature/linee/etichette")} href="/attrezzature/linee/etichette" onClick={handleLinkClick} prefetch={false}><NavLabel icon="etichette" label="Etichette" /></Link>}
               <Link className={cls("/attrezzature/linee/registri")} href="/attrezzature/linee/registri" onClick={handleLinkClick} prefetch={false}><NavLabel icon="registri" label="Registri" /></Link>
@@ -287,6 +340,39 @@ export default function SideNav({ hideSidebar = false }: Props) {
               <Link className={clsExact("/attrezzature/stazioni")} href="/attrezzature/stazioni" onClick={handleLinkClick} prefetch={false}><NavLabel icon="dashboard" label="Dashboard" /></Link>
               <Link className={cls("/attrezzature/stazioni/tutte-attrezzature")} href="/attrezzature/stazioni/tutte-attrezzature" onClick={handleLinkClick} prefetch={false}><NavLabel icon="tutteAttrezzature" label="Tutte le attrezzature" /></Link>
               <Link className={cls("/attrezzature/stazioni/movimenti")} href="/attrezzature/stazioni/movimenti" onClick={handleLinkClick} prefetch={false}><NavLabel icon="movimenti" label="Movimenti" /></Link>
+              {canManageEquipmentStazioni && (
+                <Link
+                  className={cls("/attrezzature/stazioni/manutenzioni")}
+                  href="/attrezzature/stazioni/manutenzioni"
+                  onClick={handleLinkClick}
+                  prefetch={false}
+                  style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+                >
+                  <NavIcon name="manutenzione" />
+                  <span>Manutenzioni</span>
+                  {stazioniMaintenance.count > 0 ? (
+                    <span
+                      style={{
+                        marginLeft: 8,
+                        minWidth: 20,
+                        height: 20,
+                        padding: "0 6px",
+                        borderRadius: 999,
+                        background: "#ef4444",
+                        color: "#fff",
+                        fontSize: 11,
+                        fontWeight: 900,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                      aria-label={`${stazioniMaintenance.count} nuovi invii in manutenzione`}
+                    >
+                      {stazioniMaintenance.count > 99 ? "99+" : stazioniMaintenance.count}
+                    </span>
+                  ) : null}
+                </Link>
+              )}
               <Link className={cls("/attrezzature/stazioni/assegnatari")} href="/attrezzature/stazioni/assegnatari" onClick={handleLinkClick} prefetch={false}><NavLabel icon="assegnatari" label="Assegnatari" /></Link>
               {canManageEquipmentStazioni && <Link className={cls("/attrezzature/stazioni/etichette")} href="/attrezzature/stazioni/etichette" onClick={handleLinkClick} prefetch={false}><NavLabel icon="etichette" label="Etichette" /></Link>}
               <Link className={cls("/attrezzature/stazioni/registri")} href="/attrezzature/stazioni/registri" onClick={handleLinkClick} prefetch={false}><NavLabel icon="registri" label="Registri" /></Link>

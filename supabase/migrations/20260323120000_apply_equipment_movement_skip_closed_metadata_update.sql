@@ -1,6 +1,6 @@
--- Fix: apply_equipment_movement deve usare SECURITY DEFINER per bypassare RLS
--- e trovare l'attrezzatura quando un utente normale registra un movimento.
--- Esegui nel SQL Editor di Supabase.
+-- Il trigger BEFORE UPDATE su equipment_movements rieseguiva apply_equipment_movement su ogni UPDATE.
+-- Aggiornare solo details_json (reintegro manutenzione) su un movimento già CLOSED + MAINTENANCE
+-- rimetteva l'asset in MAINTENANCE, annullando il reintegro su equipment_assets.
 
 CREATE OR REPLACE FUNCTION public.apply_equipment_movement()
 RETURNS trigger
@@ -12,7 +12,6 @@ DECLARE
   current_asset public.equipment_assets%ROWTYPE;
   effective_closed_at timestamptz;
 BEGIN
-  -- UPDATE solo metadati (es. details_json per reintegro manutenzione): non risincronizzare l'anagrafica.
   IF TG_OP = 'UPDATE'
      AND COALESCE(OLD.status, '') = 'CLOSED'
      AND COALESCE(NEW.status, '') = 'CLOSED'
@@ -26,7 +25,6 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  -- Bypass RLS: la funzione gira con privilegi del definer (postgres)
   SELECT * INTO current_asset
   FROM public.equipment_assets
   WHERE id = NEW.equipment_id

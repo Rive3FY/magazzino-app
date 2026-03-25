@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
+import AppModalFrame from "./AppModalFrame";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import type { RoleScope } from "../_lib/admin-access";
 
@@ -309,53 +310,32 @@ export default function ScopedRoleAdminUsersClient({ scope, title, intro }: Prop
       </div>
 
       {editOpen && editRow ? (
-        <div
-          onMouseDown={() => {
+        <AppModalFrame
+          open
+          title="Modifica Operatore"
+          subtitle={editRow.email ?? "-"}
+          onClose={() => {
             if (!editBusy) {
               setEditOpen(false);
               setEditRow(null);
             }
           }}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.35)",
-            display: "grid",
-            placeItems: "center",
-            zIndex: 10050,
-            padding: 16,
-          }}
+          width="min(680px, 96vw)"
+          headerRight={
+            <button
+              className="btn"
+              onClick={() => {
+                if (!editBusy) {
+                  setEditOpen(false);
+                  setEditRow(null);
+                }
+              }}
+            >
+              Chiudi
+            </button>
+          }
         >
-          <div
-            onMouseDown={(e) => e.stopPropagation()}
-            style={{
-              width: "min(680px, 96vw)",
-              background: "white",
-              borderRadius: 10,
-              border: "1px solid #d1d5db",
-              boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
-              overflow: "hidden",
-            }}
-          >
-            <div style={{ padding: 12, borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", gap: 12 }}>
-              <div>
-                <div style={{ fontWeight: 900, color: "#111827" }}>Modifica Operatore</div>
-                <div style={{ fontSize: 12, color: "#6b7280" }}>{editRow.email ?? "-"}</div>
-              </div>
-              <button
-                className="btn"
-                onClick={() => {
-                  if (!editBusy) {
-                    setEditOpen(false);
-                    setEditRow(null);
-                  }
-                }}
-              >
-                Chiudi
-              </button>
-            </div>
-
-            <div style={{ padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ display: "grid", gap: 10 }}>
               <div className="filters" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
                 <div className="field">
                   <label>Badge</label>
@@ -386,9 +366,8 @@ export default function ScopedRoleAdminUsersClient({ scope, title, intro }: Prop
                   {editBusy ? "Salvataggio…" : "Salva"}
                 </button>
               </div>
-            </div>
           </div>
-        </div>
+        </AppModalFrame>
       ) : null}
     </>
   );

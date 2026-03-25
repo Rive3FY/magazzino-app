@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import AppModalFrame from "./AppModalFrame";
 
 type Props = {
   open: boolean;
@@ -37,8 +38,6 @@ export default function ConfirmWithInputModal({
     }
   }, [open]);
 
-  if (!open) return null;
-
   function handleConfirm() {
     if (inputValue.trim() !== confirmPhrase) {
       setError("Testo non corretto. Riprova.");
@@ -49,48 +48,14 @@ export default function ConfirmWithInputModal({
   }
 
   return (
-    <div
-      className="confirmModalOverlay"
-      onMouseDown={onCancel}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="confirm-input-modal-title"
-    >
-      <div
-        className="confirmModalContent"
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{ maxWidth: 420 }}
-      >
-        <div id="confirm-input-modal-title" className="confirmModalTitle">
-          {title}
-        </div>
-        <p className="confirmModalMessage">{message}</p>
-        <div style={{ marginTop: 16 }}>
-          <label className="label" htmlFor="confirm-input-phrase">
-            {inputLabel}
-          </label>
-          <input
-            id="confirm-input-phrase"
-            type="text"
-            className="input"
-            value={inputValue}
-            onChange={(e) => {
-              setInputValue(e.target.value);
-              setError(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleConfirm();
-              if (e.key === "Escape") onCancel();
-            }}
-            placeholder={confirmPhrase}
-            autoFocus
-            style={{ width: "100%", marginTop: 6 }}
-          />
-          {error && (
-            <p style={{ marginTop: 8, color: "#b91c1c", fontSize: 14 }}>{error}</p>
-          )}
-        </div>
-        <div className="confirmModalActions" style={{ marginTop: 20 }}>
+    <AppModalFrame
+      open={open}
+      title={title}
+      subtitle="Conferma con testo"
+      onClose={onCancel}
+      width="min(460px, 100%)"
+      footer={
+        <>
           <button type="button" className="btn" onClick={onCancel}>
             {cancelLabel}
           </button>
@@ -101,8 +66,42 @@ export default function ConfirmWithInputModal({
           >
             {confirmLabel}
           </button>
+        </>
+      }
+    >
+      <div style={{ display: "grid", gap: 16 }}>
+        <p className="confirmModalMessage" style={{ margin: 0 }}>
+          {message}
+        </p>
+        <div className="appModalSection">
+          <div className="appModalSectionHeader">Verifica</div>
+          <div className="appModalSectionBody">
+            <label className="label" htmlFor="confirm-input-phrase">
+              {inputLabel}
+            </label>
+            <input
+              id="confirm-input-phrase"
+              type="text"
+              className="input"
+              value={inputValue}
+              onChange={(e) => {
+                setInputValue(e.target.value);
+                setError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleConfirm();
+                if (e.key === "Escape") onCancel();
+              }}
+              placeholder={confirmPhrase}
+              autoFocus
+              style={{ width: "100%", marginTop: 6 }}
+            />
+            {error ? (
+              <p style={{ margin: "8px 0 0", color: "#b91c1c", fontSize: 14, fontWeight: 700 }}>{error}</p>
+            ) : null}
+          </div>
         </div>
       </div>
-    </div>
+    </AppModalFrame>
   );
 }

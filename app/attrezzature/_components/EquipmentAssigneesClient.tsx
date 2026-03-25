@@ -11,6 +11,7 @@ import {
   EQUIPMENT_RESOLUTION_LABELS,
   equipmentMovementPillStyle,
 } from "../../_lib/equipment";
+import AppModalFrame from "../../_components/AppModalFrame";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentMovementRow } from "../../_lib/types";
 
 type Props = {
@@ -194,40 +195,19 @@ export default function EquipmentAssigneesClient({ area, basePath }: Props) {
       </div>
 
       {selectedKey && selected && (
-        <div
-          onMouseDown={(e) => e.target === e.currentTarget && setSelectedKey(null)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15,23,42,0.35)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 14,
-            zIndex: 10050,
-          }}
+        <AppModalFrame
+          open
+          title={selected.display}
+          subtitle={`Vista assegnazioni · ${areaLabel}`}
+          onClose={() => setSelectedKey(null)}
+          width="min(900px, 100%)"
+          headerRight={
+            <button type="button" className="btn" onClick={() => setSelectedKey(null)}>
+              Chiudi
+            </button>
+          }
         >
-          <div
-            onMouseDown={(e) => e.stopPropagation()}
-            style={{
-              width: "min(900px, 100%)",
-              maxHeight: "90vh",
-              overflow: "auto",
-              background: "white",
-              borderRadius: 14,
-              border: "1px solid rgba(15,23,42,0.16)",
-              boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
-              padding: 16,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>{selected.display}</h2>
-              <button type="button" className="btn" onClick={() => setSelectedKey(null)}>
-                Chiudi
-              </button>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
               <section>
                 <h3 style={{ margin: "0 0 10px", fontSize: 14, fontWeight: 800, color: "#64748b" }}>
                   In consegna ({selectedAssets.length})
@@ -341,8 +321,7 @@ export default function EquipmentAssigneesClient({ area, basePath }: Props) {
                 )}
               </section>
             </div>
-          </div>
-        </div>
+        </AppModalFrame>
       )}
     </main>
   );

@@ -14,6 +14,7 @@ import { useAuth } from "../../_lib/hooks/useAuth";
 import { useIsAdmin } from "../../_lib/hooks/useIsAdmin";
 import { useToast } from "../../_lib/ToastContext";
 import { fmtDateTime } from "../../_lib/utils";
+import AppModalFrame from "../../_components/AppModalFrame";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentMovementRow } from "../../_lib/types";
 
 type Props = {
@@ -157,116 +158,19 @@ function MaintenanceDetailModal({ mov, asset, area, userId, userEmail, onClose, 
   }
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="maint-detail-title"
-      onMouseDown={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(15,23,42,0.45)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 14,
-        zIndex: 10060,
-      }}
-    >
-      <div
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{
-          width: "min(720px, 100%)",
-          maxHeight: "min(92vh, 900px)",
-          overflow: "auto",
-          background: "#fff",
-          borderRadius: 16,
-          border: "1px solid rgba(15,23,42,0.12)",
-          boxShadow: "0 24px 60px rgba(0,0,0,0.25)",
-          padding: 18,
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
-          <div>
-            <div id="maint-detail-title" style={{ fontWeight: 900, fontSize: 18 }}>
-              Dettaglio invio manutenzione · {code}
-            </div>
-            <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>{name}</div>
-          </div>
-          <button type="button" className="btn" onClick={onClose} aria-label="Chiudi">
-            Chiudi
-          </button>
-        </div>
-
-        <div style={{ fontWeight: 800, fontSize: 13, color: "#0f172a", marginBottom: 6 }}>Contesto uscita (dove / quando)</div>
-        <DetailRow label="Data e ora uscita" value={mov.created_at ? fmtDateTime(mov.created_at) : "—"} />
-        <DetailRow label="Destinazione d'uso" value={(mov.destination ?? "").trim() || "—"} />
-        <DetailRow label="Piano intervento n." value={(mov.intervention_plan_number ?? "").trim() || "—"} />
-        <DetailRow label="Magazzino (anagrafica)" value={asset?.warehouse ?? "—"} />
-        <DetailRow label="Scaffale · posto" value={shelfLabel} />
-        <DetailRow label="Nota uscita" value={(mov.note ?? "").trim() || "—"} />
-        <DetailRow
-          label="Operatore uscita"
-          value={
-            [mov.assigned_to_name, mov.assigned_to_badge ? `Badge ${mov.assigned_to_badge}` : null, mov.assigned_to_email].filter(Boolean).join(" · ") ||
-            [mov.created_by_name, mov.created_by_email].filter(Boolean).join(" · ") ||
-            "—"
-          }
-        />
-
-        <div style={{ fontWeight: 800, fontSize: 13, color: "#0f172a", margin: "16px 0 6px" }}>Chiusura con invio manutenzione</div>
-        <DetailRow label="Data e ora chiusura" value={mov.closed_at ? fmtDateTime(mov.closed_at) : "—"} />
-        <DetailRow
-          label="Esito"
-          value={
-            mov.resolution_type && mov.resolution_type in EQUIPMENT_RESOLUTION_LABELS
-              ? EQUIPMENT_RESOLUTION_LABELS[mov.resolution_type]
-              : "—"
-          }
-        />
-        <DetailRow label="Nota di chiusura (problema / dichiarazione)" value={(mov.close_note ?? "").trim() || "—"} />
-        <DetailRow
-          label="Dichiarazione registrata da"
-          value={loadingClosedBy ? "Caricamento…" : closedByLabel ?? "—"}
-        />
-
-        <div style={{ fontWeight: 800, fontSize: 13, color: "#0f172a", margin: "16px 0 6px" }}>Attrezzatura</div>
-        <DetailRow label="Codice" value={code} />
-        <DetailRow label="Nome" value={name} />
-        <DetailRow label="Seriale / matricola" value={asset?.serial_number ?? "—"} />
-        <DetailRow label="Categoria" value={asset?.category ?? "—"} />
-        <DetailRow label="Marca / modello" value={[asset?.brand, asset?.model].filter(Boolean).join(" · ") || "—"} />
-        <DetailRow
-          label="Stato in anagrafica (ora)"
-          value={asset ? EQUIPMENT_STATUS_LABELS[asset.status] : "—"}
-        />
-
-        <div style={{ fontWeight: 800, fontSize: 13, color: "#0f172a", margin: "16px 0 6px" }}>Reintegro</div>
-        <DetailRow label="Reintegrata il" value={reint.at ? fmtDateTime(reint.at) : "—"} />
-        <DetailRow label="Reintegrata da" value={reint.by ?? "—"} />
-
-        <div style={{ fontSize: 12, color: "#64748b", marginTop: 10 }}>
-          ID movimento: <span style={{ fontFamily: "monospace" }}>{mov.id}</span>
-          {mov.movement_group_id ? (
-            <>
-              {" "}
-              · Gruppo: <span style={{ fontFamily: "monospace" }}>{mov.movement_group_id}</span>
-            </>
-          ) : null}
-        </div>
-
-        {localErr && (
-          <div style={{ marginTop: 12, padding: 10, borderRadius: 10, background: "rgba(239,68,68,0.12)", color: "#991b1b", fontWeight: 700 }}>
-            {localErr}
-          </div>
-        )}
-        {openMovementMsg && (
-          <div style={{ marginTop: 12, padding: 10, borderRadius: 10, background: "rgba(245,158,11,0.15)", color: "#92400e", fontWeight: 700 }}>
-            {openMovementMsg}
-          </div>
-        )}
-
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18, justifyContent: "flex-end" }}>
+    <AppModalFrame
+      open
+      title={`Dettaglio invio manutenzione · ${code}`}
+      subtitle={name}
+      onClose={onClose}
+      width="min(720px, 100%)"
+      headerRight={
+        <button type="button" className="btn" onClick={onClose} aria-label="Chiudi">
+          Chiudi
+        </button>
+      }
+      footer={
+        <>
           <button type="button" className="btn" onClick={onClose}>
             Chiudi
           </button>
@@ -279,14 +183,99 @@ function MaintenanceDetailModal({ mov, asset, area, userId, userEmail, onClose, 
           >
             {reintBusy ? "Reintegro…" : "Reintegra (disponibile)"}
           </button>
-        </div>
-        {assetResolved(asset) ? (
-          <div style={{ marginTop: 10, fontSize: 12, color: "#64748b" }}>
-            L&apos;anagrafica è già Disponibile o Dismessa: il reintegro non è necessario.
+        </>
+      }
+    >
+      <div className="appModalSplitGrid">
+        <div className="appModalSection">
+          <div className="appModalSectionHeader">Contesto uscita</div>
+          <div className="appModalSectionBody">
+            <DetailRow label="Data e ora uscita" value={mov.created_at ? fmtDateTime(mov.created_at) : "—"} />
+            <DetailRow label="Destinazione d'uso" value={(mov.destination ?? "").trim() || "—"} />
+            <DetailRow label="Piano intervento n." value={(mov.intervention_plan_number ?? "").trim() || "—"} />
+            <DetailRow label="Magazzino (anagrafica)" value={asset?.warehouse ?? "—"} />
+            <DetailRow label="Scaffale · posto" value={shelfLabel} />
+            <DetailRow label="Nota uscita" value={(mov.note ?? "").trim() || "—"} />
+            <DetailRow
+              label="Operatore uscita"
+              value={
+                [mov.assigned_to_name, mov.assigned_to_badge ? `Badge ${mov.assigned_to_badge}` : null, mov.assigned_to_email].filter(Boolean).join(" · ") ||
+                [mov.created_by_name, mov.created_by_email].filter(Boolean).join(" · ") ||
+                "—"
+              }
+            />
           </div>
-        ) : null}
+        </div>
+
+        <div className="appModalSection">
+          <div className="appModalSectionHeader">Chiusura manutenzione</div>
+          <div className="appModalSectionBody">
+            <DetailRow label="Data e ora chiusura" value={mov.closed_at ? fmtDateTime(mov.closed_at) : "—"} />
+            <DetailRow
+              label="Esito"
+              value={
+                mov.resolution_type && mov.resolution_type in EQUIPMENT_RESOLUTION_LABELS
+                  ? EQUIPMENT_RESOLUTION_LABELS[mov.resolution_type]
+                  : "—"
+              }
+            />
+            <DetailRow label="Nota di chiusura (problema / dichiarazione)" value={(mov.close_note ?? "").trim() || "—"} />
+            <DetailRow
+              label="Dichiarazione registrata da"
+              value={loadingClosedBy ? "Caricamento…" : closedByLabel ?? "—"}
+            />
+          </div>
+        </div>
+
+        <div className="appModalSection">
+          <div className="appModalSectionHeader">Attrezzatura</div>
+          <div className="appModalSectionBody">
+            <DetailRow label="Codice" value={code} />
+            <DetailRow label="Nome" value={name} />
+            <DetailRow label="Seriale / matricola" value={asset?.serial_number ?? "—"} />
+            <DetailRow label="Categoria" value={asset?.category ?? "—"} />
+            <DetailRow label="Marca / modello" value={[asset?.brand, asset?.model].filter(Boolean).join(" · ") || "—"} />
+            <DetailRow
+              label="Stato in anagrafica (ora)"
+              value={asset ? EQUIPMENT_STATUS_LABELS[asset.status] : "—"}
+            />
+          </div>
+        </div>
+
+        <div className="appModalSection">
+          <div className="appModalSectionHeader">Reintegro</div>
+          <div className="appModalSectionBody">
+            <DetailRow label="Reintegrata il" value={reint.at ? fmtDateTime(reint.at) : "—"} />
+            <DetailRow label="Reintegrata da" value={reint.by ?? "—"} />
+            <div style={{ fontSize: 12, color: "#64748b", marginTop: 10 }}>
+              ID movimento: <span style={{ fontFamily: "monospace" }}>{mov.id}</span>
+              {mov.movement_group_id ? (
+                <>
+                  {" "}
+                  · Gruppo: <span style={{ fontFamily: "monospace" }}>{mov.movement_group_id}</span>
+                </>
+              ) : null}
+            </div>
+            {assetResolved(asset) ? (
+              <div style={{ marginTop: 10, fontSize: 12, color: "#64748b" }}>
+                L&apos;anagrafica è già Disponibile o Dismessa: il reintegro non è necessario.
+              </div>
+            ) : null}
+          </div>
+        </div>
       </div>
-    </div>
+
+      {localErr ? (
+        <div style={{ marginTop: 14, padding: 10, borderRadius: 10, background: "rgba(239,68,68,0.12)", color: "#991b1b", fontWeight: 700 }}>
+          {localErr}
+        </div>
+      ) : null}
+      {openMovementMsg ? (
+        <div style={{ marginTop: 14, padding: 10, borderRadius: 10, background: "rgba(245,158,11,0.15)", color: "#92400e", fontWeight: 700 }}>
+          {openMovementMsg}
+        </div>
+      ) : null}
+    </AppModalFrame>
   );
 }
 

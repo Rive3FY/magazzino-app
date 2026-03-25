@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import AppModalFrame from "../../_components/AppModalFrame";
 import { EQUIPMENT_STATUS_LABELS, equipmentStatusStyle } from "../../_lib/equipment";
 import type { EquipmentAssetRow, EquipmentStatus } from "../../_lib/types";
 
@@ -54,96 +55,25 @@ export default function EquipmentStatusManager({ asset, isOpen, isSaving = false
   const canSubmit = !!targetStatus && targetStatus !== asset.status;
 
   return (
-    <div
-      onMouseDown={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(15,23,42,0.35)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 14,
-        zIndex: 10050,
-      }}
-    >
-      <div
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{
-          width: "min(760px, 100%)",
-          background: "#fff",
-          borderRadius: 16,
-          border: "1px solid rgba(15,23,42,0.12)",
-          boxShadow: "0 24px 60px rgba(0,0,0,0.25)",
-          padding: 16,
-          display: "grid",
-          gap: 14,
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
-          <div style={{ display: "grid", gap: 6 }}>
-            <div style={{ fontSize: 18, fontWeight: 900 }}>Gestione stato attrezzatura</div>
-            <div style={{ color: "#334155" }}>
-              <strong>{asset.serial_number || asset.asset_code}</strong>
-              {" · "}
-              {asset.name}
-            </div>
-          </div>
-          <button type="button" className="btn" onClick={onClose} disabled={isSaving}>
-            Chiudi
-          </button>
-        </div>
-
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <div style={{ fontSize: 13, color: "#475569" }}>Stato attuale</div>
-          <span style={equipmentStatusStyle(asset.status)}>{EQUIPMENT_STATUS_LABELS[asset.status]}</span>
-        </div>
-
-        <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-          {STATUS_OPTIONS.map((option) => {
-            const active = targetStatus === option.value;
-            const disabled = option.value === asset.status;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                className="btn"
-                disabled={disabled || isSaving}
-                onClick={() => setTargetStatus(option.value)}
-                style={{
-                  textAlign: "left",
-                  minHeight: 96,
-                  padding: 14,
-                  borderColor: active ? "#0f172a" : "rgba(15,23,42,0.15)",
-                  background: active ? "rgba(15,23,42,0.06)" : "#fff",
-                  opacity: disabled ? 0.55 : 1,
-                }}
-              >
-                <div style={{ fontWeight: 800, marginBottom: 6 }}>{option.title}</div>
-                <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.35 }}>{option.hint}</div>
-              </button>
-            );
-          })}
-        </div>
-
-        {targetStatus === "MAINTENANCE" && (
-          <div style={{ display: "grid", gap: 6 }}>
-            <label className="label" htmlFor="equipment-status-maintenance-note">
-              Note manutenzione
-            </label>
-            <textarea
-              id="equipment-status-maintenance-note"
-              className="input"
-              value={maintenanceNote}
-              onChange={(e) => setMaintenanceNote(e.target.value)}
-              placeholder="Motivo, intervento richiesto o dettagli utili"
-              rows={3}
-              style={{ resize: "vertical", minHeight: 80 }}
-            />
-          </div>
-        )}
-
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap" }}>
+    <AppModalFrame
+      open={isOpen}
+      title="Gestione stato attrezzatura"
+      subtitle={
+        <>
+          <strong>{asset.serial_number || asset.asset_code}</strong>
+          {" · "}
+          {asset.name}
+        </>
+      }
+      onClose={onClose}
+      width="min(760px, 100%)"
+      headerRight={
+        <button type="button" className="btn" onClick={onClose} disabled={isSaving}>
+          Chiudi
+        </button>
+      }
+      footer={
+        <>
           <button type="button" className="btn" onClick={onClose} disabled={isSaving}>
             Annulla
           </button>
@@ -155,8 +85,70 @@ export default function EquipmentStatusManager({ asset, isOpen, isSaving = false
           >
             {isSaving ? "Salvataggio..." : "Conferma"}
           </button>
+        </>
+      }
+    >
+      <div style={{ display: "grid", gap: 14 }}>
+        <div className="appModalSection">
+          <div className="appModalSectionHeader">Situazione attuale</div>
+          <div className="appModalSectionBody" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ fontSize: 13, color: "#475569" }}>Stato attuale</div>
+            <span style={equipmentStatusStyle(asset.status)}>{EQUIPMENT_STATUS_LABELS[asset.status]}</span>
+          </div>
         </div>
+
+        <div className="appModalSection">
+          <div className="appModalSectionHeader">Nuovo stato</div>
+          <div className="appModalSectionBody">
+            <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+              {STATUS_OPTIONS.map((option) => {
+                const active = targetStatus === option.value;
+                const disabled = option.value === asset.status;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className="btn"
+                    disabled={disabled || isSaving}
+                    onClick={() => setTargetStatus(option.value)}
+                    style={{
+                      textAlign: "left",
+                      minHeight: 96,
+                      padding: 14,
+                      borderColor: active ? "#2563eb" : "rgba(15,23,42,0.15)",
+                      background: active ? "rgba(59,130,246,0.1)" : "#fff",
+                      opacity: disabled ? 0.55 : 1,
+                    }}
+                  >
+                    <div style={{ fontWeight: 800, marginBottom: 6 }}>{option.title}</div>
+                    <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.35 }}>{option.hint}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {targetStatus === "MAINTENANCE" && (
+          <div className="appModalSection">
+            <div className="appModalSectionHeader">Dettagli manutenzione</div>
+            <div className="appModalSectionBody" style={{ display: "grid", gap: 6 }}>
+              <label className="label" htmlFor="equipment-status-maintenance-note">
+                Note manutenzione
+              </label>
+              <textarea
+                id="equipment-status-maintenance-note"
+                className="input"
+                value={maintenanceNote}
+                onChange={(e) => setMaintenanceNote(e.target.value)}
+                placeholder="Motivo, intervento richiesto o dettagli utili"
+                rows={3}
+                style={{ resize: "vertical", minHeight: 80 }}
+              />
+            </div>
+          </div>
+        )}
       </div>
-    </div>
+    </AppModalFrame>
   );
 }

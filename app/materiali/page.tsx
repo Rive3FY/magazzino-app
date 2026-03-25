@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { BrowserMultiFormatReader } from "@zxing/browser";
+import AppScanStatusModal from "../_components/AppScanStatusModal";
 
 type Movement = {
   id: string;
@@ -675,55 +676,13 @@ export default function Home() {
             )}
           </div>
 
-          {(scanning || nfcScanning) && (
-            <div
-              style={{
-                position: "fixed",
-                inset: 0,
-                background: "rgba(15,23,42,0.5)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: 20,
-                zIndex: 10050,
-              }}
-            >
-              <div
-                style={{
-                  background: "white",
-                  borderRadius: 14,
-                  padding: 24,
-                  maxWidth: 420,
-                  width: "100%",
-                  boxShadow: "0 24px 60px rgba(0,0,0,0.3)",
-                }}
-              >
-                {scanning ? (
-                  <>
-                    <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner barcode</div>
-                    <div style={{ padding: 12, background: "#0f172a", borderRadius: 12, marginBottom: 12 }}>
-                      <video ref={videoRef} style={{ width: "100%", maxWidth: 360, borderRadius: 8 }} muted playsInline />
-                      <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il codice a barre</div>
-                    </div>
-                    <button type="button" className="btn" onClick={stopScan}>
-                      Fine
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner NFC</div>
-                    <div style={{ padding: 24, background: "#0f172a", borderRadius: 12, marginBottom: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-                      <SpinnerIcon />
-                      <div style={{ fontSize: 14, color: "#94a3b8" }}>Avvicina il telefono al tag NFC</div>
-                    </div>
-                    <button type="button" className="btn" onClick={stopNfcScan}>
-                      Fine
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          )}
+          <AppScanStatusModal
+            open={scanning || nfcScanning}
+            mode={scanning ? "barcode" : "nfc"}
+            videoRef={videoRef}
+            icon={<SpinnerIcon />}
+            onClose={scanning ? stopScan : stopNfcScan}
+          />
 
           {msg && <div style={{ marginTop: 10, fontWeight: 800 }}>{msg}</div>}
 

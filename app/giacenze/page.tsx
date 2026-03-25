@@ -12,6 +12,7 @@ import { n, toNumberLoose, sanitizeId, fmtDate } from "../_lib/utils";
 import { useAuth } from "../_lib/hooks/useAuth";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import { useToast } from "../_lib/ToastContext";
+import AppModalFrame from "../_components/AppModalFrame";
 import type { WarehouseView, SortDir } from "../_lib/types";
 
 const supabase = createClient();
@@ -1424,118 +1425,86 @@ await writeAuditLog({
         </div>
       )}
       {historyOpen && (
-  <div
-    onMouseDown={() => {
-      setHistoryOpen(false);
-      setHistoryCode(null);
-      setHistoryRows([]);
-    }}
-    style={{
-      position: "fixed",
-      inset: 0,
-      background: "rgba(15,23,42,0.35)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      padding: 14,
-      zIndex: 10050,
-    }}
-  >
-    <div
-      onMouseDown={(e) => e.stopPropagation()}
-      style={{
-        width: "min(1000px, 100%)",
-        maxHeight: "85vh",
-        overflow: "auto",
-        background: "white",
-        borderRadius: 14,
-        border: "1px solid rgba(15,23,42,0.16)",
-        boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
-        padding: 12,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 10,
-        }}
-      >
-        <div style={{ fontWeight: 900 }}>
-          Storico materiale · <span style={{ opacity: 0.75 }}>{historyCode}</span>
-        </div>
-
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            className="btn"
-            onClick={downloadStoricoPDF}
-            disabled={historyLoading || historyRows.length === 0}
-          >
-            PDF
-          </button>
-          <button
-            className="btn"
-            onClick={() => {
-              setHistoryOpen(false);
-              setHistoryCode(null);
-              setHistoryRows([]);
-            }}
-          >
-            Chiudi
-          </button>
-        </div>
-      </div>
-
-      <div className="tableWrap" style={{ marginTop: 12 }}>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Data</th>
-              <th>Tipo</th>
-              <th>Q.tà</th>
-              <th>Mag.</th>
-              <th>Inserito da</th>
-              <th>Note</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {historyLoading ? (
-              <tr>
-                <td colSpan={6} style={{ padding: 12 }}>
-                  Caricamento…
-                </td>
-              </tr>
-            ) : historyRows.length === 0 ? (
-              <tr>
-                <td colSpan={6} style={{ padding: 12 }}>
-                  Nessun movimento per questo materiale.
-                </td>
-              </tr>
-            ) : (
-              historyRows.map((m) => (
-                <tr key={m.id}>
-                  <td>{m.created_at ? new Date(m.created_at).toLocaleString("it-IT") : "-"}</td>
-                  <td>{m.type === "IN" ? "Entrata" : "Uscita"}</td>
-                  <td style={{ fontWeight: 900 }}>
-                    {m.type === "IN" ? "+" : "-"}
-                    {m.type === "IN"
-                      ? Math.abs(Number(m.qty ?? 0))
-                      : Math.max(0, Math.abs(Number(m.qty ?? 0)) - Number(m.returned_qty ?? 0))}
-                  </td>
-                  <td>{m.warehouse ?? "-"}</td>
-                  <td>{m.created_by_name ?? m.created_by_email ?? "-"}</td>
-                  <td>{m.note ?? ""}</td>
+        <AppModalFrame
+          open
+          title={`Storico materiale · ${historyCode}`}
+          subtitle="Movimenti registrati per il materiale selezionato"
+          onClose={() => {
+            setHistoryOpen(false);
+            setHistoryCode(null);
+            setHistoryRows([]);
+          }}
+          width="min(1000px, 100%)"
+          headerRight={
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                className="btn"
+                onClick={downloadStoricoPDF}
+                disabled={historyLoading || historyRows.length === 0}
+              >
+                PDF
+              </button>
+              <button
+                className="btn"
+                onClick={() => {
+                  setHistoryOpen(false);
+                  setHistoryCode(null);
+                  setHistoryRows([]);
+                }}
+              >
+                Chiudi
+              </button>
+            </div>
+          }
+        >
+          <div className="tableWrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Tipo</th>
+                  <th>Q.tà</th>
+                  <th>Mag.</th>
+                  <th>Inserito da</th>
+                  <th>Note</th>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-)}
+              </thead>
+
+              <tbody>
+                {historyLoading ? (
+                  <tr>
+                    <td colSpan={6} style={{ padding: 12 }}>
+                      Caricamento…
+                    </td>
+                  </tr>
+                ) : historyRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} style={{ padding: 12 }}>
+                      Nessun movimento per questo materiale.
+                    </td>
+                  </tr>
+                ) : (
+                  historyRows.map((m) => (
+                    <tr key={m.id}>
+                      <td>{m.created_at ? new Date(m.created_at).toLocaleString("it-IT") : "-"}</td>
+                      <td>{m.type === "IN" ? "Entrata" : "Uscita"}</td>
+                      <td style={{ fontWeight: 900 }}>
+                        {m.type === "IN" ? "+" : "-"}
+                        {m.type === "IN"
+                          ? Math.abs(Number(m.qty ?? 0))
+                          : Math.max(0, Math.abs(Number(m.qty ?? 0)) - Number(m.returned_qty ?? 0))}
+                      </td>
+                      <td>{m.warehouse ?? "-"}</td>
+                      <td>{m.created_by_name ?? m.created_by_email ?? "-"}</td>
+                      <td>{m.note ?? ""}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </AppModalFrame>
+      )}
     </main>
   );
 }

@@ -2548,6 +2548,129 @@ html, body {
 }
 
 /* Toast - animazione ingresso */
+/* Modal frame condiviso */
+.appModalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.44);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  z-index: var(--z-modal);
+}
+.appModalShell {
+  width: min(960px, 100%);
+  max-height: min(88vh, 960px);
+  overflow: hidden;
+  background: var(--panel);
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+}
+.appModalAccentTop {
+  height: 4px;
+  background: linear-gradient(90deg, var(--accent) 0%, #2563eb 100%);
+  flex-shrink: 0;
+}
+.appModalHeader {
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.appModalHeaderRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.appModalHeaderRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.appModalTitle {
+  font-size: var(--font-xl);
+  font-weight: var(--fw-extrabold);
+  color: #2563eb;
+  letter-spacing: -0.02em;
+}
+.appModalSubtitle {
+  margin-top: 4px;
+  font-size: var(--font-sm);
+  color: var(--muted);
+  line-height: 1.45;
+}
+.appModalBody {
+  flex: 1;
+  overflow: auto;
+  padding: 18px;
+  background: #f8fafc;
+}
+.appModalFooter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+.appModalSection {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.appModalSectionHeader {
+  padding: 9px 12px;
+  font-size: 11px;
+  font-weight: var(--fw-extrabold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #1d4ed8;
+  background: rgba(59, 130, 246, 0.12);
+  border-bottom: 1px solid var(--border);
+}
+.appModalSectionBody {
+  padding: 12px;
+}
+.appModalCardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.appModalInfoCard {
+  padding: 12px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+}
+.appModalInfoLabel {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.appModalInfoValue {
+  font-weight: var(--fw-extrabold);
+  color: var(--text);
+}
+.appModalSplitGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+@media (max-width: 860px) {
+  .appModalSplitGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Confirm modal - popup del sito */
 .confirmModalOverlay {
   position: fixed;

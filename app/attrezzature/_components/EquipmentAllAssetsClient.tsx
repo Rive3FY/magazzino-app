@@ -19,6 +19,7 @@ import {
 import { applyEquipmentMaintenanceReintegration } from "../../_lib/equipmentMaintenanceReintegration";
 import EquipmentStatusManager from "./EquipmentStatusManager";
 import EquipmentExcelImportClient from "./EquipmentExcelImportClient";
+import AppScanStatusModal from "../../_components/AppScanStatusModal";
 import ConfirmModal from "../../_components/ConfirmModal";
 import RemoteNfcScanModal from "./RemoteNfcScanModal";
 import { equipmentAssetSchema } from "../../_lib/validations";
@@ -1161,55 +1162,13 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
         </div>
       </div>
 
-      {(cameraScanning || searchByNfcScanning) && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15,23,42,0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 20,
-            zIndex: 10050,
-          }}
-        >
-          <div
-            style={{
-              background: "white",
-              borderRadius: 14,
-              padding: 24,
-              maxWidth: 420,
-              width: "100%",
-              boxShadow: "0 24px 60px rgba(0,0,0,0.3)",
-            }}
-          >
-            {cameraScanning ? (
-              <>
-                <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner barcode</div>
-                <div style={{ padding: 12, background: "#0f172a", borderRadius: 12, marginBottom: 12 }}>
-                  <video ref={videoRef} style={{ width: "100%", maxWidth: 360, borderRadius: 8 }} muted playsInline />
-                  <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il codice a barre</div>
-                </div>
-                <button type="button" className="btn" onClick={stopCameraScan}>
-                  Fine
-                </button>
-              </>
-            ) : (
-              <>
-                <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner NFC</div>
-                <div style={{ padding: 24, background: "#0f172a", borderRadius: 12, marginBottom: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-                  <SpinnerIcon />
-                  <div style={{ fontSize: 14, color: "#94a3b8" }}>Avvicina il telefono al tag NFC</div>
-                </div>
-                <button type="button" className="btn" onClick={stopNfcScan}>
-                  Fine
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      <AppScanStatusModal
+        open={cameraScanning || searchByNfcScanning}
+        mode={cameraScanning ? "barcode" : "nfc"}
+        videoRef={videoRef}
+        icon={<SpinnerIcon />}
+        onClose={cameraScanning ? stopCameraScan : stopNfcScan}
+      />
 
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
         <div className="equipmentSectionHeader" style={{ flexDirection: "column", alignItems: "stretch", gap: 10 }}>

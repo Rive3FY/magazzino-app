@@ -22,6 +22,7 @@ import {
 import { applyEquipmentMaintenanceReintegration } from "../../_lib/equipmentMaintenanceReintegration";
 import { isRelationMissingOrNotExposedError } from "../../_lib/postgrestErrors";
 import EquipmentStatusManager from "./EquipmentStatusManager";
+import AppScanStatusModal from "../../_components/AppScanStatusModal";
 import ConfirmModal from "../../_components/ConfirmModal";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentMovementRow, EquipmentStatus } from "../../_lib/types";
 
@@ -499,6 +500,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   }, [history, historyFrom, historyTo, quickWarehouseFilter, filteredAssetIds]);
 
   const [historyDetail, setHistoryDetail] = useState<EquipmentMovementRow | null>(null);
+  const [historyDetailAssetsExpanded, setHistoryDetailAssetsExpanded] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<EquipmentMovementRow | null>(null);
 
@@ -509,6 +511,10 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
       .filter((row) => row.movement_group_id === historyDetail.movement_group_id)
       .sort((a, b) => a.created_at.localeCompare(b.created_at));
   }, [history, historyDetail]);
+
+  useEffect(() => {
+    setHistoryDetailAssetsExpanded(false);
+  }, [historyDetail]);
 
   function openDeleteConfirm(row: EquipmentMovementRow) {
     if (!isAdmin) return;
@@ -948,55 +954,13 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
         </div>
       </div>
 
-      {(cameraScanning || searchByNfcScanning) && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15,23,42,0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 20,
-            zIndex: 10050,
-          }}
-        >
-          <div
-            style={{
-              background: "white",
-              borderRadius: 14,
-              padding: 24,
-              maxWidth: 420,
-              width: "100%",
-              boxShadow: "0 24px 60px rgba(0,0,0,0.3)",
-            }}
-          >
-            {cameraScanning ? (
-              <>
-                <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner barcode</div>
-                <div style={{ padding: 12, background: "#0f172a", borderRadius: 12, marginBottom: 12 }}>
-                  <video ref={videoRef} style={{ width: "100%", maxWidth: 360, borderRadius: 8 }} muted playsInline />
-                  <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il codice a barre</div>
-                </div>
-                <button type="button" className="btn" onClick={stopCameraScan}>
-                  Fine
-                </button>
-              </>
-            ) : (
-              <>
-                <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner NFC</div>
-                <div style={{ padding: 24, background: "#0f172a", borderRadius: 12, marginBottom: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-                  <SpinnerIcon />
-                  <div style={{ fontSize: 14, color: "#94a3b8" }}>Avvicina il telefono al tag NFC</div>
-                </div>
-                <button type="button" className="btn" onClick={stopNfcScan}>
-                  Fine
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      <AppScanStatusModal
+        open={cameraScanning || searchByNfcScanning}
+        mode={cameraScanning ? "barcode" : "nfc"}
+        videoRef={videoRef}
+        icon={<SpinnerIcon />}
+        onClose={cameraScanning ? stopCameraScan : stopNfcScan}
+      />
 
       <EquipmentStatusManager
         asset={quickSelected}
@@ -1162,7 +1126,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(15,23,42,0.35)",
+            background: "rgba(15,23,42,0.42)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -1173,145 +1137,279 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{
-              width: "min(960px, 100%)",
-              maxHeight: "85vh",
-              overflow: "auto",
+              width: "min(1120px, 100%)",
+              maxHeight: "88vh",
               background: "white",
-              borderRadius: 14,
+              borderRadius: 16,
               border: "1px solid rgba(15,23,42,0.16)",
               boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
-              padding: 16,
+              overflow: "hidden",
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-              <div>
-                <div style={{ fontWeight: 900, fontSize: 18 }}>
-                  {historyDetailGroup.length > 1 ? `Dettaglio prelievo multiplo (${historyDetailGroup.length} attrezzature)` : "Dettaglio movimento"}
+            <div style={{ height: 4, background: "linear-gradient(90deg, #3b82f6 0%, #2563eb 100%)" }} />
+
+            <div style={{ padding: "14px 18px 12px", borderBottom: "1px solid #e2e8f0", background: "#fff" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                <div>
+                  <div style={{ fontWeight: 900, fontSize: 18, color: "#2563eb" }}>
+                    {historyDetailGroup.length > 1 ? `Dettaglio prelievo multiplo (${historyDetailGroup.length} attrezzature)` : "Dettaglio movimento"}
+                  </div>
+                  <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
+                    Area {areaLabel}
+                  </div>
                 </div>
-                <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
-                  Area {areaLabel}
+                <button type="button" className="btn" onClick={() => setHistoryDetail(null)}>
+                  Chiudi
+                </button>
+              </div>
+
+              <div
+                style={{
+                  marginTop: 10,
+                  paddingTop: 10,
+                  borderTop: "1px solid #e2e8f0",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 900, color: "#0f172a" }}>Scheda movimento</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={equipmentMovementPillStyle(historyDetail.status ?? "OPEN")}>
+                    {EQUIPMENT_MOVEMENT_STATUS_LABELS[historyDetail.status ?? "OPEN"]}
+                  </span>
+                  <span style={equipmentMovementPillStyle("OUT")}>{EQUIPMENT_MOVEMENT_LABELS.OUT}</span>
                 </div>
               </div>
-              <button type="button" className="btn" onClick={() => setHistoryDetail(null)}>
-                Chiudi
-              </button>
+            </div>
+
+            <div
+              className="mobileGrid1"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gap: 14,
+                padding: 18,
+                background: "#f8fafc",
+                maxHeight: "calc(88vh - 150px)",
+                overflow: "auto",
+              }}
+            >
+              <section style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, overflow: "hidden" }}>
+                <div
+                  style={{
+                    padding: "9px 12px",
+                    fontSize: 11,
+                    fontWeight: 900,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    color: "#1d4ed8",
+                    background: "rgba(59,130,246,0.12)",
+                    borderBottom: "1px solid #e2e8f0",
+                  }}
+                >
+                  Dati movimento
+                </div>
+                <div
+                  style={{
+                    padding: 12,
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>Data inserimento</div>
+                    <div style={{ fontWeight: 800 }}>{fmtDateTime(historyDetail.created_at)}</div>
+                  </div>
+                  <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>Inserito da</div>
+                    <div style={{ fontWeight: 800 }}>{historyDetail.created_by_name || historyDetail.created_by_email || "—"}</div>
+                  </div>
+                  <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>Stato</div>
+                    <div style={{ marginTop: 4 }}>
+                      <span style={equipmentMovementPillStyle(historyDetail.status ?? "OPEN")}>
+                        {EQUIPMENT_MOVEMENT_STATUS_LABELS[historyDetail.status ?? "OPEN"]}
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>Tipo</div>
+                    <div style={{ marginTop: 4 }}>
+                      <span style={equipmentMovementPillStyle("OUT")}>{EQUIPMENT_MOVEMENT_LABELS.OUT}</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, overflow: "hidden" }}>
+                <div
+                  style={{
+                    padding: "9px 12px",
+                    fontSize: 11,
+                    fontWeight: 900,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    color: "#1d4ed8",
+                    background: "rgba(59,130,246,0.12)",
+                    borderBottom: "1px solid #e2e8f0",
+                  }}
+                >
+                  Assegnazione
+                </div>
+                <div
+                  style={{
+                    padding: 12,
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>Assegnatario</div>
+                    <div style={{ fontWeight: 800 }}>
+                      {[historyDetail.assigned_to_name, historyDetail.assigned_to_badge ? `Badge ${historyDetail.assigned_to_badge}` : null]
+                        .filter(Boolean)
+                        .join(" · ") || "—"}
+                    </div>
+                    {historyDetail.assigned_to_email && (
+                      <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>{historyDetail.assigned_to_email}</div>
+                    )}
+                  </div>
+                  <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>Destinazione</div>
+                    <div style={{ fontWeight: 800 }}>{historyDetail.destination || "—"}</div>
+                  </div>
+                  <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>Piano d&apos;intervento</div>
+                    <div style={{ fontWeight: 800 }}>{historyDetail.intervention_plan_number || "—"}</div>
+                  </div>
+                  <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>Esito finale</div>
+                    <div style={{ fontWeight: 800 }}>
+                      {historyDetail.resolution_type ? EQUIPMENT_RESOLUTION_LABELS[historyDetail.resolution_type] : "—"}
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, overflow: "hidden" }}>
+                <div
+                  style={{
+                    padding: "9px 12px",
+                    fontSize: 11,
+                    fontWeight: 900,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    color: "#1d4ed8",
+                    background: "rgba(59,130,246,0.12)",
+                    borderBottom: "1px solid #e2e8f0",
+                  }}
+                >
+                  Note e chiusura
+                </div>
+                <div style={{ padding: 12, display: "grid", gap: 10 }}>
+                  <div style={{ padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff" }}>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Note uscita</div>
+                    <div style={{ fontWeight: 700 }}>{historyDetail.note || "—"}</div>
+                  </div>
+                  <div style={{ padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff" }}>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Note chiusura</div>
+                    <div style={{ fontWeight: 700 }}>{historyDetail.close_note || "—"}</div>
+                  </div>
+                  <div style={{ padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff" }}>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Data chiusura</div>
+                    <div style={{ fontWeight: 700 }}>
+                      {historyDetail.closed_at ? fmtDateTime(historyDetail.closed_at) : "Movimento ancora aperto"}
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, overflow: "hidden" }}>
+                <div
+                  style={{
+                    padding: "9px 12px",
+                    fontSize: 11,
+                    fontWeight: 900,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    color: "#1d4ed8",
+                    background: "rgba(59,130,246,0.12)",
+                    borderBottom: "1px solid #e2e8f0",
+                  }}
+                >
+                  {historyDetailGroup.length > 1 ? "Attrezzature del gruppo" : "Attrezzatura coinvolta"}
+                </div>
+                <div style={{ padding: 12, display: "grid", gap: 8 }}>
+                  {(historyDetailAssetsExpanded ? historyDetailGroup : historyDetailGroup.slice(0, 4)).map((movement) => {
+                    const asset = rows.find((item) => item.id === movement.equipment_id);
+                    return (
+                      <div
+                        key={movement.id}
+                        style={{
+                          padding: 12,
+                          borderRadius: 10,
+                          border: "1px solid #e2e8f0",
+                          background: "#f8fafc",
+                        }}
+                      >
+                        <div style={{ fontWeight: 900 }}>
+                          {asset ? `${asset.serial_number || asset.asset_code} - ${asset.name}` : movement.equipment_id}
+                        </div>
+                        <div style={{ marginTop: 6, fontSize: 13, color: "#334155" }}>
+                          {[
+                            asset?.warehouse || null,
+                            asset?.category || null,
+                            [asset?.shelf, asset?.place].filter(Boolean).join(" · ") || null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ") || "Nessun dettaglio aggiuntivo"}
+                        </div>
+                        <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
+                          {[
+                            asset?.barcode ? `Barcode ${asset.barcode}` : null,
+                            asset?.nfc_tag_id ? `NFC ${asset.nfc_tag_id}` : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ") || "Nessun identificativo"}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {historyDetailGroup.length > 4 && (
+                    <div style={{ display: "flex", justifyContent: "flex-start", marginTop: 4 }}>
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => setHistoryDetailAssetsExpanded((v) => !v)}
+                      >
+                        {historyDetailAssetsExpanded
+                          ? "Mostra meno"
+                          : `Mostra tutte (${historyDetailGroup.length})`}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </section>
             </div>
 
             <div
               style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                gap: 10,
-                marginTop: 16,
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 8,
+                padding: "12px 18px",
+                borderTop: "1px solid #e2e8f0",
+                background: "#fff",
               }}
             >
-              <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
-                <div style={{ fontSize: 12, color: "#64748b" }}>Data inserimento</div>
-                <div style={{ fontWeight: 800 }}>{fmtDateTime(historyDetail.created_at)}</div>
-              </div>
-              <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
-                <div style={{ fontSize: 12, color: "#64748b" }}>Stato</div>
-                <div style={{ marginTop: 4 }}>
-                  <span style={equipmentMovementPillStyle(historyDetail.status ?? "OPEN")}>
-                    {EQUIPMENT_MOVEMENT_STATUS_LABELS[historyDetail.status ?? "OPEN"]}
-                  </span>
-                </div>
-              </div>
-              <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
-                <div style={{ fontSize: 12, color: "#64748b" }}>Tipo</div>
-                <div style={{ marginTop: 4 }}>
-                  <span style={equipmentMovementPillStyle("OUT")}>{EQUIPMENT_MOVEMENT_LABELS.OUT}</span>
-                </div>
-              </div>
-              <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
-                <div style={{ fontSize: 12, color: "#64748b" }}>Inserito da</div>
-                <div style={{ fontWeight: 800 }}>{historyDetail.created_by_name || historyDetail.created_by_email || "—"}</div>
-              </div>
-              <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
-                <div style={{ fontSize: 12, color: "#64748b" }}>Assegnatario</div>
-                <div style={{ fontWeight: 800 }}>
-                  {[historyDetail.assigned_to_name, historyDetail.assigned_to_badge ? `Badge ${historyDetail.assigned_to_badge}` : null]
-                    .filter(Boolean)
-                    .join(" · ") || "—"}
-                </div>
-                {historyDetail.assigned_to_email && (
-                  <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>{historyDetail.assigned_to_email}</div>
-                )}
-              </div>
-              <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
-                <div style={{ fontSize: 12, color: "#64748b" }}>Destinazione</div>
-                <div style={{ fontWeight: 800 }}>{historyDetail.destination || "—"}</div>
-              </div>
-              <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
-                <div style={{ fontSize: 12, color: "#64748b" }}>Esito finale</div>
-                <div style={{ fontWeight: 800 }}>
-                  {historyDetail.resolution_type ? EQUIPMENT_RESOLUTION_LABELS[historyDetail.resolution_type] : "—"}
-                </div>
-              </div>
-              <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
-                <div style={{ fontSize: 12, color: "#64748b" }}>Piano d&apos;intervento</div>
-                <div style={{ fontWeight: 800 }}>{historyDetail.intervention_plan_number || "—"}</div>
-              </div>
-            </div>
-
-            <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
-              <div style={{ padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff" }}>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Note uscita</div>
-                <div style={{ fontWeight: 700 }}>{historyDetail.note || "—"}</div>
-              </div>
-              <div style={{ padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff" }}>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Note chiusura</div>
-                <div style={{ fontWeight: 700 }}>{historyDetail.close_note || "—"}</div>
-              </div>
-              <div style={{ padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff" }}>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Data chiusura</div>
-                <div style={{ fontWeight: 700 }}>
-                  {historyDetail.closed_at ? fmtDateTime(historyDetail.closed_at) : "Movimento ancora aperto"}
-                </div>
-              </div>
-            </div>
-
-            <div style={{ marginTop: 16 }}>
-              <div style={{ fontWeight: 900, marginBottom: 10 }}>
-                {historyDetailGroup.length > 1 ? "Attrezzature del gruppo" : "Attrezzatura coinvolta"}
-              </div>
-              <div style={{ display: "grid", gap: 8 }}>
-                {historyDetailGroup.map((movement) => {
-                  const asset = rows.find((item) => item.id === movement.equipment_id);
-                  return (
-                    <div
-                      key={movement.id}
-                      style={{
-                        padding: 12,
-                        borderRadius: 10,
-                        border: "1px solid #e2e8f0",
-                        background: "#f8fafc",
-                      }}
-                    >
-                      <div style={{ fontWeight: 900 }}>
-                        {asset ? `${asset.serial_number || asset.asset_code} - ${asset.name}` : movement.equipment_id}
-                      </div>
-                      <div style={{ marginTop: 6, fontSize: 13, color: "#334155" }}>
-                        {[
-                          asset?.warehouse || null,
-                          asset?.category || null,
-                          [asset?.shelf, asset?.place].filter(Boolean).join(" · ") || null,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ") || "Nessun dettaglio aggiuntivo"}
-                      </div>
-                      <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
-                        {[
-                          asset?.barcode ? `Barcode ${asset.barcode}` : null,
-                          asset?.nfc_tag_id ? `NFC ${asset.nfc_tag_id}` : null,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ") || "Nessun identificativo"}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <button type="button" className="btn btnPrimary" onClick={() => setHistoryDetail(null)}>
+                Chiudi
+              </button>
             </div>
           </div>
         </div>

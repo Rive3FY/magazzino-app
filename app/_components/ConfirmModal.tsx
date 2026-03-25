@@ -1,5 +1,7 @@
 "use client";
 
+import AppModalFrame from "./AppModalFrame";
+
 type Props = {
   open: boolean;
   title: string;
@@ -21,28 +23,15 @@ export default function ConfirmModal({
   onConfirm,
   onCancel,
 }: Props) {
-  if (!open) return null;
-
   return (
-    <div
-      className="confirmModalOverlay"
-      onMouseDown={onCancel}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="confirm-modal-title"
-      aria-describedby="confirm-modal-desc"
-    >
-      <div
-        className="confirmModalContent"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div id="confirm-modal-title" className="confirmModalTitle">
-          {title}
-        </div>
-        <p id="confirm-modal-desc" className="confirmModalMessage">
-          {message}
-        </p>
-        <div className="confirmModalActions">
+    <AppModalFrame
+      open={open}
+      title={title}
+      subtitle="Conferma operazione"
+      onClose={onCancel}
+      width="min(440px, 100%)"
+      footer={
+        <>
           <button type="button" className="btn" onClick={onCancel}>
             {cancelLabel}
           </button>
@@ -53,8 +42,12 @@ export default function ConfirmModal({
           >
             {confirmLabel}
           </button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <p className="confirmModalMessage" style={{ margin: 0 }} id="confirm-modal-desc">
+        {message}
+      </p>
+    </AppModalFrame>
   );
 }

@@ -21,6 +21,8 @@ import {
 } from "../../_lib/equipment";
 import { equipmentMovementSchema } from "../../_lib/validations";
 import { isRelationMissingOrNotExposedError } from "../../_lib/postgrestErrors";
+import AppModalFrame from "../../_components/AppModalFrame";
+import AppScanStatusModal from "../../_components/AppScanStatusModal";
 import ConfirmModal from "../../_components/ConfirmModal";
 import RemoteNfcScanModal from "./RemoteNfcScanModal";
 import type {
@@ -2650,88 +2652,23 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         </div>
       </div>
 
-      {(cameraScanning || searchByNfcScanning) && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15,23,42,0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 20,
-            zIndex: 10050,
-          }}
-        >
-          <div
-            style={{
-              background: "white",
-              borderRadius: 14,
-              padding: 24,
-              maxWidth: 420,
-              width: "100%",
-              boxShadow: "0 24px 60px rgba(0,0,0,0.3)",
-            }}
-          >
-            {cameraScanning ? (
-              <>
-                <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner barcode</div>
-                <div style={{ padding: 12, background: "#0f172a", borderRadius: 12, marginBottom: 12 }}>
-                  <video ref={videoRef} style={{ width: "100%", maxWidth: 360, borderRadius: 8 }} muted playsInline />
-                  <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il codice a barre</div>
-                </div>
-                <button type="button" className="btn" onClick={stopCameraScan}>
-                  Fine
-                </button>
-              </>
-            ) : (
-              <>
-                <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner NFC</div>
-                <div style={{ padding: 24, background: "#0f172a", borderRadius: 12, marginBottom: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-                  <SpinnerIcon />
-                  <div style={{ fontSize: 14, color: "#94a3b8" }}>Avvicina il telefono al tag NFC</div>
-                </div>
-                <button type="button" className="btn" onClick={stopNfcScan}>
-                  Fine
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      <AppScanStatusModal
+        open={cameraScanning || searchByNfcScanning}
+        mode={cameraScanning ? "barcode" : "nfc"}
+        videoRef={videoRef}
+        icon={<SpinnerIcon />}
+        onClose={cameraScanning ? stopCameraScan : stopNfcScan}
+      />
 
       {scanResult && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15,23,42,0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 20,
-            zIndex: 10050,
-          }}
+        <AppModalFrame
+          open
+          title={scanResult.source === "barcode" ? "Scansione barcode" : "Scansione NFC"}
+          subtitle={scanResult.mode === "CART" ? "Aggiunta rapida al carrello" : "Conferma prelievo singolo"}
+          onClose={resetScannedSelection}
+          width="min(520px, 100%)"
         >
-          <div
-            style={{
-              background: "white",
-              borderRadius: 14,
-              padding: 24,
-              maxWidth: 520,
-              width: "100%",
-              boxShadow: "0 24px 60px rgba(0,0,0,0.3)",
-            }}
-          >
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-              <div>
-                <div style={{ fontWeight: 900, fontSize: 16 }}>
-                  {scanResult.source === "barcode" ? "Scansione barcode" : "Scansione NFC"}
-                </div>
-                <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
-                  {scanResult.mode === "CART" ? "Aggiunta rapida al carrello" : "Conferma prelievo singolo"}
-                </div>
-              </div>
               <span
                 title={scanResultCanPickup ? "Disponibile" : "Indisponibile"}
                 style={{
@@ -2818,64 +2755,40 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 </button>
               )}
             </div>
-          </div>
-        </div>
+        </AppModalFrame>
       )}
 
       {closeOpen && closing && (
-        <div
-          onMouseDown={closeModal}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15,23,42,0.35)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 14,
-            zIndex: 10050,
-          }}
-        >
-          <div
-            onMouseDown={(e) => e.stopPropagation()}
-            style={{
-              position: "relative",
-              width: "min(1100px, 100%)",
-              maxHeight: "85vh",
-              overflow: "auto",
-              background: "white",
-              borderRadius: 14,
-              border: "1px solid rgba(15,23,42,0.16)",
-              boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
-              padding: 12,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ fontWeight: 900, fontSize: 16 }}>
-                {closingGroup.length > 1 ? "Dettaglio gruppo / chiusura" : "Dettaglio movimento / chiusura"}
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                {isAdmin && (
-                  <button
-                    className="btn"
-                    type="button"
-                    disabled={saving}
-                    onClick={() => {
-                      if (!closing) return;
-                      openDeleteConfirm(closing);
-                    }}
-                    style={{
-                      borderColor: "rgba(239,68,68,0.5)",
-                      background: "rgba(239,68,68,0.1)",
-                      color: "#991b1b",
-                    }}
-                  >
-                    Elimina movimento
-                  </button>
-                )}
-                <button className="btn" onClick={closeModal} type="button">Chiudi</button>
-              </div>
+        <AppModalFrame
+          open
+          title={closingGroup.length > 1 ? "Dettaglio gruppo / chiusura" : "Dettaglio movimento / chiusura"}
+          subtitle={`Area ${areaLabel}`}
+          onClose={closeModal}
+          width="min(1100px, 100%)"
+          headerRight={
+            <div style={{ display: "flex", gap: 8 }}>
+              {isAdmin && (
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={saving}
+                  onClick={() => {
+                    if (!closing) return;
+                    openDeleteConfirm(closing);
+                  }}
+                  style={{
+                    borderColor: "rgba(239,68,68,0.5)",
+                    background: "rgba(239,68,68,0.1)",
+                    color: "#991b1b",
+                  }}
+                >
+                  Elimina movimento
+                </button>
+              )}
+              <button className="btn" onClick={closeModal} type="button">Chiudi</button>
             </div>
+          }
+        >
 
             {closingGroup.length <= 1 && (() => {
               const asset = assetMap.get(closing.equipment_id);
@@ -3080,8 +2993,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
             )}
 
             {msg && <div style={{ marginTop: 10, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
-          </div>
-        </div>
+        </AppModalFrame>
       )}
 
       {deleteConfirm && (
@@ -3108,39 +3020,13 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       )}
 
       {categorySelectModalOpen && categorySelectModalCategory && (
-        <div
-          style={{
-      position: "fixed",
-      inset: 0,
-      background: "rgba(0,0,0,0.5)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      zIndex: 10050,
-            padding: 16,
-          }}
-          onClick={() => setCategorySelectModalOpen(false)}
+        <AppModalFrame
+          open
+          title={`Gruppo "${categorySelectModalCategory}"`}
+          subtitle="Seleziona le attrezzature da aggiungere al carrello"
+          onClose={() => setCategorySelectModalOpen(false)}
+          width="min(480px, 100%)"
         >
-          <div
-            style={{
-              background: "var(--bg)",
-              borderRadius: 12,
-              padding: 20,
-              maxWidth: 480,
-              width: "100%",
-              maxHeight: "85vh",
-              display: "flex",
-              flexDirection: "column",
-              boxShadow: "0 24px 60px rgba(0,0,0,0.25)",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 style={{ margin: "0 0 12px", fontSize: 18, fontWeight: 700 }}>
-              Gruppo &quot;{categorySelectModalCategory}&quot; – Seleziona da prelevare
-            </h3>
-            <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--muted)" }}>
-              Seleziona le attrezzature da aggiungere al carrello.
-            </p>
             {categoryModalAssets.some(canAddAssetToCart) && (
               <div style={{ marginBottom: 8, display: "flex", gap: 8 }}>
                 <button
@@ -3230,8 +3116,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 Aggiungi {categorySelectModalSelected.size > 0 ? `(${categorySelectModalSelected.size})` : ""} al carrello
               </button>
             </div>
-          </div>
-        </div>
+        </AppModalFrame>
       )}
 
       <ConfirmModal

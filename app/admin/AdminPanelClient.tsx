@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import ConfirmModal from "../_components/ConfirmModal";
 import ConfirmWithInputModal from "../_components/ConfirmWithInputModal";
+import AppModalFrame from "../_components/AppModalFrame";
 
 type Row = {
   Materiale?: any;
@@ -642,53 +643,32 @@ export default function AdminPanelClient() {
       </div>
 
       {editOpen && editUser && (
-        <div
-          onMouseDown={() => {
+        <AppModalFrame
+          open
+          title="Modifica Operatore"
+          subtitle={editUser.email ?? "-"}
+          onClose={() => {
             if (!editBusy) {
               setEditOpen(false);
               setEditUser(null);
             }
           }}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.35)",
-            display: "grid",
-            placeItems: "center",
-            zIndex: 10050,
-            padding: 16,
-          }}
+          width="min(680px, 96vw)"
+          headerRight={
+            <button
+              className="btn"
+              onClick={() => {
+                if (!editBusy) {
+                  setEditOpen(false);
+                  setEditUser(null);
+                }
+              }}
+            >
+              Chiudi
+            </button>
+          }
         >
-          <div
-            onMouseDown={(e) => e.stopPropagation()}
-            style={{
-              width: "min(680px, 96vw)",
-              background: "white",
-              borderRadius: 10,
-              border: "1px solid #d1d5db",
-              boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
-              overflow: "hidden",
-            }}
-          >
-            <div style={{ padding: 12, borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", gap: 12 }}>
-              <div>
-                <div style={{ fontWeight: 900, color: "#111827" }}>Modifica Operatore</div>
-                <div style={{ fontSize: 12, color: "#6b7280" }}>{editUser.email ?? "-"}</div>
-              </div>
-              <button
-                className="btn"
-                onClick={() => {
-                  if (!editBusy) {
-                    setEditOpen(false);
-                    setEditUser(null);
-                  }
-                }}
-              >
-                Chiudi
-              </button>
-            </div>
-
-            <div style={{ padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ display: "grid", gap: 10 }}>
               <div className="filters" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
                 <div className="field">
                   <label>Badge</label>
@@ -723,9 +703,8 @@ export default function AdminPanelClient() {
               <div style={{ fontSize: 12, color: "#6b7280" }}>
                 Nota: badge/nome/cognome vengono salvati nel profilo dell’utente.
               </div>
-            </div>
           </div>
-        </div>
+        </AppModalFrame>
       )}
 
       {deleteMovId && (

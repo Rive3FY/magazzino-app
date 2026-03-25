@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 import { useState } from "react";
 import { createClient } from "../../_lib/supabase/client";
 import { useToast } from "../../_lib/ToastContext";
+import AppModalFrame from "../../_components/AppModalFrame";
 import type { EquipmentArea } from "../../_lib/types";
 
 const EQUIPMENT_FIELDS = [
@@ -181,157 +182,142 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
   }
 
   return (
-    <div
-      onMouseDown={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.4)",
-        display: "grid",
-        placeItems: "center",
-        zIndex: 10050,
-        padding: 16,
-      }}
+    <AppModalFrame
+      open
+      title="Importa attrezzature da Excel"
+      subtitle={
+        <>
+          {step === "upload" && "Carica il file Excel (.xlsx, .xls)"}
+          {step === "mapping" && "Associa le colonne del file ai campi del registro"}
+          {step === "preview" && "Anteprima e conferma importazione"}
+        </>
+      }
+      onClose={onClose}
+      width="min(720px, 96vw)"
+      headerRight={<button type="button" className="btn" onClick={onClose}>Chiudi</button>}
     >
-      <div
-        onMouseDown={(e) => e.stopPropagation()}
-        style={{
-          width: "min(720px, 96vw)",
-          maxHeight: "90vh",
-          overflow: "auto",
-          background: "#fff",
-          borderRadius: 14,
-          boxShadow: "0 24px 60px rgba(0,0,0,0.2)",
-          border: "1px solid #e2e8f0",
-        }}
-      >
-        <div style={{ padding: 16, borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div style={{ fontWeight: 900, fontSize: 18 }}>Importa attrezzature da Excel</div>
-            <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
-              {step === "upload" && "Carica il file Excel (.xlsx, .xls)"}
-              {step === "mapping" && "Associa le colonne del file ai campi del registro"}
-              {step === "preview" && "Anteprima e conferma importazione"}
-            </div>
-          </div>
-          <button type="button" className="btn" onClick={onClose}>Chiudi</button>
-        </div>
-
-        <div style={{ padding: 16 }}>
+        <div style={{ display: "grid", gap: 16 }}>
           {step === "upload" && (
-            <div>
-              <label className="label">File Excel</label>
-              <input
-                type="file"
-                accept=".xlsx,.xls"
-                onChange={handleFileSelect}
-                className="input"
-                style={{ width: "100%" }}
-              />
-              <div style={{ marginTop: 12, fontSize: 13, color: "#64748b" }}>
-                Il file deve avere la prima riga con le intestazioni delle colonne. Dopo il caricamento potrai associare ogni colonna del file ai campi del registro.
+            <div className="appModalSection">
+              <div className="appModalSectionHeader">Caricamento file</div>
+              <div className="appModalSectionBody">
+                <label className="label">File Excel</label>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={handleFileSelect}
+                  className="input"
+                  style={{ width: "100%" }}
+                />
+                <div style={{ marginTop: 12, fontSize: 13, color: "#64748b" }}>
+                  Il file deve avere la prima riga con le intestazioni delle colonne. Dopo il caricamento potrai associare ogni colonna del file ai campi del registro.
+                </div>
               </div>
             </div>
           )}
 
           {step === "mapping" && (
-            <div style={{ display: "grid", gap: 12 }}>
-              <div style={{ fontWeight: 800 }}>Associazione colonne</div>
-              <div style={{ fontSize: 13, color: "#64748b" }}>
-                Per ogni campo del registro, scegli quale colonna del tuo Excel usare. Lascia "(Non usare)" per ignorare una colonna.
-                {excelColumns.length > 0 && (
-                  <span style={{ display: "block", marginTop: 4, fontWeight: 600 }}>{excelColumns.length} colonne trovate nel file.</span>
-                )}
-              </div>
-              <div style={{ display: "grid", gap: 10 }}>
-                {EQUIPMENT_FIELDS.map(({ key, label, required }) => (
-                  <div key={key} style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: 12, alignItems: "center" }}>
-                    <label style={{ fontWeight: 600 }}>
-                      {label}
-                      {required && <span style={{ color: "#dc2626", marginLeft: 4 }}>*</span>}
-                    </label>
-                    <select
-                      className="input"
-                      value={columnMapping[key] !== undefined ? String(columnMapping[key]) : ""}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setMapping(key, v === "" ? -1 : parseInt(v, 10));
-                      }}
-                      style={{ width: "100%" }}
-                    >
-                      <option value="">(Non usare)</option>
-                      {excelColumns.map((col) => (
-                        <option key={col.index} value={col.index}>{col.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
-              </div>
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button type="button" className="btn btnPrimary" onClick={() => setStep("preview")}>
-                  Anteprima
-                </button>
-                <button type="button" className="btn" onClick={() => setStep("upload")}>
-                  Cambia file
-                </button>
+            <div className="appModalSection">
+              <div className="appModalSectionHeader">Associazione colonne</div>
+              <div className="appModalSectionBody" style={{ display: "grid", gap: 12 }}>
+                <div style={{ fontSize: 13, color: "#64748b" }}>
+                  Per ogni campo del registro, scegli quale colonna del tuo Excel usare. Lascia "(Non usare)" per ignorare una colonna.
+                  {excelColumns.length > 0 && (
+                    <span style={{ display: "block", marginTop: 4, fontWeight: 600 }}>{excelColumns.length} colonne trovate nel file.</span>
+                  )}
+                </div>
+                <div style={{ display: "grid", gap: 10 }}>
+                  {EQUIPMENT_FIELDS.map(({ key, label, required }) => (
+                    <div key={key} style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: 12, alignItems: "center" }}>
+                      <label style={{ fontWeight: 600 }}>
+                        {label}
+                        {required && <span style={{ color: "#dc2626", marginLeft: 4 }}>*</span>}
+                      </label>
+                      <select
+                        className="input"
+                        value={columnMapping[key] !== undefined ? String(columnMapping[key]) : ""}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setMapping(key, v === "" ? -1 : parseInt(v, 10));
+                        }}
+                        style={{ width: "100%" }}
+                      >
+                        <option value="">(Non usare)</option>
+                        {excelColumns.map((col) => (
+                          <option key={col.index} value={col.index}>{col.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <button type="button" className="btn btnPrimary" onClick={() => setStep("preview")}>
+                    Anteprima
+                  </button>
+                  <button type="button" className="btn" onClick={() => setStep("upload")}>
+                    Cambia file
+                  </button>
+                </div>
               </div>
             </div>
           )}
 
           {step === "preview" && (
-            <div style={{ display: "grid", gap: 12 }}>
-              <div style={{ fontWeight: 800 }}>
-                Anteprima ({validRows.length} righe valide
-                {skippedCount > 0 && `, ${skippedCount} saltate (seriale/nome mancanti)`})
-              </div>
-              <div style={{ overflowX: "auto", maxHeight: 280, border: "1px solid #e2e8f0", borderRadius: 8 }}>
-                <table className="table" style={{ fontSize: 12 }}>
-                  <thead>
-                    <tr>
-                      <th>Seriale</th>
-                      <th>Nome</th>
-                      <th>Categoria</th>
-                      <th>Magazzino</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {validRows.slice(0, 15).map((r, i) => (
-                      <tr key={i}>
-                        <td>{r.serial_number}</td>
-                        <td>{r.name}</td>
-                        <td>{r.category}</td>
-                        <td>{r.warehouse}</td>
+            <div className="appModalSection">
+              <div className="appModalSectionHeader">Anteprima</div>
+              <div className="appModalSectionBody" style={{ display: "grid", gap: 12 }}>
+                <div style={{ fontWeight: 800 }}>
+                  Anteprima ({validRows.length} righe valide
+                  {skippedCount > 0 && `, ${skippedCount} saltate (seriale/nome mancanti)`})
+                </div>
+                <div style={{ overflowX: "auto", maxHeight: 280, border: "1px solid #e2e8f0", borderRadius: 8 }}>
+                  <table className="table" style={{ fontSize: 12 }}>
+                    <thead>
+                      <tr>
+                        <th>Seriale</th>
+                        <th>Nome</th>
+                        <th>Categoria</th>
+                        <th>Magazzino</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {validRows.length > 15 && (
-                <div style={{ fontSize: 12, color: "#64748b" }}>… e altre {validRows.length - 15} righe</div>
-              )}
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  className="btn btnPrimary"
-                  disabled={importing || validRows.length === 0}
-                  onClick={() => void doImport()}
-                >
-                  {importing ? "Importazione…" : `Importa ${validRows.length} attrezzature`}
-                </button>
-                <button type="button" className="btn" onClick={() => setStep("mapping")}>
-                  Modifica associazioni
-                </button>
+                    </thead>
+                    <tbody>
+                      {validRows.slice(0, 15).map((r, i) => (
+                        <tr key={i}>
+                          <td>{r.serial_number}</td>
+                          <td>{r.name}</td>
+                          <td>{r.category}</td>
+                          <td>{r.warehouse}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {validRows.length > 15 && (
+                  <div style={{ fontSize: 12, color: "#64748b" }}>… e altre {validRows.length - 15} righe</div>
+                )}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="btn btnPrimary"
+                    disabled={importing || validRows.length === 0}
+                    onClick={() => void doImport()}
+                  >
+                    {importing ? "Importazione…" : `Importa ${validRows.length} attrezzature`}
+                  </button>
+                  <button type="button" className="btn" onClick={() => setStep("mapping")}>
+                    Modifica associazioni
+                  </button>
+                </div>
               </div>
             </div>
           )}
 
-          {msg && (
-            <div style={{ marginTop: 12, padding: 10, background: "#fef2f2", borderRadius: 8, color: "#991b1b", fontWeight: 600 }}>
+          {msg ? (
+            <div style={{ padding: 10, background: "#fef2f2", borderRadius: 8, color: "#991b1b", fontWeight: 600 }}>
               {msg}
             </div>
-          )}
+          ) : null}
         </div>
-      </div>
-    </div>
+    </AppModalFrame>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "../../_lib/supabase/client";
+import { notifyEquipmentSync } from "../../_lib/equipmentSync";
 import type { EquipmentArea } from "../../_lib/types";
 import { useToast } from "../../_lib/ToastContext";
 
@@ -120,6 +121,7 @@ export default function EquipmentNfcCategoryTagsClient({ area }: Props) {
       });
       if (error) throw error;
       toast.success("Tag registrato.");
+      notifyEquipmentSync(area, "admin-nfc-category-tag-save");
       setModalOpen(false);
       setScannedTagId(null);
       void load();
@@ -136,6 +138,7 @@ export default function EquipmentNfcCategoryTagsClient({ area }: Props) {
       const { error } = await supabase.from("equipment_nfc_category_tags").delete().eq("id", id);
       if (error) throw error;
       toast.success("Tag rimosso.");
+      notifyEquipmentSync(area, "admin-nfc-category-tag-delete");
       void load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Errore eliminazione");

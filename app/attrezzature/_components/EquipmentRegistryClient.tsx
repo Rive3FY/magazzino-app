@@ -31,6 +31,11 @@ type Props = {
   basePath: string;
 };
 
+type NfcCategoryTagRow = {
+  nfc_tag_id: string;
+  category: string;
+};
+
 const supabase = createClient();
 
 function BarcodeIcon() {
@@ -62,6 +67,42 @@ function SpinnerIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 1s linear infinite", transformOrigin: "center" }}>
       <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
+}
+
+function EquipmentStatusIcon({ status, size = 16 }: { status: EquipmentStatus; size?: number }) {
+  if (status === "AVAILABLE") {
+    return (
+      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <circle cx="8" cy="8" r="6" fill="#10b981" fillOpacity="0.14" stroke="#059669" strokeWidth="1.5" />
+        <path d="M5 8.2 7 10.2 11 6.2" stroke="#047857" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (status === "ASSIGNED") {
+    return (
+      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <circle cx="8" cy="8" r="6" fill="#3b82f6" fillOpacity="0.14" stroke="#2563eb" strokeWidth="1.5" />
+        <path d="M8 4.5v7" stroke="#1d4ed8" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M5.5 8h5" stroke="#1d4ed8" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (status === "MAINTENANCE") {
+    return (
+      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <circle cx="8" cy="8" r="6" fill="#f59e0b" fillOpacity="0.16" stroke="#d97706" strokeWidth="1.5" />
+        <path d="M6 10.5 10.5 6" stroke="#b45309" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M9.7 5.9a1.1 1.1 0 1 1 1.55-1.55l.35.35a1.1 1.1 0 0 1-1.55 1.55l-.35-.35Z" fill="#b45309" />
+      </svg>
+    );
+  }
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="6" fill="#ef4444" fillOpacity="0.14" stroke="#dc2626" strokeWidth="1.5" />
+      <path d="M5.5 5.5 10.5 10.5" stroke="#b91c1c" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M10.5 5.5 5.5 10.5" stroke="#b91c1c" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
@@ -187,8 +228,10 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   const [quickCategoryFilter, setQuickCategoryFilter] = useState<string>("");
   const [quickGroupFilter, setQuickGroupFilter] = useState<string>("");
   const [categoryGroups, setCategoryGroups] = useState<{ group_name: string; category: string }[]>([]);
+  const [nfcCategoryTags, setNfcCategoryTags] = useState<NfcCategoryTagRow[]>([]);
   const [quickWarehouseFilter, setQuickWarehouseFilter] = useState<string>("ALL");
   const [quickOpen, setQuickOpen] = useState(false);
+  const [quickPickOpen, setQuickPickOpen] = useState(false);
   const [quickActiveIndex, setQuickActiveIndex] = useState(0);
   const [msg, setMsg] = useState<string | null>(null);
   const [historyFrom, setHistoryFrom] = useState("");
@@ -202,6 +245,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const quickBoxRef = useRef<HTMLDivElement | null>(null);
+  const quickPickBoxRef = useRef<HTMLDivElement | null>(null);
   const categoryGroupsTableMissingRef = useRef(false);
 
   useEffect(() => {
@@ -224,7 +268,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
       ? Promise.resolve({ data: [], error: { message: "skip" } })
       : supabase.from("equipment_category_groups").select("group_name,category").eq("equipment_area", area).order("group_name").order("category");
 
-    const [assetsRes, historyRes, categoryGroupsRes] = await Promise.all([
+    const [assetsRes, historyRes, categoryGroupsRes, nfcCategoryTagsRes] = await Promise.all([
       supabase
         .from("equipment_assets")
         .select("*")
@@ -237,6 +281,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
         .order("created_at", { ascending: false })
         .limit(300),
       categoryGroupsPromise,
+      supabase.from("equipment_nfc_category_tags").select("nfc_tag_id,category").eq("equipment_area", area),
     ]);
 
     if (assetsRes.error) {
@@ -267,6 +312,13 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
       }
     } else {
       setCategoryGroups((categoryGroupsRes.data ?? []) as { group_name: string; category: string }[]);
+    }
+
+    if (nfcCategoryTagsRes.error) {
+      console.error("equipment_nfc_category_tags:", nfcCategoryTagsRes.error);
+      setNfcCategoryTags([]);
+    } else {
+      setNfcCategoryTags((nfcCategoryTagsRes.data ?? []) as NfcCategoryTagRow[]);
     }
 
     setLoading(false);
@@ -405,6 +457,17 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
 
   const quickGroupNames = useMemo(() => Array.from(new Set(quickGroupedCategories.keys())).sort(), [quickGroupedCategories]);
 
+  const quickCategoryToGroup = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of categoryGroups) {
+      const grp = (row.group_name ?? "").trim();
+      const cat = (row.category ?? "").trim();
+      if (!grp || !cat) continue;
+      map.set(cat, grp);
+    }
+    return map;
+  }, [categoryGroups]);
+
   const quickUngroupedCategories = useMemo(() => {
     const inGroup = new Set<string>();
     for (const row of categoryGroups) {
@@ -448,7 +511,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   const quickMatches = useMemo(() => {
     let base = filteredRows;
     const search = quickSearch.trim().toLowerCase();
-    if (!search) return base.slice(0, 12);
+    if (!search) return base;
     return base
       .filter((row) =>
         [
@@ -558,6 +621,32 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     setDeleteConfirm(null);
   }
 
+  function applyQuickCategoryTag(category: string) {
+    const normalizedCategory = category.trim();
+    if (!normalizedCategory) return;
+    const linkedGroup = quickCategoryToGroup.get(normalizedCategory) ?? "";
+    const nextGroup = linkedGroup || (quickUngroupedCategories.includes(normalizedCategory) ? "__OTHER__" : "");
+    const candidates = rows.filter((row) => {
+      if ((row.category ?? "").trim() !== normalizedCategory) return false;
+      if (quickWarehouseFilter !== "ALL" && (row.warehouse ?? "").trim() !== quickWarehouseFilter) return false;
+      return true;
+    });
+    setQuickGroupFilter(nextGroup);
+    setQuickCategoryFilter(normalizedCategory);
+    setQuickSelectedId(candidates.length === 1 ? candidates[0].id : "");
+    setQuickSearch(candidates.length === 1 ? `${candidates[0].serial_number || candidates[0].asset_code} - ${candidates[0].name}` : normalizedCategory);
+    setQuickOpen(false);
+    if (candidates.length === 0) {
+      setMsg(`Tag NFC gruppo/sottogruppo rilevato: ${normalizedCategory}. Nessuna attrezzatura trovata con i filtri correnti.`);
+      return;
+    }
+    if (candidates.length === 1) {
+      setMsg(`Tag NFC gruppo/sottogruppo rilevato: ${normalizedCategory}. Attrezzatura selezionata automaticamente.`);
+      return;
+    }
+    setMsg(`Tag NFC gruppo/sottogruppo rilevato: ${normalizedCategory}. ${candidates.length} attrezzature trovate, selezionane una.`);
+  }
+
   function applyQuickResult(value: string, mode: "barcode" | "nfc") {
     const normalized = value.trim().toLowerCase();
     if (!normalized) return;
@@ -570,20 +659,30 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
       }
       return String(row.nfc_tag_id ?? "").trim().toLowerCase() === normalized;
     });
-    setQuickSelectedId(matched?.id ?? "");
-    setQuickOpen(false);
-    if (!matched) {
-      setMsg(mode === "barcode" ? "Nessuna attrezzatura trovata per questo barcode." : "Nessuna attrezzatura associata a questo tag NFC.");
-    } else {
+    if (matched) {
+      setQuickSelectedId(matched.id);
+      setQuickOpen(false);
       setQuickSearch(`${matched.serial_number || matched.asset_code} - ${matched.name}`);
       setMsg(null);
+      return;
     }
+    if (mode === "nfc") {
+      const categoryTag = nfcCategoryTags.find((row) => String(row.nfc_tag_id ?? "").trim().toLowerCase() === normalized);
+      if (categoryTag) {
+        applyQuickCategoryTag(categoryTag.category);
+        return;
+      }
+    }
+    setQuickSelectedId("");
+    setQuickOpen(false);
+    setMsg(mode === "barcode" ? "Nessuna attrezzatura trovata per questo barcode." : "Nessuna attrezzatura o sottogruppo associato a questo tag NFC.");
   }
 
   function pickQuickMatch(row: EquipmentAssetRow) {
     setQuickSelectedId(row.id);
     setQuickSearch(`${row.serial_number || row.asset_code} - ${row.name}`);
     setQuickOpen(false);
+    setQuickPickOpen(false);
     setMsg(null);
   }
 
@@ -673,8 +772,9 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
 
   useEffect(() => {
     function onDocMouseDown(e: MouseEvent) {
-      if (!quickBoxRef.current) return;
-      if (!quickBoxRef.current.contains(e.target as Node)) setQuickOpen(false);
+      const target = e.target as Node;
+      if (quickBoxRef.current && !quickBoxRef.current.contains(target)) setQuickOpen(false);
+      if (quickPickBoxRef.current && !quickPickBoxRef.current.contains(target)) setQuickPickOpen(false);
     }
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
@@ -717,7 +817,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
               <div className="equipmentStatLabel">Registrate</div>
               <div className="equipmentStatValue">{filteredRows.length}</div>
             </div>
-            {EQUIPMENT_STATUS_OPTIONS.map((status) => (
+            {EQUIPMENT_STATUS_OPTIONS.filter((status) => status !== "DISMISSED").map((status) => (
               <div key={status} className="equipmentStatCard">
                 <div className="equipmentStatLabel">{EQUIPMENT_STATUS_LABELS[status]}</div>
                 <div className="equipmentStatValue">{stats[status]}</div>
@@ -879,23 +979,120 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                 {searchByNfcScanning ? "NFC..." : "NFC"}
               </button>
             </div>
-            <div style={{ minWidth: 0 }}>
+            <div ref={quickPickBoxRef} style={{ minWidth: 0, position: "relative" }}>
               <label className="label" htmlFor={`equipment-quick-pick-${area}`}>
                 Attrezzatura
               </label>
-              <ClearableSelect
-                id={`equipment-quick-pick-${area}`}
-                value={quickSelectedId}
-                onChange={setQuickSelectedId}
-                clearValue=""
-              >
-                <option value="">Seleziona risultato</option>
-                {quickMatches.map((row) => (
-                  <option key={row.id} value={row.id}>
-                    {(row.serial_number || row.asset_code) + " - " + row.name}
-                  </option>
-                ))}
-              </ClearableSelect>
+              <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+                <button
+                  id={`equipment-quick-pick-${area}`}
+                  type="button"
+                  className="input"
+                  aria-haspopup="listbox"
+                  aria-expanded={quickPickOpen}
+                  onClick={() => setQuickPickOpen((v) => !v)}
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  {quickSelected ? (
+                    <>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
+                        <EquipmentStatusIcon status={quickSelected.status} />
+                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {(quickSelected.serial_number || quickSelected.asset_code) + " - " + quickSelected.name}
+                        </span>
+                      </span>
+                      <span style={{ fontSize: 12, color: "#64748b", whiteSpace: "nowrap" }}>
+                        {EQUIPMENT_STATUS_LABELS[quickSelected.status]}
+                      </span>
+                    </>
+                  ) : (
+                    <span style={{ color: "#64748b" }}>Seleziona risultato</span>
+                  )}
+                  <span style={{ color: "#64748b", flexShrink: 0 }}>{quickPickOpen ? "▲" : "▼"}</span>
+                </button>
+                {quickSelectedId ? (
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => {
+                      setQuickSelectedId("");
+                      setQuickPickOpen(false);
+                    }}
+                    aria-label="Cancella attrezzatura selezionata"
+                    style={{ padding: "0 12px", minWidth: 44 }}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </div>
+              {quickPickOpen && (
+                <div
+                  role="listbox"
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    top: "100%",
+                    marginTop: 6,
+                    background: "#fff",
+                    border: "1px solid rgba(15,23,42,0.12)",
+                    borderRadius: 12,
+                    boxShadow: "0 16px 40px rgba(0,0,0,0.12)",
+                    overflow: "hidden",
+                    zIndex: 50,
+                  }}
+                >
+                  <div style={{ maxHeight: 320, overflowY: "auto" }}>
+                    {quickMatches.length === 0 ? (
+                      <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
+                    ) : (
+                      quickMatches.map((row, idx) => (
+                        <button
+                          key={row.id}
+                          type="button"
+                          onClick={() => pickQuickMatch(row)}
+                          style={{
+                            width: "100%",
+                            border: "none",
+                            background: quickSelectedId === row.id ? "#eef2ff" : "white",
+                            padding: "10px 12px",
+                            cursor: "pointer",
+                            borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
+                            textAlign: "left",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <EquipmentStatusIcon status={row.status} />
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ fontWeight: 800, color: "#0f172a" }}>{row.serial_number || row.asset_code}</div>
+                              <div style={{ fontSize: 12, color: "#334155" }}>{row.name}</div>
+                            </div>
+                            <span
+                              style={{
+                                ...equipmentStatusStyle(row.status),
+                                padding: "4px 8px",
+                                fontSize: 11,
+                                fontWeight: 700,
+                                flexShrink: 0,
+                              }}
+                            >
+                              {EQUIPMENT_STATUS_LABELS[row.status]}
+                            </span>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

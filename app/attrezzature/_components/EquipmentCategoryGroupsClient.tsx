@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "../../_lib/supabase/client";
+import { notifyEquipmentSync } from "../../_lib/equipmentSync";
 import type { EquipmentArea } from "../../_lib/types";
 import { useToast } from "../../_lib/ToastContext";
 import { isRelationMissingOrNotExposedError } from "../../_lib/postgrestErrors";
@@ -88,6 +89,7 @@ export default function EquipmentCategoryGroupsClient({ area }: Props) {
       });
       if (error) throw error;
       toast.success("Associazione aggiunta.");
+      notifyEquipmentSync(area, "admin-category-group-save");
       setNewCategory("");
       void load();
     } catch (e) {
@@ -103,6 +105,7 @@ export default function EquipmentCategoryGroupsClient({ area }: Props) {
       const { error } = await supabase.from("equipment_category_groups").delete().eq("id", id);
       if (error) throw error;
       toast.success("Associazione rimossa.");
+      notifyEquipmentSync(area, "admin-category-group-delete");
       void load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Errore eliminazione");

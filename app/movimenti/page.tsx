@@ -23,6 +23,24 @@ function sameUser(a: string | null | undefined, b: string | null | undefined) {
   return !!a && !!b && a === b;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function excelFreeQty(row: unknown) {
+  const record = asRecord(row);
+  if (!record) return 0;
+  if (record.qty_free !== null && record.qty_free !== undefined && record.qty_free !== "") {
+    return n(record.qty_free);
+  }
+  const rowJson = asRecord(record.row_json);
+  return n(rowJson?.["Qnt. a Mag. libero"] ?? 0);
+}
+
+function excelNumberField(row: unknown, key: string) {
+  return n(asRecord(row)?.[key] ?? 0);
+}
+
 function pillStyle(kind: "IN" | "OUT" | "OPEN" | "CLOSED" | "PRM" | "REALE") {
   const base: React.CSSProperties = {
     display: "inline-flex",
@@ -516,7 +534,7 @@ export default function MovimentiPage() {
 async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<QuickMaterialInfo | null> {
   const { data: stock, error: stockErr } = await supabase
     .from("excel_live")
-    .select("code,warehouse,qty_free,qty_blocked,qty_quality")
+    .select("code,warehouse,qty_free,qty_blocked,qty_quality,row_json")
     .eq("code", code)
     .eq("warehouse", wh)
     .maybeSingle();
@@ -538,14 +556,16 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
     console.error("loadMaterialForScan item error:", itemErr);
   }
 
+  const itemRecord = asRecord(item);
+
   return {
     code,
     warehouse: wh,
-    name: String((item as any)?.name ?? "").trim() || code,
-    um: (item as any)?.um ?? null,
-    qtyFree: Number((stock as any)?.qty_free ?? 0),
-    qtyBlocked: Number((stock as any)?.qty_blocked ?? 0),
-    qtyQuality: Number((stock as any)?.qty_quality ?? 0),
+    name: String(itemRecord?.name ?? "").trim() || code,
+    um: typeof itemRecord?.um === "string" ? itemRecord.um : null,
+    qtyFree: excelFreeQty(stock),
+    qtyBlocked: excelNumberField(stock, "qty_blocked"),
+    qtyQuality: excelNumberField(stock, "qty_quality"),
   };
 }
   async function loadImageAsDataUrl(src: string): Promise<string> {
@@ -949,12 +969,8 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
       try {
         const { data: prmLive } = await supabase.from("excel_live").select("qty_free,row_json").eq("code", it.code).eq("warehouse", "PRM").maybeSingle();
         const { data: realeLive } = await supabase.from("excel_live").select("qty_free,row_json").eq("code", it.code).eq("warehouse", "REALE").maybeSingle();
-        const { data: prmOrig } = await supabase.from("excel_original").select("qty_free,row_json").eq("code", it.code).eq("warehouse", "PRM").maybeSingle();
-        const { data: realeOrig } = await supabase.from("excel_original").select("qty_free,row_json").eq("code", it.code).eq("warehouse", "REALE").maybeSingle();
-        const prmRow = prmLive ?? prmOrig;
-        const realeRow = realeLive ?? realeOrig;
-        const prmFree = prmRow ? (Number.isFinite(Number(prmRow.qty_free)) ? n(prmRow.qty_free) : n((prmRow.row_json as any)?.["Qnt. a Mag. libero"] ?? 0)) : 0;
-        const realeFree = realeRow ? (Number.isFinite(Number(realeRow.qty_free)) ? n(realeRow.qty_free) : n((realeRow.row_json as any)?.["Qnt. a Mag. libero"] ?? 0)) : 0;
+        const prmFree = excelFreeQty(prmLive);
+        const realeFree = excelFreeQty(realeLive);
         const { data: shelfRows } = await supabase.from("material_shelves").select("warehouse,shelf,place").eq("code", it.code);
         const prmShelfRow = (shelfRows ?? []).find((r: any) => r.warehouse === "PRM");
         const realeShelfRow = (shelfRows ?? []).find((r: any) => r.warehouse === "REALE");
@@ -1675,34 +1691,7 @@ function finalizeMaterialPickupSuccess() {
       .maybeSingle();
 
     if (eLive) throw eLive;
-    if (live) return live as ExcelLiveRow;
-
-    const { data: orig, error: eOrig } = await supabase
-      .from("excel_original")
-      .select("code,warehouse,qty_free,qty_blocked,qty_quality,row_json")
-      .eq("code", code)
-      .eq("warehouse", wh)
-      .maybeSingle();
-
-    if (eOrig) throw eOrig;
-    if (!orig) return null;
-
-    const ins = orig as any;
-    const { data: created, error: eIns } = await supabase
-      .from("excel_live")
-      .insert({
-        code: ins.code,
-        warehouse: ins.warehouse,
-        qty_free: ins.qty_free ?? 0,
-        qty_blocked: ins.qty_blocked ?? 0,
-        qty_quality: ins.qty_quality ?? 0,
-        row_json: ins.row_json ?? {},
-      })
-      .select("code,warehouse,qty_free,qty_blocked,qty_quality,row_json")
-      .maybeSingle();
-
-    if (eIns) throw eIns;
-    return (created ?? null) as ExcelLiveRow | null;
+    return (live ?? null) as ExcelLiveRow | null;
   }
 
   async function getWarehouseFreeQty(code: string, wh: "PRM" | "REALE") {
@@ -1714,43 +1703,19 @@ function finalizeMaterialPickupSuccess() {
       .maybeSingle();
     if (liveErr) throw liveErr;
     if (live) {
-      const rowJson = ((live as any).row_json ?? {}) as Record<string, unknown>;
-      return Number.isFinite(Number((live as any).qty_free))
-        ? n((live as any).qty_free)
-        : n(rowJson["Qnt. a Mag. libero"] ?? 0);
+      return excelFreeQty(live);
     }
-
-    const { data: orig, error: origErr } = await supabase
-      .from("excel_original")
-      .select("qty_free,row_json")
-      .eq("code", code)
-      .eq("warehouse", wh)
-      .maybeSingle();
-    if (origErr) throw origErr;
-    if (!orig) return 0;
-
-    const rowJson = ((orig as any).row_json ?? {}) as Record<string, unknown>;
-    return Number.isFinite(Number((orig as any).qty_free))
-      ? n((orig as any).qty_free)
-      : n(rowJson["Qnt. a Mag. libero"] ?? 0);
+    return 0;
   }
 
   type ApplyDeltaResult = true | false | { needsRequest: true; code: string; warehouse: "PRM" | "REALE"; deltaFree: number };
 
   async function applyDeltaToExcelLive(code: string, wh: "PRM" | "REALE", deltaFree: number): Promise<ApplyDeltaResult> {
     let live = await getOrCreateExcelLiveRow(code, wh);
-    let targetWh = wh;
 
     if (!live) {
-      const otherWh: "PRM" | "REALE" = wh === "PRM" ? "REALE" : "PRM";
-      live = await getOrCreateExcelLiveRow(code, otherWh);
-      if (live) {
-        targetWh = otherWh;
-        console.warn(`Riga ${code} non trovata in ${wh}, applicato delta a ${otherWh} invece.`);
-      }
-    }
+      if (deltaFree < 0) return false;
 
-    if (!live) {
       const { data: created, error: eIns } = await supabase
         .from("excel_live")
         .insert({
@@ -1772,7 +1737,6 @@ function finalizeMaterialPickupSuccess() {
         return false;
       }
       live = created as ExcelLiveRow;
-      targetWh = wh;
     }
 
     const rowJson = { ...(live.row_json ?? {}) };
@@ -1790,7 +1754,7 @@ function finalizeMaterialPickupSuccess() {
         row_json: rowJson,
       })
       .eq("code", code)
-      .eq("warehouse", targetWh);
+      .eq("warehouse", wh);
 
     if (eUp) throw eUp;
     return true;
@@ -1816,8 +1780,8 @@ function finalizeMaterialPickupSuccess() {
       try {
         const livePRM = await getOrCreateExcelLiveRow(picked.code, "PRM");
         const liveREALE = await getOrCreateExcelLiveRow(picked.code, "REALE");
-        const prmFree = livePRM ? (Number.isFinite(Number(livePRM.qty_free)) ? n(livePRM.qty_free) : n((livePRM.row_json as any)?.["Qnt. a Mag. libero"] ?? 0)) : 0;
-        const realeFree = liveREALE ? (Number.isFinite(Number(liveREALE.qty_free)) ? n(liveREALE.qty_free) : n((liveREALE.row_json as any)?.["Qnt. a Mag. libero"] ?? 0)) : 0;
+        const prmFree = excelFreeQty(livePRM);
+        const realeFree = excelFreeQty(liveREALE);
         const totalAvailable = prmFree + realeFree;
         if (totalAvailable < qn) {
           return setMsg(`Quantità insufficiente. Disponibile: PRM ${prmFree} + REALE ${realeFree} = ${totalAvailable}, richiesta: ${qn}.`);
@@ -1912,9 +1876,7 @@ function finalizeMaterialPickupSuccess() {
         if (!live) {
           return setMsg(`Materiale ${picked.code} non trovato in ${warehouse}. Importa l'Excel prima.`);
         }
-        const rowJson = { ...(live.row_json ?? {}) };
-        const currentFromJson = n(rowJson["Qnt. a Mag. libero"]);
-        const currentFree = Number.isFinite(Number(live.qty_free)) ? n(live.qty_free) : currentFromJson;
+        const currentFree = excelFreeQty(live);
         if (currentFree < qn) {
           return setMsg(
             `Quantità insufficiente. Disponibile: ${currentFree}, richiesta: ${qn}.`
@@ -2092,6 +2054,15 @@ function finalizeMaterialPickupSuccess() {
     }
 
     toast.success("Movimento eliminato");
+    setHistory((prev) => prev.filter((row) => row.id !== id));
+    setSelectedIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    setClosingGroup((prev) => prev.filter((row) => row.id !== id));
+    setHistoryRows((prev) => prev.filter((row) => row.id !== id));
     if (closing?.id === id) {
       setCloseOpen(false);
       setClosing(null);
@@ -2099,7 +2070,6 @@ function finalizeMaterialPickupSuccess() {
       setEditRectify(false);
     }
 
-    await loadHistory();
     setDeleteConfirm(null);
   }
 
@@ -2154,7 +2124,7 @@ function finalizeMaterialPickupSuccess() {
     setMsg(`${ids.length} movimento/i eliminato/i.`);
     toast.success(`${ids.length} movimento/i eliminato/i`);
     setDeleteConfirm(null);
-    await loadHistory();
+    await loadHistory(true);
   }
 
   async function handleDeleteConfirm() {

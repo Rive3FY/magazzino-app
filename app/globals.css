@@ -2399,12 +2399,12 @@ html, body {
   animation: nfcPulse 1s ease-in-out infinite;
 }
 
-/* Stampa etichette - 70x30mm orizzontali per porta etichette adesive (3 colonne per A4) */
+/* Stampa etichette - 70x30mm orizzontali per porta etichette adesive */
 .etichette-print-grid {
   display: grid;
-  grid-template-columns: repeat(3, 70mm);
+  grid-template-columns: repeat(2, 70mm);
   gap: 2mm;
-  padding: 8mm;
+  padding: 0;
 }
 .etichetta-label {
   width: 70mm;
@@ -2485,15 +2485,15 @@ html, body {
   max-width: none;
 }
 .etichetta-qr {
-  width: 19mm;
-  min-width: 19mm;
+  width: 20mm;
+  min-width: 20mm;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .etichetta-qr svg {
-  width: 19mm !important;
-  height: 19mm !important;
+  width: 20mm !important;
+  height: 20mm !important;
   display: block;
 }
 .etichetta-qr-only {
@@ -2510,8 +2510,8 @@ html, body {
   height: 100%;
 }
 .etichetta-qr-only svg {
-  width: 24mm !important;
-  height: 24mm !important;
+  width: 26mm !important;
+  height: 26mm !important;
   display: block;
 }
 .etichette-preview-wrap {
@@ -2568,7 +2568,7 @@ html, body {
     position: static !important;
     left: auto !important;
     display: grid !important;
-    width: auto !important;
+    width: max-content !important;
     max-width: 210mm !important;
     min-height: 0 !important;
     height: auto !important;

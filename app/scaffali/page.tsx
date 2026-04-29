@@ -73,6 +73,16 @@ type ShelfRow = {
 };
 
 type ShelfEntry = { shelf: string; place: string; nfcTagId: string; barcode: string };
+type LiveRow = { code: string; row_json?: Record<string, unknown> | null };
+
+function getLiveItemName(row: LiveRow) {
+  return String(row.row_json?.["Descrizione Materiale"] ?? row.code).trim() || row.code;
+}
+
+function getLiveItemUm(row: LiveRow) {
+  const um = String(row.row_json?.["Unità di Misura"] ?? "").trim();
+  return um || null;
+}
 
 export default function ScaffaliPage() {
   const supabase = createClient();
@@ -131,6 +141,12 @@ export default function ScaffaliPage() {
       const { data: shelfData, error: eShelf } = await supabase.from("material_shelves").select("code,warehouse,shelf,place,nfc_tag_id,barcode");
       if (eShelf) throw eShelf;
 
+      const { data: liveData, error: eLive } = await supabase
+        .from("excel_live")
+        .select("code,row_json")
+        .order("code");
+      if (eLive) throw eLive;
+
       const shelfMap: Record<string, { PRM: ShelfEntry; REALE: ShelfEntry }> = {};
       for (const s of shelfData ?? []) {
         const row = s as ShelfRow;
@@ -143,7 +159,20 @@ export default function ScaffaliPage() {
         };
       }
 
-      setItems(itemsData ?? []);
+      const itemMap = new Map((itemsData ?? []).map((item) => [item.code, item]));
+      const liveItems = new Map<string, ItemRow>();
+      for (const rowRaw of liveData ?? []) {
+        const row = rowRaw as LiveRow;
+        if (!row.code || liveItems.has(row.code)) continue;
+        const item = itemMap.get(row.code);
+        liveItems.set(row.code, {
+          code: row.code,
+          name: item?.name ?? getLiveItemName(row),
+          um: item?.um ?? getLiveItemUm(row),
+        });
+      }
+
+      setItems(Array.from(liveItems.values()).sort((a, b) => a.code.localeCompare(b.code)));
       setShelves(shelfMap);
     } catch (e: any) {
       setMsg("Errore caricamento: " + (e?.message ?? String(e)));

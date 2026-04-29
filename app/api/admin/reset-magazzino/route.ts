@@ -12,6 +12,24 @@ function getSupabaseAdmin() {
   return createClient(url, serviceKey, { auth: { persistSession: false } });
 }
 
+function isSetupMissingError(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("could not find the table") ||
+    normalized.includes("schema cache") ||
+    normalized.includes("relation") && normalized.includes("does not exist") ||
+    normalized.includes("bucket not found")
+  );
+}
+
+function chunkArray<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
 export async function POST() {
   try {
     const serverSupabase = await createServerClient();
@@ -33,29 +51,55 @@ export async function POST() {
     const uuidOr = `id.eq.${nil},id.neq.${nil}`;
     const codeOr = "code.eq.,code.neq.";
 
+    const { data: backupRows, error: backupRowsError } = await admin
+      .from("import_file_backups")
+      .select("storage_path");
+    if (backupRowsError && !isSetupMissingError(backupRowsError.message)) {
+      return NextResponse.json({ error: backupRowsError.message }, { status: 500 });
+    }
+
+    const backupPaths = Array.from(
+      new Set(
+        (backupRows ?? [])
+          .map((row) => String((row as { storage_path?: unknown }).storage_path ?? "").trim())
+          .filter(Boolean)
+      )
+    );
+
     const tables: [string, string][] = [
       ["excel_live_requests", uuidOr],
       ["movements", uuidOr],
-      ["audit_log", uuidOr],
+      ["material_shelves", codeOr],
+      ["item_stocks", codeOr],
+      ["excel_live", codeOr],
+      ["excel_original", codeOr],
+      ["items", codeOr],
+      ["referents", uuidOr],
+      ["import_file_backups", uuidOr],
     ];
     for (const [table, filter] of tables) {
       const { error } = await delAll(table, filter);
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      if (error && !isSetupMissingError(error.message)) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
     }
 
-    const { error: errStocks } = await admin.from("item_stocks").delete().or(codeOr);
-    if (errStocks) return NextResponse.json({ error: errStocks.message }, { status: 500 });
+    const { error: errAudit } = await admin
+      .from("audit_log")
+      .delete()
+      .in("entity_type", ["material", "movement"]);
+    if (errAudit && !isSetupMissingError(errAudit.message)) {
+      return NextResponse.json({ error: errAudit.message }, { status: 500 });
+    }
 
-    const { error: errLive } = await admin.from("excel_live").delete().or(codeOr);
-    if (errLive) return NextResponse.json({ error: errLive.message }, { status: 500 });
+    for (const paths of chunkArray(backupPaths, 100)) {
+      const { error } = await admin.storage.from("import-backups").remove(paths);
+      if (error && !isSetupMissingError(error.message)) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+    }
 
-    const { error: errOrig } = await admin.from("excel_original").delete().or(codeOr);
-    if (errOrig) return NextResponse.json({ error: errOrig.message }, { status: 500 });
-
-    const { error: errItems } = await admin.from("items").delete().or(codeOr);
-    if (errItems) return NextResponse.json({ error: errItems.message }, { status: 500 });
-
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, deletedBackupFiles: backupPaths.length });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Errore sconosciuto";
     return NextResponse.json({ error: msg }, { status: 500 });

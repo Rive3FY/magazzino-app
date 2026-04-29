@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import JsBarcode from "jsbarcode";
+import { QRCodeSVG } from "qrcode.react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { createClient } from "../../_lib/supabase/client";
 import { useAuth } from "../../_lib/hooks/useAuth";
 import { useIsAdmin } from "../../_lib/hooks/useIsAdmin";
@@ -28,6 +30,8 @@ type Props = {
 type LabelAsset = EquipmentAssetRow & {
   barcode_value: string;
 };
+
+type PrintMode = "complete" | "qrOnly";
 
 const supabase = createClient();
 
@@ -77,7 +81,7 @@ function SpinnerIcon() {
   );
 }
 
-export default function EquipmentLabelsClient({ area, basePath }: Props) {
+export default function EquipmentLabelsClient({ area }: Props) {
   const { user } = useAuth();
   const access = useIsAdmin();
   const toast = useToast();
@@ -89,6 +93,7 @@ export default function EquipmentLabelsClient({ area, basePath }: Props) {
   const [msg, setMsg] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | EquipmentStatus>("ALL");
+  const [printMode, setPrintMode] = useState<PrintMode>("complete");
   const [selected, setSelected] = useState<Set<string> | null>(new Set());
   const [nfcAssociatingId, setNfcAssociatingId] = useState<string | null>(null);
   const [nfcTagReassign, setNfcTagReassign] = useState<NfcReassignState | null>(null);
@@ -301,6 +306,13 @@ export default function EquipmentLabelsClient({ area, basePath }: Props) {
 
     const labelsHtml = labels
       .map((row) => {
+        const qrHtml = renderToStaticMarkup(
+          <QRCodeSVG value={row.barcode_value} size={112} level="M" marginSize={2} />
+        );
+        if (printMode === "qrOnly") {
+          return `<div class="etichetta-label etichetta-qr-only"><div class="etichetta-qr-only-inner">${qrHtml}</div></div>`;
+        }
+
         const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
         tmp.appendChild(svg);
         try {
@@ -311,7 +323,7 @@ export default function EquipmentLabelsClient({ area, basePath }: Props) {
         const barcodeHtml = svg.outerHTML;
         tmp.removeChild(svg);
         const shelfLine = [row.shelf, row.place].filter(Boolean).join(" · ");
-        return `<div class="etichetta-label"><div class="etichetta-content"><div class="etichetta-text"><div class="etichetta-code">${esc(row.serial_number || row.asset_code)}</div><div class="etichetta-name">${esc(row.name)}</div><div class="etichetta-shelf">${esc(EQUIPMENT_AREA_LABELS[row.equipment_area])}</div>${shelfLine ? `<div class="etichetta-shelf">Scaffale: ${esc(shelfLine)}</div>` : ""}</div><div class="etichetta-barcode">${barcodeHtml}</div></div></div>`;
+        return `<div class="etichetta-label"><div class="etichetta-content etichetta-content-with-qr"><div class="etichetta-left"><div class="etichetta-text"><div class="etichetta-code">${esc(row.serial_number || row.asset_code)}</div><div class="etichetta-name">${esc(row.name)}</div><div class="etichetta-shelf">${esc(EQUIPMENT_AREA_LABELS[row.equipment_area])}</div>${shelfLine ? `<div class="etichetta-shelf">Scaffale: ${esc(shelfLine)}</div>` : ""}</div><div class="etichetta-barcode">${barcodeHtml}</div></div><div class="etichetta-qr">${qrHtml}</div></div></div>`;
       })
       .join("");
 
@@ -322,15 +334,22 @@ export default function EquipmentLabelsClient({ area, basePath }: Props) {
 @page{size:A4;margin:8mm}
 *{box-sizing:border-box}
 body{margin:0;padding:0;background:#fff}
-.etichette-print-grid{display:grid;grid-template-columns:repeat(3,70mm);gap:2mm;padding:8mm;width:max-content}
+.etichette-print-grid{display:grid;grid-template-columns:repeat(2,70mm);gap:2mm;padding:0;width:max-content}
 .etichetta-label{width:70mm;height:30mm;border:1px dashed #999;padding:2.5mm;break-inside:avoid;box-sizing:border-box}
 .etichetta-content{display:flex;flex-direction:column;height:100%;gap:1.5mm}
+.etichetta-content-with-qr{flex-direction:row;align-items:stretch;gap:2mm}
+.etichetta-left{display:flex;flex-direction:column;gap:1mm;min-width:0;flex:1}
 .etichetta-text{display:flex;flex-direction:column;gap:0.5mm;flex-shrink:0;min-width:0;width:100%;align-self:stretch}
 .etichetta-code{font-weight:800;font-size:10px;line-height:1.2;letter-spacing:-0.02em;word-break:break-all;flex-shrink:0}
 .etichetta-name{font-size:9px;color:#555;line-height:1.25;word-wrap:break-word;overflow-wrap:break-word;word-break:break-word;max-height:10mm;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
 .etichetta-shelf{font-size:9px;color:#444;line-height:1.2;flex-shrink:0}
-.etichetta-barcode{width:100%;max-height:14mm;overflow:hidden;margin-top:auto;flex-shrink:1;min-height:0;display:flex;align-items:flex-end}
+.etichetta-barcode{width:100%;max-height:11mm;overflow:hidden;margin-top:auto;flex-shrink:1;min-height:0;display:flex;align-items:flex-end}
 .etichetta-barcode svg{width:100%!important;height:auto!important;display:block;max-width:none}
+.etichetta-qr{width:20mm;min-width:20mm;display:flex;align-items:center;justify-content:center}
+.etichetta-qr svg{width:20mm!important;height:20mm!important;display:block}
+.etichetta-qr-only{display:flex;align-items:center;justify-content:center;padding:2mm}
+.etichetta-qr-only-inner{display:flex;align-items:center;justify-content:center;width:100%;height:100%}
+.etichetta-qr-only svg{width:26mm!important;height:26mm!important;display:block}
 </style>
 </head><body><div class="etichette-print-grid">${labelsHtml}</div></body></html>`;
   }
@@ -368,21 +387,33 @@ body{margin:0;padding:0;background:#fff}
     }
     const html = buildLabelsHtml();
     const iframe = document.createElement("iframe");
-    iframe.style.cssText = "position:absolute;width:0;height:0;border:0;visibility:hidden";
+    iframe.style.cssText = "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none";
     document.body.appendChild(iframe);
     const doc = iframe.contentWindow?.document;
     if (!doc) {
       iframe.remove();
       return;
     }
+
+    let printed = false;
+    const cleanup = () => {
+      setTimeout(() => iframe.remove(), 1000);
+    };
+
+    const printFrame = () => {
+      if (printed) return;
+      printed = true;
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    };
+
+    iframe.onload = printFrame;
+    iframe.contentWindow?.addEventListener("afterprint", cleanup, { once: true });
     doc.open();
     doc.write(html);
     doc.close();
-    iframe.contentWindow?.focus();
-    setTimeout(() => {
-      iframe.contentWindow?.print();
-      setTimeout(() => iframe.remove(), 100);
-    }, 300);
+    setTimeout(printFrame, 500);
+    setTimeout(cleanup, 60000);
   }
 
   const areaLabel = EQUIPMENT_AREA_LABELS[area];
@@ -445,6 +476,13 @@ body{margin:0;padding:0;background:#fff}
                 {EQUIPMENT_STATUS_OPTIONS.map((status) => (
                   <option key={status} value={status}>{EQUIPMENT_STATUS_LABELS[status]}</option>
                 ))}
+              </select>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <label className="label" htmlFor={`labels-print-mode-${area}`}>Stampa</label>
+              <select id={`labels-print-mode-${area}`} className="input" value={printMode} onChange={(e) => setPrintMode(e.target.value as PrintMode)}>
+                <option value="complete">Barcode + QR</option>
+                <option value="qrOnly">Solo QR</option>
               </select>
             </div>
           </div>
@@ -610,23 +648,54 @@ body{margin:0;padding:0;background:#fff}
         ) : (
           <div className="etichette-print-grid etichette-preview">
             {labels.map((row) => (
-              <div key={row.id} className="etichetta-label">
-                <div className="etichetta-content">
-                  <div className="etichetta-text">
-                    <div className="etichetta-code">{row.serial_number || row.asset_code}</div>
-                    <div className="etichetta-name">{row.name}</div>
-                    <div className="etichetta-shelf">{row.serial_number || "Nessun seriale"}</div>
-                    <div className="etichetta-shelf">{areaLabel}</div>
-                  </div>
-                  <div className="etichetta-barcode">
-                    <BarcodeSvg value={row.barcode_value} />
-                  </div>
-                </div>
-              </div>
+              <EquipmentLabelPreview key={row.id} row={row} areaLabel={areaLabel} printMode={printMode} />
             ))}
           </div>
         )}
       </div>
     </main>
+  );
+}
+
+function EquipmentLabelPreview({
+  row,
+  areaLabel,
+  printMode,
+}: {
+  row: LabelAsset;
+  areaLabel: string;
+  printMode: PrintMode;
+}) {
+  if (printMode === "qrOnly") {
+    return (
+      <div className="etichetta-label etichetta-qr-only">
+        <div className="etichetta-qr-only-inner">
+          <QRCodeSVG value={row.barcode_value} size={112} level="M" marginSize={2} />
+        </div>
+      </div>
+    );
+  }
+
+  const shelfLine = [row.shelf, row.place].filter(Boolean).join(" · ");
+
+  return (
+    <div className="etichetta-label">
+      <div className="etichetta-content etichetta-content-with-qr">
+        <div className="etichetta-left">
+          <div className="etichetta-text">
+            <div className="etichetta-code">{row.serial_number || row.asset_code}</div>
+            <div className="etichetta-name">{row.name}</div>
+            <div className="etichetta-shelf">{areaLabel}</div>
+            {shelfLine ? <div className="etichetta-shelf">Scaffale: {shelfLine}</div> : null}
+          </div>
+          <div className="etichetta-barcode">
+            <BarcodeSvg value={row.barcode_value} />
+          </div>
+        </div>
+        <div className="etichetta-qr">
+          <QRCodeSVG value={row.barcode_value} size={88} level="M" marginSize={2} />
+        </div>
+      </div>
+    </div>
   );
 }

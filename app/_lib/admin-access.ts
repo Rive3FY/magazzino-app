@@ -35,6 +35,13 @@ const EMPTY_ROLE_FLAGS: ProfileRoleFlags = {
   isEquipmentStazioniAdmin: false,
 };
 
+const ADMIN_ACCESS_CACHE_KEY = "magazzino-admin-access:v1";
+
+type CachedAdminAccess = {
+  userId: string;
+  flags: ProfileRoleFlags;
+};
+
 export function deriveAdminAccess(flags: Partial<ProfileRoleFlags> | null | undefined, scope?: RoleScope): AdminAccess {
   const normalized: ProfileRoleFlags = {
     approved: !!flags?.approved,
@@ -73,6 +80,54 @@ export function deriveAdminAccess(flags: Partial<ProfileRoleFlags> | null | unde
     canManageEquipmentStazioni,
     canManageScopeAdmins,
   };
+}
+
+export function readCachedAdminAccess(): CachedAdminAccess | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(ADMIN_ACCESS_CACHE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Partial<CachedAdminAccess>;
+    if (!parsed.userId || !parsed.flags) return null;
+
+    return {
+      userId: String(parsed.userId),
+      flags: {
+        approved: !!parsed.flags.approved,
+        legacyAdmin: !!parsed.flags.legacyAdmin,
+        isSuperAdmin: !!parsed.flags.isSuperAdmin,
+        isMaterialsAdmin: !!parsed.flags.isMaterialsAdmin,
+        isEquipmentLineeAdmin: !!parsed.flags.isEquipmentLineeAdmin,
+        isEquipmentStazioniAdmin: !!parsed.flags.isEquipmentStazioniAdmin,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function writeCachedAdminAccess(userId: string, flags: ProfileRoleFlags) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      ADMIN_ACCESS_CACHE_KEY,
+      JSON.stringify({
+        userId,
+        flags,
+      } satisfies CachedAdminAccess)
+    );
+  } catch {}
+}
+
+export function clearCachedAdminAccess() {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.removeItem(ADMIN_ACCESS_CACHE_KEY);
+  } catch {}
 }
 
 export async function loadOwnProfileRoleFlags(

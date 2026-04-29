@@ -2,67 +2,54 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "../../_lib/supabase/client";
-import { deriveAdminAccess, type AdminAccess } from "../admin-access";
+import {
+  clearCachedAdminAccess,
+  deriveAdminAccess,
+  loadOwnProfileRoleFlags,
+  readCachedAdminAccess,
+  writeCachedAdminAccess,
+  type AdminAccess,
+} from "../admin-access";
 
 export function useIsAdmin(): AdminAccess & { loading: boolean } {
-  const [access, setAccess] = useState(() => deriveAdminAccess(null));
-  const [loading, setLoading] = useState(true);
+  const [access, setAccess] = useState(() => {
+    const cached = readCachedAdminAccess();
+    return deriveAdminAccess(cached?.flags ?? null);
+  });
+  const [loading, setLoading] = useState(() => !readCachedAdminAccess());
 
   useEffect(() => {
     const supabase = createClient();
+    let alive = true;
 
     (async () => {
       const { data: u } = await supabase.auth.getUser();
       if (!u.user) {
+        clearCachedAdminAccess();
+        if (!alive) return;
         setAccess(deriveAdminAccess(null));
         setLoading(false);
         return;
       }
 
       try {
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("approved,is_admin,is_super_admin,is_materials_admin,is_equipment_linee_admin,is_equipment_stazioni_admin")
-          .eq("id", u.user.id)
-          .maybeSingle();
-
-        if (error) throw error;
-
-        setAccess(
-          deriveAdminAccess({
-            approved: !!data?.approved,
-            legacyAdmin: !!data?.is_admin,
-            isSuperAdmin: !!data?.is_super_admin || !!data?.is_admin,
-            isMaterialsAdmin: !!data?.is_materials_admin,
-            isEquipmentLineeAdmin: !!data?.is_equipment_linee_admin,
-            isEquipmentStazioniAdmin: !!data?.is_equipment_stazioni_admin,
-          })
-        );
+        const flags = await loadOwnProfileRoleFlags(supabase, u.user.id);
+        writeCachedAdminAccess(u.user.id, flags);
+        if (!alive) return;
+        setAccess(deriveAdminAccess(flags));
       } catch (error) {
-        try {
-          const { data, error: legacyError } = await supabase
-            .from("profiles")
-            .select("approved,is_admin")
-            .eq("id", u.user.id)
-            .maybeSingle();
-
-          if (legacyError) throw legacyError;
-
-          setAccess(
-            deriveAdminAccess({
-              approved: !!data?.approved,
-              legacyAdmin: !!data?.is_admin,
-              isSuperAdmin: !!data?.is_admin,
-            })
-          );
-        } catch (legacyReadError) {
-          console.error("load profile roles error:", error, legacyReadError);
-          setAccess(deriveAdminAccess(null));
-        }
+        console.error("load profile roles error:", error);
+        clearCachedAdminAccess();
+        if (!alive) return;
+        setAccess(deriveAdminAccess(null));
       }
 
-      setLoading(false);
+      if (alive) setLoading(false);
     })();
+
+    return () => {
+      alive = false;
+    };
   }, []);
 
   return { ...access, loading };

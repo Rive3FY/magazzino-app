@@ -9,6 +9,7 @@ import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 
 type ItemRow = { code: string; name: string; um: string | null };
 type ShelfRow = { code: string; warehouse: "PRM" | "REALE"; shelf: string; place?: string | null; barcode?: string | null };
+type LiveRow = { code: string; warehouse: "PRM" | "REALE"; qty_free: unknown; row_json?: Record<string, unknown> | null };
 
 type LabelItem = {
   code: string;
@@ -22,6 +23,27 @@ type LabelItem = {
 type PrintMode = "complete" | "qrOnly";
 
 const supabase = createClient();
+
+function n(value: unknown) {
+  const num = Number(value ?? 0);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function getLiveQty(row: LiveRow) {
+  if (row.qty_free !== null && row.qty_free !== undefined && row.qty_free !== "") {
+    return n(row.qty_free);
+  }
+  return n(row.row_json?.["Qnt. a Mag. libero"] ?? 0);
+}
+
+function getLiveItemName(row: LiveRow) {
+  return String(row.row_json?.["Descrizione Materiale"] ?? row.code).trim() || row.code;
+}
+
+function getLiveItemUm(row: LiveRow) {
+  const um = String(row.row_json?.["Unità di Misura"] ?? "").trim();
+  return um || null;
+}
 
 function BarcodeSvg({ value, options }: { value: string; options?: Record<string, unknown> }) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -74,8 +96,7 @@ export default function EtichettePage() {
 
       const { data: liveData, error: eLive } = await supabase
         .from("excel_live")
-        .select("code,warehouse,qty_free")
-        .gt("qty_free", 0);
+        .select("code,warehouse,qty_free,row_json");
 
       if (eLive) throw eLive;
 
@@ -91,13 +112,24 @@ export default function EtichettePage() {
       }
 
       const qtyMap: Record<string, Record<string, number>> = {};
+      const itemMap = new Map((itemsData ?? []).map((item) => [item.code, item]));
+      const liveItems = new Map<string, ItemRow>();
       for (const r of liveData ?? []) {
-        const row = r as { code: string; warehouse: string; qty_free: number };
+        const row = r as LiveRow;
+        if (!row.code) continue;
+        if (!liveItems.has(row.code)) {
+          const item = itemMap.get(row.code);
+          liveItems.set(row.code, {
+            code: row.code,
+            name: item?.name ?? getLiveItemName(row),
+            um: item?.um ?? getLiveItemUm(row),
+          });
+        }
         if (!qtyMap[row.code]) qtyMap[row.code] = {};
-        qtyMap[row.code][row.warehouse] = Number(row.qty_free ?? 0);
+        qtyMap[row.code][row.warehouse] = getLiveQty(row);
       }
 
-      setItems(itemsData ?? []);
+      setItems(Array.from(liveItems.values()).sort((a, b) => a.code.localeCompare(b.code)));
       setShelves(shelfMap);
       setQtyByCodeWh(qtyMap);
     } catch (e: unknown) {
@@ -206,7 +238,7 @@ export default function EtichettePage() {
     document.body.appendChild(tmp);
     const labelHtml = labels.map((l) => {
       const qrHtml = renderToStaticMarkup(
-        <QRCodeSVG value={l.barcodeValue} size={96} level="M" marginSize={0} />
+        <QRCodeSVG value={l.barcodeValue} size={112} level="M" marginSize={2} />
       );
       if (printMode === "qrOnly") {
         return `<div class="etichetta-label etichetta-qr-only"><div class="etichetta-qr-only-inner">${qrHtml}</div></div>`;
@@ -230,7 +262,7 @@ export default function EtichettePage() {
 @page{size:A4;margin:8mm}
 *{box-sizing:border-box}
 body{margin:0;padding:0;background:#fff}
-.etichette-print-grid{display:grid;grid-template-columns:repeat(3,70mm);gap:2mm;padding:8mm;width:max-content}
+.etichette-print-grid{display:grid;grid-template-columns:repeat(2,70mm);gap:2mm;padding:0;width:max-content}
 .etichetta-label{width:70mm;height:30mm;border:1px dashed #999;padding:2.5mm;break-inside:avoid;box-sizing:border-box}
 .etichetta-content{display:flex;flex-direction:column;height:100%;gap:1.5mm}
 .etichetta-content-with-qr{flex-direction:row;align-items:stretch;gap:2mm}
@@ -241,11 +273,11 @@ body{margin:0;padding:0;background:#fff}
 .etichetta-shelf{font-size:9px;color:#444;line-height:1.2;flex-shrink:0}
 .etichetta-barcode{width:100%;max-height:11mm;overflow:hidden;margin-top:auto;flex-shrink:1;min-height:0;display:flex;align-items:flex-end}
 .etichetta-barcode svg{width:100%!important;height:auto!important;display:block;max-width:none}
-.etichetta-qr{width:19mm;min-width:19mm;display:flex;align-items:center;justify-content:center}
-.etichetta-qr svg{width:19mm!important;height:19mm!important;display:block}
+.etichetta-qr{width:20mm;min-width:20mm;display:flex;align-items:center;justify-content:center}
+.etichetta-qr svg{width:20mm!important;height:20mm!important;display:block}
 .etichetta-qr-only{display:flex;align-items:center;justify-content:center;padding:2mm}
 .etichetta-qr-only-inner{display:flex;align-items:center;justify-content:center;width:100%;height:100%}
-.etichetta-qr-only svg{width:24mm!important;height:24mm!important;display:block}
+.etichetta-qr-only svg{width:26mm!important;height:26mm!important;display:block}
 </style>
 </head><body><div class="etichette-print-grid">${labelHtml}</div></body></html>`;
   }
@@ -266,21 +298,33 @@ body{margin:0;padding:0;background:#fff}
     if (labels.length === 0) return;
     const html = buildLabelsHtml();
     const iframe = document.createElement("iframe");
-    iframe.style.cssText = "position:absolute;width:0;height:0;border:0;visibility:hidden";
+    iframe.style.cssText = "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none";
     document.body.appendChild(iframe);
     const doc = iframe.contentWindow?.document;
     if (!doc) {
       iframe.remove();
       return;
     }
+
+    let printed = false;
+    const cleanup = () => {
+      setTimeout(() => iframe.remove(), 1000);
+    };
+
+    const printFrame = () => {
+      if (printed) return;
+      printed = true;
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    };
+
+    iframe.onload = printFrame;
+    iframe.contentWindow?.addEventListener("afterprint", cleanup, { once: true });
     doc.open();
     doc.write(html);
     doc.close();
-    iframe.contentWindow?.focus();
-    setTimeout(() => {
-      iframe.contentWindow?.print();
-      setTimeout(() => iframe.remove(), 100);
-    }, 300);
+    setTimeout(printFrame, 500);
+    setTimeout(cleanup, 60000);
   };
 
   if (adminLoading) return <div style={{ padding: 20 }}>Controllo permessi...</div>;
@@ -478,7 +522,7 @@ function LabelPreview({
     return (
       <div className="etichetta-label etichetta-qr-only">
         <div className="etichetta-qr-only-inner">
-          <QRCodeSVG value={label.barcodeValue} size={96} level="M" marginSize={0} />
+          <QRCodeSVG value={label.barcodeValue} size={112} level="M" marginSize={2} />
         </div>
       </div>
     );
@@ -502,7 +546,7 @@ function LabelPreview({
           </div>
         </div>
         <div className="etichetta-qr">
-          <QRCodeSVG value={label.barcodeValue} size={76} level="M" marginSize={0} />
+          <QRCodeSVG value={label.barcodeValue} size={88} level="M" marginSize={2} />
         </div>
       </div>
     </div>

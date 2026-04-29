@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "../_lib/supabase/client";
-import { deriveAdminAccess } from "../_lib/admin-access";
+import { clearCachedAdminAccess, deriveAdminAccess, writeCachedAdminAccess } from "../_lib/admin-access";
 
 export default function LoginPage() {
   const searchParams = useSearchParams();
@@ -54,6 +54,7 @@ export default function LoginPage() {
             isEquipmentStazioniAdmin: !!profile?.is_equipment_stazioni_admin,
           });
           if (access.approved || access.isAdmin) {
+            writeCachedAdminAccess(data.user.id, access);
             const target = redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/";
             window.location.href = target;
           } else {
@@ -76,6 +77,7 @@ export default function LoginPage() {
               isSuperAdmin: !!legacyProfile?.is_admin,
             });
             if (access.approved || access.isAdmin) {
+              writeCachedAdminAccess(data.user.id, access);
               const target = redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/";
               window.location.href = target;
             } else {
@@ -85,6 +87,7 @@ export default function LoginPage() {
           } catch {
             console.error("profiles read error:", e2);
             await supabase.auth.signOut();
+            clearCachedAdminAccess();
             if (!alive) return;
             setLoading(false);
             return;
@@ -159,6 +162,7 @@ export default function LoginPage() {
       } catch {
         console.error("profiles read error:", e2);
         await supabase.auth.signOut();
+        clearCachedAdminAccess();
         setMsg("Profilo non disponibile o permessi mancanti. Contatta l'admin.");
         setWorking(false);
         return;
@@ -167,11 +171,13 @@ export default function LoginPage() {
 
     if (!access.approved && !access.isAdmin) {
       await supabase.auth.signOut();
+      clearCachedAdminAccess();
       setMsg("Account creato ✅ ma non ancora approvato dall'admin.");
       setWorking(false);
       return;
     }
 
+    writeCachedAdminAccess(data.user.id, access);
     const target = redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/";
     window.location.href = target;
   }

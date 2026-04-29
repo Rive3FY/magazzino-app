@@ -388,7 +388,7 @@ export default function Home() {
       const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
       setMsg(
         isIOS
-          ? "NFC non disponibile su iPhone/iPad. Usa barcode o ricerca manuale."
+          ? "NFC non disponibile su iPhone/iPad. Usa Barcode / QR o ricerca manuale."
           : "NFC richiede Chrome su Android con HTTPS. Da mobile via IP usa npm run dev:https, poi accedi da https://TUO_IP:3000"
       );
       return;
@@ -541,7 +541,7 @@ export default function Home() {
             <div>
               <div style={{ fontWeight: 900, fontSize: 16 }}> Controllo veloce materiale</div>
               <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
-                Cerca per codice/descrizione o scansiona. Vedi giacenze PRM/REALE, dove si trova e lo scaffale.
+                Cerca per codice/descrizione o scansiona Barcode / QR. Vedi giacenze PRM/REALE, dove si trova e lo scaffale.
               </div>
             </div>
 
@@ -565,7 +565,7 @@ export default function Home() {
                 style={{ display: "flex", alignItems: "center", gap: 6 }}
               >
                 <BarcodeIcon />
-                {scanning ? "Chiudi camera" : "Barcode"}
+                {scanning ? "Chiudi camera" : "Barcode / QR"}
               </button>
               <button
                 type="button"
@@ -682,6 +682,8 @@ export default function Home() {
             videoRef={videoRef}
             icon={<SpinnerIcon />}
             onClose={scanning ? stopScan : stopNfcScan}
+            barcodeTitle="Scanner Barcode / QR"
+            barcodeHint="Inquadra il barcode o il QR code"
           />
 
           {msg && <div style={{ marginTop: 10, fontWeight: 800 }}>{msg}</div>}

@@ -1,7 +1,7 @@
 "use client";
 
 import * as XLSX from "xlsx";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import { useToast } from "../_lib/ToastContext";
@@ -27,7 +27,9 @@ type BackupFilesResponse = {
   message?: string;
 };
 
-function cleanCell(v: any) {
+const supabase = createClient();
+
+function cleanCell(v: unknown) {
   if (v === null || v === undefined) return "";
   if (typeof v === "number") return v;
   return String(v).trim();
@@ -47,22 +49,63 @@ function formatBytes(value: number | null | undefined) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function ImportPage() {
-  const supabase = createClient();
+function normalizeExcelHeader(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\u00a0/g, " ")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
 
+function getExcelCell(row: Record<string, unknown>, aliases: string[]) {
+  for (const alias of aliases) {
+    if (Object.prototype.hasOwnProperty.call(row, alias)) return row[alias];
+  }
+
+  const normalizedAliases = new Set(aliases.map(normalizeExcelHeader));
+  for (const [key, value] of Object.entries(row)) {
+    if (normalizedAliases.has(normalizeExcelHeader(key))) return value;
+  }
+
+  return "";
+}
+
+function getExcelNumber(row: Record<string, unknown>, aliases: string[]) {
+  return toNumberLoose(getExcelCell(row, aliases));
+}
+
+const QTY_FREE_ALIASES = [
+  "Qnt. a Mag. libero",
+  "Qnt. a Mag. Libero",
+  "Qnt a Mag libero",
+  "Qta a Mag libero",
+  "Quantità disponibile",
+  "Quantita disponibile",
+  "Qnt. disponibile",
+  "Disponibile",
+  "Libero",
+];
+
+const QTY_BLOCKED_ALIASES = ["Qnt. a Mag. bloccato", "Qnt a Mag bloccato", "Quantità bloccata", "Quantita bloccata", "Bloccato"];
+const QTY_QUALITY_ALIASES = ["Controllo Qualità Magazzino", "Controllo Qualita Magazzino", "Qualità", "Qualita"];
+
+export default function ImportPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loadedCounts, setLoadedCounts] = useState<LoadedCounts>(null);
   const [backupFiles, setBackupFiles] = useState<BackupFileRow[]>([]);
   const [backupsLoading, setBackupsLoading] = useState(false);
   const [backupSetupMsg, setBackupSetupMsg] = useState<string | null>(null);
+  const [deletingBackupId, setDeletingBackupId] = useState<string | null>(null);
   const [prmUnlocked, setPrmUnlocked] = useState(false);
   const [realeUnlocked, setRealeUnlocked] = useState(false);
 
   const { canManageMaterials: isAdmin, loading: checking } = useIsAdmin();
   const toast = useToast();
 
-  async function loadCounts() {
+  const loadCounts = useCallback(async () => {
     try {
       const { count: prm } = await supabase.from("excel_live").select("*", { count: "exact", head: true }).eq("warehouse", "PRM");
       const { count: reale } = await supabase.from("excel_live").select("*", { count: "exact", head: true }).eq("warehouse", "REALE");
@@ -70,16 +113,9 @@ export default function ImportPage() {
     } catch {
       setLoadedCounts({ PRM: 0, REALE: 0 });
     }
-  }
+  }, []);
 
-  useEffect(() => {
-    if (isAdmin) {
-      void loadCounts();
-      void loadBackupFiles();
-    }
-  }, [isAdmin]);
-
-  async function loadBackupFiles() {
+  const loadBackupFiles = useCallback(async () => {
     setBackupsLoading(true);
     try {
       const response = await fetch("/api/import-backups", { cache: "no-store" });
@@ -101,7 +137,14 @@ export default function ImportPage() {
     } finally {
       setBackupsLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    if (isAdmin) {
+      void loadCounts();
+      void loadBackupFiles();
+    }
+  }, [isAdmin, loadCounts, loadBackupFiles]);
 
   async function backupImportedFile(file: File, warehouseKind: WarehouseKind, rowCount: number) {
     const formData = new FormData();
@@ -122,6 +165,31 @@ export default function ImportPage() {
     await loadBackupFiles();
   }
 
+  async function deleteBackupFile(row: BackupFileRow) {
+    const ok = window.confirm(`Eliminare il backup "${row.original_filename}"?\n\nIl file verrà rimosso anche dall'archivio storage.`);
+    if (!ok) return;
+
+    setDeletingBackupId(row.id);
+    try {
+      const response = await fetch(`/api/import-backups?id=${encodeURIComponent(row.id)}`, {
+        method: "DELETE",
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string; warning?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Errore eliminazione backup");
+      }
+
+      setBackupFiles((prev) => prev.filter((item) => item.id !== row.id));
+      toast.success(payload.warning || "Backup eliminato");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Errore eliminazione backup";
+      setMsg(message);
+    } finally {
+      setDeletingBackupId(null);
+    }
+  }
+
   async function importExcel(file: File, warehouseKind: WarehouseKind) {
     setMsg(null);
     setBusy(true);
@@ -131,12 +199,12 @@ export default function ImportPage() {
       const wb = XLSX.read(buf, { type: "array" });
       const sheet = wb.Sheets[wb.SheetNames[0]];
 
-      const rows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, {
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
         defval: "",
       });
 
       // 1) Upsert anagrafica items (se ti serve)
-      const itemsMap = new Map<string, any>();
+      const itemsMap = new Map<string, { code: string; name: string; um: string | null }>();
 
       for (const r of rows) {
         const code = String(r["Materiale"] ?? "").trim();
@@ -180,7 +248,7 @@ export default function ImportPage() {
         qty_free: number;
         qty_blocked: number;
         qty_quality: number;
-        row_json: Record<string, any>;
+        row_json: Record<string, unknown>;
       };
 
       const map = new Map<string, ExcelRowPayload>();
@@ -193,12 +261,12 @@ export default function ImportPage() {
 
         const key = `${code}_${warehouseKind}`;
 
-        // Quantità: prova entrambe le varianti (libero/Libero)
-        const qtyFree = toNumberLoose(r["Qnt. a Mag. libero"] ?? r["Qnt. a Mag. Libero"]);
-        const qtyBlocked = toNumberLoose(r["Qnt. a Mag. bloccato"]);
-        const qtyQuality = toNumberLoose(r["Controllo Qualità Magazzino"]);
+        // Quantità: lettura robusta delle intestazioni (maiuscole, spazi, accenti, varianti PRM/REALE).
+        const qtyFree = getExcelNumber(r, QTY_FREE_ALIASES);
+        const qtyBlocked = getExcelNumber(r, QTY_BLOCKED_ALIASES);
+        const qtyQuality = getExcelNumber(r, QTY_QUALITY_ALIASES);
 
-        const excelJson: Record<string, any> = {};
+        const excelJson: Record<string, unknown> = {};
         for (const k of Object.keys(r)) {
           excelJson[k] = cleanCell(r[k]);
         }
@@ -206,6 +274,10 @@ export default function ImportPage() {
         // Normalizziamo sempre questi campi nel JSON
         excelJson["Materiale"] = code;
         excelJson["Descrizione Materiale"] = name;
+        excelJson["Magazzino"] = warehouseKind;
+        excelJson["Qnt. a Mag. libero"] = qtyFree;
+        excelJson["Qnt. a Mag. bloccato"] = qtyBlocked;
+        excelJson["Controllo Qualità Magazzino"] = qtyQuality;
 
         map.set(key, {
           code,
@@ -272,8 +344,8 @@ export default function ImportPage() {
       setMsg(`Import ${warehouseKind} completato ✅ (${payload.length} materiali)${backupMsg}`);
       toast.success(`Import ${warehouseKind} completato (${payload.length} materiali)`);
       await loadCounts();
-    } catch (e: any) {
-      setMsg("Errore import: " + (e?.message ?? String(e)));
+    } catch (e: unknown) {
+      setMsg("Errore import: " + (e instanceof Error ? e.message : String(e)));
     } finally {
       setBusy(false);
     }
@@ -437,7 +509,7 @@ export default function ImportPage() {
                   <th>Righe</th>
                   <th>Dimensione</th>
                   <th>Caricato da</th>
-                  <th>Download</th>
+                  <th>Azioni</th>
                 </tr>
               </thead>
               <tbody>
@@ -450,16 +522,31 @@ export default function ImportPage() {
                     <td>{formatBytes(row.file_size)}</td>
                     <td>{row.uploaded_by_email ?? "-"}</td>
                     <td>
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={() => {
-                          window.location.href = `/api/import-backups/download?id=${encodeURIComponent(row.id)}`;
-                          toast.success("Download avviato");
-                        }}
-                      >
-                        Scarica
-                      </button>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() => {
+                            window.location.href = `/api/import-backups/download?id=${encodeURIComponent(row.id)}`;
+                            toast.success("Download avviato");
+                          }}
+                        >
+                          Scarica
+                        </button>
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={deletingBackupId === row.id}
+                          onClick={() => void deleteBackupFile(row)}
+                          style={{
+                            borderColor: "rgba(239,68,68,0.5)",
+                            background: "rgba(239,68,68,0.1)",
+                            color: "#991b1b",
+                          }}
+                        >
+                          {deletingBackupId === row.id ? "Eliminazione..." : "Elimina"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

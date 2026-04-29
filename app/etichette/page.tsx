@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import JsBarcode from "jsbarcode";
+import { QRCodeSVG } from "qrcode.react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { createClient } from "../_lib/supabase/client";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 
@@ -16,6 +18,10 @@ type LabelItem = {
   place: string;
   barcodeValue: string;
 };
+
+type PrintMode = "complete" | "qrOnly";
+
+const supabase = createClient();
 
 function BarcodeSvg({ value, options }: { value: string; options?: Record<string, unknown> }) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -41,7 +47,6 @@ function BarcodeSvg({ value, options }: { value: string; options?: Record<string
 }
 
 export default function EtichettePage() {
-  const supabase = createClient();
   const { canManageMaterials: isAdmin, loading: adminLoading } = useIsAdmin();
 
   const [items, setItems] = useState<ItemRow[]>([]);
@@ -51,12 +56,13 @@ export default function EtichettePage() {
   const [warehouseFilter, setWarehouseFilter] = useState<"PRM" | "REALE" | "both">("both");
   const [onlyWithShelf, setOnlyWithShelf] = useState(false);
   const [labelType, setLabelType] = useState<"materiale" | "scaffale">("scaffale");
+  const [printMode, setPrintMode] = useState<PrintMode>("complete");
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<Set<string> | null>(new Set());
   const [msg, setMsg] = useState<string | null>(null);
   const headerCheckRef = useRef<HTMLInputElement>(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setMsg(null);
     try {
@@ -94,16 +100,26 @@ export default function EtichettePage() {
       setItems(itemsData ?? []);
       setShelves(shelfMap);
       setQtyByCodeWh(qtyMap);
-    } catch (e: any) {
-      setMsg("Errore caricamento: " + (e?.message ?? String(e)));
+    } catch (e: unknown) {
+      setMsg("Errore caricamento: " + (e instanceof Error ? e.message : String(e)));
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     if (isAdmin) void load();
-  }, [isAdmin]);
+  }, [isAdmin, load]);
+
+  function hasAssignedShelf(entry: { shelf: string; place: string; barcode: string } | undefined) {
+    return !!entry && (!!entry.shelf || !!entry.place);
+  }
+
+  function canPrintWarehouseLabel(code: string, warehouse: "PRM" | "REALE") {
+    const entry = shelves[code]?.[warehouse];
+    const hasQty = (qtyByCodeWh[code]?.[warehouse] ?? 0) > 0;
+    return hasQty || hasAssignedShelf(entry);
+  }
 
   const filtered = items.filter((it) => {
     const match = !q.trim() || it.code.toLowerCase().includes(q.toLowerCase()) || (it.name ?? "").toLowerCase().includes(q.toLowerCase());
@@ -111,29 +127,22 @@ export default function EtichettePage() {
     if (warehouseFilter === "both") {
       const prm = shelves[it.code]?.PRM;
       const reale = shelves[it.code]?.REALE;
-      const prmQty = (qtyByCodeWh[it.code]?.PRM ?? 0) > 0;
-      const realeQty = (qtyByCodeWh[it.code]?.REALE ?? 0) > 0;
-      if (!prmQty && !realeQty) return false;
       if (onlyWithShelf) {
-        const hasPrm = prm && (prm.shelf || prm.place) && prmQty;
-        const hasReale = reale && (reale.shelf || reale.place) && realeQty;
-        return hasPrm || hasReale;
+        return hasAssignedShelf(prm) || hasAssignedShelf(reale);
       }
-      return true;
+      return canPrintWarehouseLabel(it.code, "PRM") || canPrintWarehouseLabel(it.code, "REALE");
     }
     const entry = shelves[it.code]?.[warehouseFilter];
-    const hasQty = (qtyByCodeWh[it.code]?.[warehouseFilter] ?? 0) > 0;
-    if (!hasQty) return false;
-    if (onlyWithShelf && (!entry || (!entry.shelf && !entry.place))) return false;
-    return true;
+    if (onlyWithShelf) return hasAssignedShelf(entry);
+    return canPrintWarehouseLabel(it.code, warehouseFilter);
   });
 
   const whs: Array<"PRM" | "REALE"> = warehouseFilter === "both" ? ["PRM", "REALE"] : [warehouseFilter];
   const selectableCount = filtered.reduce((acc, it) => {
     let n = 0;
     for (const wh of whs) {
-      if ((qtyByCodeWh[it.code]?.[wh] ?? 0) <= 0) continue;
       const entry = shelves[it.code]?.[wh] ?? { shelf: "", place: "", barcode: "" };
+      if (!canPrintWarehouseLabel(it.code, wh)) continue;
       if (onlyWithShelf && !entry.shelf && !entry.place) continue;
       n++;
     }
@@ -145,8 +154,8 @@ export default function EtichettePage() {
     const prm = shelves[it.code]?.PRM ?? { shelf: "", place: "", barcode: "" };
     const reale = shelves[it.code]?.REALE ?? { shelf: "", place: "", barcode: "" };
     for (const wh of whs) {
-      if ((qtyByCodeWh[it.code]?.[wh] ?? 0) <= 0) continue;
       const entry = wh === "PRM" ? prm : reale;
+      if (!canPrintWarehouseLabel(it.code, wh)) continue;
       if (onlyWithShelf && !entry.shelf && !entry.place) continue;
       if (selected !== null && !selected.has(`${it.code}:${wh}`)) continue;
       labels.push({
@@ -166,8 +175,8 @@ export default function EtichettePage() {
       const allKeys = new Set<string>();
       for (const it of filtered) {
         for (const w of whs) {
-          if ((qtyByCodeWh[it.code]?.[w] ?? 0) <= 0) continue;
           const entry = shelves[it.code]?.[w] ?? { shelf: "", place: "", barcode: "" };
+          if (!canPrintWarehouseLabel(it.code, w)) continue;
           if (onlyWithShelf && !entry.shelf && !entry.place) continue;
           allKeys.add(`${it.code}:${w}`);
         }
@@ -196,6 +205,13 @@ export default function EtichettePage() {
     tmp.style.cssText = "position:absolute;left:-9999px;top:0;visibility:hidden";
     document.body.appendChild(tmp);
     const labelHtml = labels.map((l) => {
+      const qrHtml = renderToStaticMarkup(
+        <QRCodeSVG value={l.barcodeValue} size={96} level="M" marginSize={0} />
+      );
+      if (printMode === "qrOnly") {
+        return `<div class="etichetta-label etichetta-qr-only"><div class="etichetta-qr-only-inner">${qrHtml}</div></div>`;
+      }
+
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       tmp.appendChild(svg);
       try {
@@ -206,7 +222,7 @@ export default function EtichettePage() {
       const bcHtml = svg.outerHTML;
       tmp.removeChild(svg);
       const shelfLine = labelType === "scaffale" ? `<div class="etichetta-shelf"><b>${esc(l.warehouse)}</b> · ${esc(l.shelf)}${l.place ? ` · ${esc(l.place)}` : ""}</div>` : "";
-      return `<div class="etichetta-label"><div class="etichetta-content"><div class="etichetta-text"><div class="etichetta-code">${esc(l.code)}</div><div class="etichetta-name">${esc(l.name)}</div>${shelfLine}</div><div class="etichetta-barcode">${bcHtml}</div></div></div>`;
+      return `<div class="etichetta-label"><div class="etichetta-content etichetta-content-with-qr"><div class="etichetta-left"><div class="etichetta-text"><div class="etichetta-code">${esc(l.code)}</div><div class="etichetta-name">${esc(l.name)}</div>${shelfLine}</div><div class="etichetta-barcode">${bcHtml}</div></div><div class="etichetta-qr">${qrHtml}</div></div></div>`;
     }).join("");
     tmp.remove();
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etichette</title>
@@ -217,12 +233,19 @@ body{margin:0;padding:0;background:#fff}
 .etichette-print-grid{display:grid;grid-template-columns:repeat(3,70mm);gap:2mm;padding:8mm;width:max-content}
 .etichetta-label{width:70mm;height:30mm;border:1px dashed #999;padding:2.5mm;break-inside:avoid;box-sizing:border-box}
 .etichetta-content{display:flex;flex-direction:column;height:100%;gap:1.5mm}
+.etichetta-content-with-qr{flex-direction:row;align-items:stretch;gap:2mm}
+.etichetta-left{display:flex;flex-direction:column;gap:1mm;min-width:0;flex:1}
 .etichetta-text{display:flex;flex-direction:column;gap:0.5mm;flex-shrink:0;min-width:0;width:100%;align-self:stretch}
 .etichetta-code{font-weight:800;font-size:10px;line-height:1.2;letter-spacing:-0.02em;word-break:break-all;flex-shrink:0}
 .etichetta-name{font-size:9px;color:#555;line-height:1.25;word-wrap:break-word;overflow-wrap:break-word;word-break:break-word;max-height:10mm;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
 .etichetta-shelf{font-size:9px;color:#444;line-height:1.2;flex-shrink:0}
-.etichetta-barcode{width:100%;max-height:14mm;overflow:hidden;margin-top:auto;flex-shrink:1;min-height:0;display:flex;align-items:flex-end}
+.etichetta-barcode{width:100%;max-height:11mm;overflow:hidden;margin-top:auto;flex-shrink:1;min-height:0;display:flex;align-items:flex-end}
 .etichetta-barcode svg{width:100%!important;height:auto!important;display:block;max-width:none}
+.etichetta-qr{width:19mm;min-width:19mm;display:flex;align-items:center;justify-content:center}
+.etichetta-qr svg{width:19mm!important;height:19mm!important;display:block}
+.etichetta-qr-only{display:flex;align-items:center;justify-content:center;padding:2mm}
+.etichetta-qr-only-inner{display:flex;align-items:center;justify-content:center;width:100%;height:100%}
+.etichetta-qr-only svg{width:24mm!important;height:24mm!important;display:block}
 </style>
 </head><body><div class="etichette-print-grid">${labelHtml}</div></body></html>`;
   }
@@ -271,7 +294,7 @@ body{margin:0;padding:0;background:#fff}
 
       <div className="card" style={{ padding: 12, margin: 12 }}>
         <div style={{ fontSize: 13, color: "#64748b", marginBottom: 16 }}>
-          Genera etichette con barcode per materiali e scaffali. Vengono mostrati solo i materiali con giacenza disponibile (qty &gt; 0). <b>Scarica anteprima</b> per salvare un file HTML da aprire e stampare (Ctrl+P).
+          Genera etichette con barcode e QR code per materiali e scaffali. Puoi anche stampare solo i QR senza descrizione.
         </div>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 16 }}>
@@ -288,7 +311,7 @@ body{margin:0;padding:0;background:#fff}
           </div>
           <div>
             <label className="label" style={{ fontSize: 12 }}>Magazzino</label>
-            <select className="input" value={warehouseFilter} onChange={(e) => setWarehouseFilter(e.target.value as any)} style={{ width: 120 }}>
+            <select className="input" value={warehouseFilter} onChange={(e) => setWarehouseFilter(e.target.value as "PRM" | "REALE" | "both")} style={{ width: 120 }}>
               <option value="both">Entrambi</option>
               <option value="PRM">PRM</option>
               <option value="REALE">REALE</option>
@@ -302,9 +325,16 @@ body{margin:0;padding:0;background:#fff}
           </div>
           <div>
             <label className="label" style={{ fontSize: 12 }}>Tipo etichetta</label>
-            <select className="input" value={labelType} onChange={(e) => setLabelType(e.target.value as any)} style={{ width: 140 }}>
-              <option value="materiale">Materiale (codice + barcode)</option>
-              <option value="scaffale">Scaffale (codice + scaffale + barcode)</option>
+            <select className="input" value={labelType} onChange={(e) => setLabelType(e.target.value as "materiale" | "scaffale")} style={{ width: 140 }}>
+              <option value="materiale">Materiale (codice + Barcode / QR)</option>
+              <option value="scaffale">Scaffale (codice + scaffale + Barcode / QR)</option>
+            </select>
+          </div>
+          <div>
+            <label className="label" style={{ fontSize: 12 }}>Stampa</label>
+            <select className="input" value={printMode} onChange={(e) => setPrintMode(e.target.value as PrintMode)} style={{ width: 150 }}>
+              <option value="complete">Barcode + QR</option>
+              <option value="qrOnly">Solo QR</option>
             </select>
           </div>
         </div>
@@ -313,6 +343,7 @@ body{margin:0;padding:0;background:#fff}
           <div style={{ padding: 24, textAlign: "center", color: "#64748b" }}>Caricamento...</div>
         ) : (
           <>
+            {msg && <div className="equipmentInlineMessage" style={{ marginBottom: 10 }}>{msg}</div>}
             <div style={{ marginBottom: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <button type="button" className="btn btnPrimary" onClick={selectAll}>
                 Seleziona tutti ({selectableCount})
@@ -351,8 +382,8 @@ body{margin:0;padding:0;background:#fff}
                   {filtered.map((it) => {
                     const whsRow: Array<"PRM" | "REALE"> = warehouseFilter === "both" ? ["PRM", "REALE"] : [warehouseFilter];
                     return whsRow.map((wh) => {
-                      if ((qtyByCodeWh[it.code]?.[wh] ?? 0) <= 0) return null;
                       const entry = shelves[it.code]?.[wh] ?? { shelf: "", place: "", barcode: "" };
+                      if (!canPrintWarehouseLabel(it.code, wh)) return null;
                       if (onlyWithShelf && !entry.shelf && !entry.place) return null;
                       const key = `${it.code}:${wh}`;
                       const sel = selected === null || selected.has(key);
@@ -413,22 +444,7 @@ body{margin:0;padding:0;background:#fff}
                 <div className="etichette-preview-wrap" style={{ marginTop: 8 }}>
                   <div className="etichette-print-grid etichette-preview">
                     {labels.map((l, i) => (
-                      <div key={i} className="etichetta-label">
-                        <div className="etichetta-content">
-                          <div className="etichetta-text">
-                            <div className="etichetta-code">{l.code}</div>
-                            <div className="etichetta-name">{l.name}</div>
-                            {labelType === "scaffale" && (
-                              <div className="etichetta-shelf">
-                                <b>{l.warehouse}</b> · {l.shelf}{l.place ? ` · ${l.place}` : ""}
-                              </div>
-                            )}
-                          </div>
-                          <div className="etichetta-barcode">
-                            <BarcodeSvg value={l.barcodeValue} />
-                          </div>
-                        </div>
-                      </div>
+                      <LabelPreview key={i} label={l} labelType={labelType} printMode={printMode} />
                     ))}
                   </div>
                 </div>
@@ -441,25 +457,54 @@ body{margin:0;padding:0;background:#fff}
       {/* Area stampa: usata per anteprima; la stampa genera il contenuto al volo */}
       <div className="print-area etichette-print-grid">
         {labels.map((l, i) => (
-          <div key={i} className="etichetta-label">
-            <div className="etichetta-content">
-              <div className="etichetta-text">
-                <div className="etichetta-code">{l.code}</div>
-                <div className="etichetta-name">{l.name}</div>
-                {labelType === "scaffale" && (
-                  <div className="etichetta-shelf">
-                    <b>{l.warehouse}</b> · {l.shelf}{l.place ? ` · ${l.place}` : ""}
-                  </div>
-                )}
-              </div>
-              <div className="etichetta-barcode">
-                <BarcodeSvg value={l.barcodeValue} />
-              </div>
-            </div>
-          </div>
+          <LabelPreview key={i} label={l} labelType={labelType} printMode={printMode} />
         ))}
       </div>
 
     </main>
+  );
+}
+
+function LabelPreview({
+  label,
+  labelType,
+  printMode,
+}: {
+  label: LabelItem;
+  labelType: "materiale" | "scaffale";
+  printMode: PrintMode;
+}) {
+  if (printMode === "qrOnly") {
+    return (
+      <div className="etichetta-label etichetta-qr-only">
+        <div className="etichetta-qr-only-inner">
+          <QRCodeSVG value={label.barcodeValue} size={96} level="M" marginSize={0} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="etichetta-label">
+      <div className="etichetta-content etichetta-content-with-qr">
+        <div className="etichetta-left">
+          <div className="etichetta-text">
+            <div className="etichetta-code">{label.code}</div>
+            <div className="etichetta-name">{label.name}</div>
+            {labelType === "scaffale" && (
+              <div className="etichetta-shelf">
+                <b>{label.warehouse}</b> · {label.shelf}{label.place ? ` · ${label.place}` : ""}
+              </div>
+            )}
+          </div>
+          <div className="etichetta-barcode">
+            <BarcodeSvg value={label.barcodeValue} />
+          </div>
+        </div>
+        <div className="etichetta-qr">
+          <QRCodeSVG value={label.barcodeValue} size={76} level="M" marginSize={0} />
+        </div>
+      </div>
+    </div>
   );
 }

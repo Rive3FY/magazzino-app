@@ -1231,7 +1231,7 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
       const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
       setMsg(
         isIOS
-          ? "NFC non disponibile su iPhone/iPad. Usa barcode o manuale."
+          ? "NFC non disponibile su iPhone/iPad. Usa Barcode / QR o manuale."
           : "NFC richiede Chrome su Android con HTTPS. Da mobile via IP usa npm run dev:https, poi accedi da https://TUO_IP:3000"
       );
       return;
@@ -3340,7 +3340,7 @@ function finalizeMaterialPickupSuccess() {
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
                   <button className="btn" type="button" onClick={() => (scanning ? stopScan() : startScan())} disabled={cartNfcScanning} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <BarcodeIcon />
-                    Barcode
+                    Barcode / QR
                   </button>
                   <button className="btn" type="button" onClick={startNfcScan} disabled={scanning || cartNfcScanning} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     {cartNfcScanning ? <SpinnerIcon /> : <NfcIcon />}
@@ -4960,10 +4960,10 @@ function finalizeMaterialPickupSuccess() {
     >
       {scanning ? (
         <>
-          <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner barcode</div>
+          <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner Barcode / QR</div>
           <div style={{ padding: 12, background: "#0f172a", borderRadius: 12, marginBottom: 12 }}>
             <video ref={videoRef} style={{ width: "100%", maxWidth: 360, borderRadius: 8 }} muted playsInline />
-            <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il codice a barre</div>
+            <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il barcode o il QR code</div>
           </div>
           <button type="button" className="btn" onClick={() => { stopScan(); setScanInfo(null); if (cart.length > 0) setCartOpen(true); }}>
             Fine
@@ -5102,7 +5102,7 @@ function finalizeMaterialPickupSuccess() {
 
       <div style={{ marginTop: 10, marginBottom: 12, padding: 12, background: "#f8fafc", borderRadius: 10, border: "1px solid #e2e8f0" }}>
         <div style={{ fontWeight: 800, marginBottom: 4, fontSize: 13 }}>Aggiungi materiali</div>
-        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>Puoi aggiungere più materiali usando barcode, NFC o inserimento manuale.</div>
+        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>Puoi aggiungere più materiali usando Barcode / QR, NFC o inserimento manuale.</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
           <button
             type="button"
@@ -5112,7 +5112,7 @@ function finalizeMaterialPickupSuccess() {
             style={{ display: "flex", alignItems: "center", gap: 6 }}
           >
             <BarcodeIcon />
-            Barcode
+            Barcode / QR
           </button>
           <button
             type="button"

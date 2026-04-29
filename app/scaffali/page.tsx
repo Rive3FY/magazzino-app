@@ -235,7 +235,7 @@ export default function ScaffaliPage() {
     if (!isNfcSupported) {
       setMsg(
         isIOS
-          ? "NFC non disponibile su iPhone/iPad. Safari non supporta la scansione NFC. Usa la ricerca per barcode."
+          ? "NFC non disponibile su iPhone/iPad. Safari non supporta la scansione NFC. Usa la ricerca per Barcode / QR."
           : "NFC richiede Chrome su Android con HTTPS. Da mobile via IP usa npm run dev:https, poi accedi da https://TUO_IP:3000"
       );
       return;
@@ -514,7 +514,7 @@ export default function ScaffaliPage() {
         <div style={{ marginBottom: 12, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
           <div>
             <label className="label" htmlFor="qScaffali">
-              Cerca materiale (codice, descrizione, scaffale, barcode)
+              Cerca materiale (codice, descrizione, scaffale, Barcode / QR)
             </label>
             <input
               id="qScaffali"
@@ -534,7 +534,7 @@ export default function ScaffaliPage() {
               style={{ display: "flex", alignItems: "center", gap: 6 }}
             >
               <BarcodeIcon />
-              Cerca con barcode
+              Cerca con Barcode / QR
             </button>
             <button
               type="button"
@@ -550,19 +550,19 @@ export default function ScaffaliPage() {
         </div>
 
         <div style={{ fontSize: 13, color: "#64748b", marginBottom: 12 }}>
-          Assegna scaffale e luogo per ogni materiale e magazzino. Cerca con barcode o NFC per trovare rapidamente un materiale.
+          Assegna scaffale e luogo per ogni materiale e magazzino. Cerca con Barcode / QR o NFC per trovare rapidamente un materiale.
         </div>
         {isMobile && (
           <div style={{ fontSize: 12, padding: 10, background: "#e0f2fe", borderRadius: 8, marginBottom: 12, border: "1px solid #0ea5e9" }}>
-            Clicca su un materiale per aprire il popup e inserire scaffale, luogo, barcode o NFC.
+            Clicca su un materiale per aprire il popup e inserire scaffale, luogo, Barcode / QR o NFC.
           </div>
         )}
         {!isNfcSupported && (
           <div style={{ fontSize: 12, padding: 10, background: "#fef3c7", borderRadius: 8, marginBottom: 12, border: "1px solid #f59e0b" }}>
             {isIOS ? (
-              <>ℹ️ <b>NFC non disponibile su iPhone/iPad.</b> Safari non supporta l&apos;API Web NFC. Usa <b>Cerca con barcode</b> per trovare i materiali.</>
+              <>ℹ️ <b>NFC non disponibile su iPhone/iPad.</b> Safari non supporta l&apos;API Web NFC. Usa <b>Cerca con Barcode / QR</b> per trovare i materiali.</>
             ) : (
-              <>ℹ️ NFC: disponibile solo su <b>Chrome Android</b> con <b>HTTPS</b>. Su iOS non è supportato. Usa <b>Cerca con barcode</b> come alternativa.</>
+              <>ℹ️ NFC: disponibile solo su <b>Chrome Android</b> con <b>HTTPS</b>. Su iOS non è supportato. Usa <b>Cerca con Barcode / QR</b> come alternativa.</>
             )}
           </div>
         )}
@@ -624,7 +624,7 @@ export default function ScaffaliPage() {
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                zIndex: 10050,
+                zIndex: 10060,
                 padding: 20,
               }}
             >
@@ -654,7 +654,7 @@ export default function ScaffaliPage() {
                   </div>
                 ) : (
                   <div style={{ fontSize: 13, padding: 12, background: "#f1f5f9", borderRadius: 8, marginBottom: 12 }}>
-                    Nessuna posizione ancora. Verrà creato con scaffale "—". Puoi modificarlo dopo.
+                    Nessuna posizione ancora. Verrà creato con scaffale &quot;—&quot;. Puoi modificarlo dopo.
                   </div>
                 )}
                 {c.otherWarehouse && (
@@ -698,14 +698,14 @@ export default function ScaffaliPage() {
                 boxShadow: "0 24px 60px rgba(0,0,0,0.3)",
               }}
             >
-              <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Cerca materiale per barcode</div>
+              <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Cerca materiale per Barcode / QR</div>
               <div style={{ fontSize: 14, color: "#64748b", marginBottom: 12 }}>
-                Scansiona o digita il barcode per cercare il materiale associato.
+                Scansiona o digita il Barcode / QR per cercare il materiale associato.
               </div>
               <div style={{ marginBottom: 16, display: cameraScanning ? "block" : "none" }}>
                 <div style={{ padding: 12, background: "#0f172a", borderRadius: 12, marginBottom: 8 }}>
                   <video ref={videoRef} style={{ width: "100%", maxWidth: 360, borderRadius: 8 }} muted playsInline />
-                  <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il barcode</div>
+                  <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il barcode o il QR code</div>
                 </div>
                 <button type="button" className="btn" onClick={stopCameraScan} style={{ width: "100%" }}>
                   Chiudi camera
@@ -777,7 +777,7 @@ export default function ScaffaliPage() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              zIndex: 10050,
+              zIndex: 10060,
               padding: 20,
             }}
           >
@@ -818,7 +818,7 @@ export default function ScaffaliPage() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              zIndex: 10050,
+              zIndex: 10060,
               padding: 20,
             }}
           >

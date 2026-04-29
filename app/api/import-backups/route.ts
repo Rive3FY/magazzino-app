@@ -148,3 +148,58 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export async function DELETE(request: Request) {
+  try {
+    const auth = await requireAdmin();
+    if (auth.error) return auth.error;
+
+    const { searchParams } = new URL(request.url);
+    const id = String(searchParams.get("id") ?? "").trim();
+    if (!id) {
+      return NextResponse.json({ error: "ID backup mancante" }, { status: 400 });
+    }
+
+    const supabase = getSupabaseAdmin();
+    const { data: row, error: rowError } = await supabase
+      .from("import_file_backups")
+      .select("storage_path")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (rowError) {
+      return NextResponse.json({ error: rowError.message }, { status: 500 });
+    }
+
+    if (!row) {
+      return NextResponse.json({ error: "Backup non trovato" }, { status: 404 });
+    }
+
+    const { error: deleteRowError } = await supabase
+      .from("import_file_backups")
+      .delete()
+      .eq("id", id);
+
+    if (deleteRowError) {
+      return NextResponse.json({ error: deleteRowError.message }, { status: 500 });
+    }
+
+    if (row.storage_path) {
+      const { error: storageError } = await supabase.storage
+        .from("import-backups")
+        .remove([row.storage_path]);
+
+      if (storageError && !isSetupMissingError(storageError.message)) {
+        return NextResponse.json({
+          ok: true,
+          warning: `Record eliminato, ma file storage non rimosso: ${storageError.message}`,
+        });
+      }
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}

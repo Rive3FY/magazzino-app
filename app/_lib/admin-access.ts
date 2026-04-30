@@ -26,6 +26,14 @@ type RawProfileFlags = {
   is_equipment_stazioni_admin?: boolean | null;
 };
 
+type ProfileRoleQuery = {
+  select: (columns: string) => {
+    eq: (column: string, value: string) => {
+      maybeSingle: <T>() => PromiseLike<{ data: T | null; error: { message?: string } | null }>;
+    };
+  };
+};
+
 const EMPTY_ROLE_FLAGS: ProfileRoleFlags = {
   approved: false,
   legacyAdmin: false,
@@ -132,19 +140,14 @@ export function clearCachedAdminAccess() {
 
 export async function loadOwnProfileRoleFlags(
   supabase: {
-    from: (table: string) => {
-      select: (columns: string) => {
-        eq: (column: string, value: string) => {
-          maybeSingle: <T>() => PromiseLike<{ data: T | null; error: { message?: string } | null }>;
-        };
-      };
-    };
+    from: (table: string) => unknown;
   },
   userId: string
-) {
+): Promise<ProfileRoleFlags> {
+  const profiles = supabase.from("profiles") as ProfileRoleQuery;
+
   try {
-    const { data, error } = await supabase
-      .from("profiles")
+    const { data, error } = await profiles
       .select("approved,is_admin,is_super_admin,is_materials_admin,is_equipment_linee_admin,is_equipment_stazioni_admin")
       .eq("id", userId)
       .maybeSingle<RawProfileFlags>();
@@ -162,8 +165,7 @@ export async function loadOwnProfileRoleFlags(
       isEquipmentStazioniAdmin: !!data?.is_equipment_stazioni_admin,
     } satisfies ProfileRoleFlags;
   } catch {
-    const { data, error } = await supabase
-      .from("profiles")
+    const { data, error } = await profiles
       .select("approved,is_admin")
       .eq("id", userId)
       .maybeSingle<{ approved?: boolean | null; is_admin?: boolean | null }>();

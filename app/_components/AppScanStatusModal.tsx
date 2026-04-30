@@ -21,9 +21,9 @@ export default function AppScanStatusModal({
   videoRef,
   icon,
   onClose,
-  barcodeTitle = "Scanner barcode",
+  barcodeTitle = "Scanner Barcode / QR",
   nfcTitle = "Scanner NFC",
-  barcodeHint = "Inquadra il codice a barre",
+  barcodeHint = "Inquadra il barcode o il QR code",
   nfcHint = "Avvicina il telefono al tag NFC",
 }: Props) {
   return (

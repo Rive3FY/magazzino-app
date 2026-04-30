@@ -3030,6 +3030,17 @@ function finalizeMaterialPickupSuccess() {
     return 1;
   }
 
+  function startDashboardBarcodePickup() {
+    setType("OUT");
+    setScanMode("NORMAL");
+    setWizardMatOpen(true);
+    setOutboundStepMat(1);
+    setMsg(null);
+    window.setTimeout(() => {
+      void startScan();
+    }, 0);
+  }
+
   const active = useMemo(() => suggestions[activeIndex], [suggestions, activeIndex]);
 
   const displayHistory = useMemo(() => {
@@ -3187,19 +3198,30 @@ function finalizeMaterialPickupSuccess() {
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
         <div className="mobileFlexCol" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           {!wizardMatOpen && (
-            <button
-              type="button"
-              className="btn btnPrimary"
-              onClick={() => {
-                setType("OUT");
-                setWizardMatOpen(true);
-                setOutboundStepMat(getResumeOutboundStepMat());
-                setMsg(null);
-              }}
-              style={{ padding: "10px 20px", fontWeight: 800 }}
-            >
-              {hasMaterialWizardDraft ? "Continua prelievo" : "Avvia prelievo"}
-            </button>
+            <>
+              <button
+                type="button"
+                className="btn btnPrimary"
+                onClick={() => {
+                  setType("OUT");
+                  setWizardMatOpen(true);
+                  setOutboundStepMat(getResumeOutboundStepMat());
+                  setMsg(null);
+                }}
+                style={{ padding: "10px 20px", fontWeight: 800 }}
+              >
+                {hasMaterialWizardDraft ? "Continua prelievo" : "Avvia prelievo"}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={startDashboardBarcodePickup}
+                style={{ padding: "10px 20px", fontWeight: 800, display: "inline-flex", alignItems: "center", gap: 6 }}
+              >
+                <BarcodeIcon />
+                Barcode / QR
+              </button>
+            </>
           )}
 
           {msg && <div style={{ marginTop: 10, fontWeight: 800, whiteSpace: "pre-wrap", width: "100%" }}>{msg}</div>}

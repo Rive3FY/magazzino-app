@@ -1843,7 +1843,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 <div style={{ display: "flex", alignItems: "end", gap: 8, flexWrap: "wrap" }}>
                   <button className="btn" onClick={startCameraScanForSearch} type="button" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                     <BarcodeIcon />
-                    Barcode
+                    Barcode / QR
                   </button>
                   <button className="btn" onClick={searchByNfc} disabled={searchByNfcScanning} type="button" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                     <NfcIcon />
@@ -2663,7 +2663,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       {scanResult && (
         <AppModalFrame
           open
-          title={scanResult.source === "barcode" ? "Scansione barcode" : "Scansione NFC"}
+          title={scanResult.source === "barcode" ? "Scansione Barcode / QR" : "Scansione NFC"}
           subtitle={scanResult.mode === "CART" ? "Aggiunta rapida al carrello" : "Conferma prelievo singolo"}
           onClose={resetScannedSelection}
           width="min(520px, 100%)"

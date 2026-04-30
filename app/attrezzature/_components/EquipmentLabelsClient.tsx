@@ -33,6 +33,8 @@ type LabelAsset = EquipmentAssetRow & {
 
 type PrintMode = "complete" | "qrOnly";
 
+const ROWS_PER_PAGE = 15;
+
 const supabase = createClient();
 
 function BarcodeSvg({ value }: { value: string }) {
@@ -94,6 +96,8 @@ export default function EquipmentLabelsClient({ area }: Props) {
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | EquipmentStatus>("ALL");
   const [printMode, setPrintMode] = useState<PrintMode>("complete");
+  const [page, setPage] = useState(1);
+  const [pageInput, setPageInput] = useState("");
   const [selected, setSelected] = useState<Set<string> | null>(new Set());
   const [nfcAssociatingId, setNfcAssociatingId] = useState<string | null>(null);
   const [nfcTagReassign, setNfcTagReassign] = useState<NfcReassignState | null>(null);
@@ -240,6 +244,27 @@ export default function EquipmentLabelsClient({ area }: Props) {
         .some((value) => String(value).toLowerCase().includes(search));
     });
   }, [q, rows, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / ROWS_PER_PAGE));
+  const paginatedRows = useMemo(() => {
+    const start = (page - 1) * ROWS_PER_PAGE;
+    return filtered.slice(start, start + ROWS_PER_PAGE);
+  }, [filtered, page]);
+
+  function goToPage(p: number) {
+    const target = Math.max(1, Math.min(totalPages, p));
+    setPage(target);
+    setPageInput("");
+  }
+
+  useEffect(() => {
+    setPage(1);
+    setPageInput("");
+  }, [q, statusFilter, area]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
 
   const labels = useMemo<LabelAsset[]>(() => {
     return filtered
@@ -502,8 +527,47 @@ body{margin:0;padding:0;background:#fff}
         <div className="equipmentSectionHeader">
           <div>
             <div className="equipmentSectionTitle">Barcode e NFC</div>
-            <div className="equipmentSectionHint">Scegli quali etichette stampare e associa i tag NFC.</div>
+            <div className="equipmentSectionHint">
+              {filtered.length} risultati · Pagina {page} di {totalPages}. Scegli quali etichette stampare e associa i tag NFC.
+            </div>
           </div>
+          {totalPages > 1 && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="btn"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                ← Prec
+              </button>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Pagina {page} di {totalPages}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <input
+                  type="number"
+                  min={1}
+                  max={totalPages}
+                  value={pageInput}
+                  onChange={(e) => setPageInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && goToPage(parseInt(pageInput, 10) || 1)}
+                  placeholder="n°"
+                  className="input"
+                  style={{ width: 52, padding: "6px 8px", fontSize: 13 }}
+                />
+                <button type="button" className="btn" onClick={() => goToPage(parseInt(pageInput, 10) || 1)}>
+                  Vai
+                </button>
+              </div>
+              <button
+                type="button"
+                className="btn"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Succ →
+              </button>
+            </div>
+          )}
         </div>
         <div className="tableWrap">
           <table className="table">
@@ -541,7 +605,7 @@ body{margin:0;padding:0;background:#fff}
                   <td colSpan={9}>Nessuna attrezzatura disponibile.</td>
                 </tr>
               )}
-              {filtered.map((row) => {
+              {paginatedRows.map((row) => {
                 const checked = selected === null || selected.has(row.id);
                 return (
                   <tr key={row.id}>
@@ -573,6 +637,27 @@ body{margin:0;padding:0;background:#fff}
             </tbody>
           </table>
         </div>
+        {totalPages > 1 && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+            <button
+              type="button"
+              className="btn"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              ← Prec
+            </button>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Pagina {page} di {totalPages}</span>
+            <button
+              type="button"
+              className="btn"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Succ →
+            </button>
+          </div>
+        )}
       </div>
 
       {!!nfcAssociatingId && (

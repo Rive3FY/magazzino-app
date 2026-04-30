@@ -972,7 +972,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
             <div style={{ minWidth: 0, display: "flex", alignItems: "end", gap: 8, flexWrap: "wrap" }}>
               <button className="btn" onClick={startCameraScanForQuickSearch} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <BarcodeIcon />
-                Barcode
+                Barcode / QR
               </button>
               <button className="btn" onClick={searchByNfc} disabled={searchByNfcScanning} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <NfcIcon />

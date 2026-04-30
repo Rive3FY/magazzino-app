@@ -12,17 +12,20 @@ import {
 } from "../admin-access";
 
 export function useIsAdmin(): AdminAccess & { loading: boolean } {
-  const [access, setAccess] = useState(() => {
-    const cached = readCachedAdminAccess();
-    return deriveAdminAccess(cached?.flags ?? null);
-  });
-  const [loading, setLoading] = useState(() => !readCachedAdminAccess());
+  const [access, setAccess] = useState(() => deriveAdminAccess(null));
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const supabase = createClient();
     let alive = true;
 
     (async () => {
+      const cached = readCachedAdminAccess();
+      if (cached) {
+        setAccess(deriveAdminAccess(cached.flags));
+        setLoading(false);
+      }
+
       const { data: u } = await supabase.auth.getUser();
       if (!u.user) {
         clearCachedAdminAccess();

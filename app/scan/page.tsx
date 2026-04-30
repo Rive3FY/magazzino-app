@@ -136,7 +136,7 @@ export default function ScanPage() {
   return (
     <main className="panel">
       <div className="pageBar">
-        <div className="pageBarTitle">Scansione barcode</div>
+        <div className="pageBarTitle">Scansione Barcode / QR</div>
         <div className="pageBarActions">
           <button className="btn" onClick={() => router.back()}>
             Indietro
@@ -157,7 +157,7 @@ export default function ScanPage() {
         />
 
         <div style={{ fontSize: 12, marginTop: 6, opacity: 0.9 }}>
-          Inquadra il codice a barre.
+          Inquadra il barcode o il QR code.
         </div>
 
         {msg && (

@@ -554,6 +554,7 @@ body:has(.appLogin) {
   /* Desktop con sidebar collassabile: topbar e sidebar fixed per restare sempre unite durante lo scroll */
   .app.appWithSidebar {
     grid-template-columns: 1fr;
+    grid-template-rows: 1fr;
     padding-top: var(--banner-height);
   }
   .app.appWithSidebar .topbar {
@@ -576,6 +577,7 @@ body:has(.appLogin) {
   }
   .app.appWithSidebar .main {
     grid-column: 1;
+    grid-row: 1;
     transition: margin-left 0.25s ease, width 0.25s ease;
   }
   .app.appWithSidebar:not(.appSidebarCollapsed) .sidebar {
@@ -591,6 +593,9 @@ body:has(.appLogin) {
   .app.appWithSidebar.appSidebarCollapsed .main {
     margin-left: 0;
     width: 100%;
+  }
+  .app.appWithSidebar .content {
+    padding-top: 0;
   }
 }
 

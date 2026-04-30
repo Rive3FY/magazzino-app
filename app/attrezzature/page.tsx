@@ -11,9 +11,23 @@ function LauncherArrow() {
   );
 }
 
+function LauncherIcon({ label }: { label: string }) {
+  return <span className="launcherIcon" aria-hidden="true">{label}</span>;
+}
+
+function LauncherMeta({ items }: { items: string[] }) {
+  return (
+    <div className="launcherMeta">
+      {items.map((item) => (
+        <span key={item}>{item}</span>
+      ))}
+    </div>
+  );
+}
+
 export default function AttrezzaturePage() {
   return (
-    <main className="panel">
+    <main className="panel launcherPanel">
       <div className="pageBar">
         <div className="pageBarTitle">Selezione attrezzature</div>
       </div>
@@ -33,11 +47,13 @@ export default function AttrezzaturePage() {
             style={{ borderTopColor: "#15803d" }}
           >
             <div className="launcherCardContent">
+              <LauncherIcon label="L" />
               <div className="launcherCardBadge">Dashboard Linee</div>
               <div className="launcherCardTitle">Attrezzature Linee</div>
               <div className="launcherCardText">
                 Gestisci anagrafica, assegnazioni, rientri, manutenzione ed etichette delle attrezzature usate sulle linee.
               </div>
+              <LauncherMeta items={["Movimenti", "Assegnazioni", "Registri"]} />
             </div>
             <div className="launcherCardFooter">
               <span>Apri Linee</span>
@@ -51,11 +67,13 @@ export default function AttrezzaturePage() {
             style={{ borderTopColor: "#c2410c" }}
           >
             <div className="launcherCardContent">
+              <LauncherIcon label="S" />
               <div className="launcherCardBadge">Dashboard Stazioni</div>
               <div className="launcherCardTitle">Attrezzature Stazioni</div>
               <div className="launcherCardText">
                 Gestisci un registro separato per le attrezzature delle stazioni, con storico ed etichette dedicati.
               </div>
+              <LauncherMeta items={["Inventario", "Manutenzioni", "Etichette"]} />
             </div>
             <div className="launcherCardFooter">
               <span>Apri Stazioni</span>

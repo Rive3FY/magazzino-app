@@ -9,7 +9,7 @@ import AppShell from "./_components/AppShell";
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 export const metadata = {
   title: "Gestionale Magazzino",
-  description: "Movimenti e Giacenze",
+  description: "Movimenti e Inventario",
 };
 export const viewport = {
   width: "device-width",

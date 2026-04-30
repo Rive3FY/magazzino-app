@@ -462,7 +462,7 @@ export default function ImportPage() {
       <div className="card" style={{ padding: 12, margin: 12 }}>
         <div style={{ fontWeight: 900 }}>Download Excel LIVE</div>
         <div style={{ fontSize: 13, opacity: 0.9, marginTop: 4 }}>
-          Scarica il file Excel con tutte le giacenze aggiornate (PRM + REALE)
+          Scarica il file Excel con tutto l'inventario aggiornato (PRM + REALE)
         </div>
         <button
           type="button"

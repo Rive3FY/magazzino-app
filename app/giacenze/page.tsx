@@ -435,7 +435,7 @@ async function openHistory(code: string) {
     setCount(0);
     if (silent) setRefreshing(false);
     else setLoading(false);
-    setMsg("Errore caricamento giacenze. (RPC giacenze_list)");
+    setMsg("Errore caricamento inventario. (RPC giacenze_list)");
     return;
   }
 
@@ -828,15 +828,15 @@ await writeAuditLog({
 
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Giacenze");
-    XLSX.writeFile(wb, `giacenze_${view.toLowerCase()}_pagina_${page}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "Inventario");
+    XLSX.writeFile(wb, `inventario_${view.toLowerCase()}_pagina_${page}.xlsx`);
   }
 
   return (
     <main className="panel" style={{ overflowX: "hidden" }}>
       {/* HEADER */}
       <div className="pageBar">
-        <div className="pageBarTitle">Magazzino - Giacenze</div>
+        <div className="pageBarTitle">Magazzino - Inventario</div>
       </div>
 
       {/* FILTRI */}

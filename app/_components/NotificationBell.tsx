@@ -259,7 +259,7 @@ export default function NotificationBell() {
               {isAdmin && negativeStocks.length > 0 && (
                 <div className="notificationBellSection">
                   <div className="notificationBellSectionTitle">
-                    ⚠️ Giacenze negative ({negativeStocks.length})
+                    ⚠️ Inventario negativo ({negativeStocks.length})
                   </div>
                   {negativeStocks.map((s) => (
                     <Link

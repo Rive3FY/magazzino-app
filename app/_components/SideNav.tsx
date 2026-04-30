@@ -260,7 +260,7 @@ export default function SideNav({ hideSidebar = false }: Props) {
               </div>
               <Link className={clsExact("/materiali")} href="/materiali" onClick={handleLinkClick} prefetch={false}><NavLabel icon="dashboard" label="Dashboard" /></Link>
               <Link className={cls("/movimenti")} href="/movimenti" onClick={handleLinkClick} prefetch={false}><NavLabel icon="movimenti" label="Movimenti" /></Link>
-              <Link className={cls("/giacenze")} href="/giacenze" onClick={handleLinkClick} prefetch={false}><NavLabel icon="giacenze" label="Giacenze" /></Link>
+              <Link className={cls("/giacenze")} href="/giacenze" onClick={handleLinkClick} prefetch={false}><NavLabel icon="giacenze" label="Inventario" /></Link>
               {canManageMaterials && <Link className={cls("/scaffali")} href="/scaffali" onClick={handleLinkClick} prefetch={false}><NavLabel icon="scaffali" label="Scaffali" /></Link>}
               {canManageMaterials && <Link className={cls("/etichette")} href="/etichette" onClick={handleLinkClick} prefetch={false}><NavLabel icon="etichette" label="Etichette" /></Link>}
               {canManageMaterials && <Link className={cls("/import")} href="/import" onClick={handleLinkClick} prefetch={false}><NavLabel icon="importExport" label="Import & Export" /></Link>}

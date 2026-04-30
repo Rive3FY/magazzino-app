@@ -329,7 +329,7 @@ export default function AdminPage() {
 
   async function handleResetMagazzino() {
     const ok1 = window.confirm(
-      "ATTENZIONE:\n\nQuesta operazione cancellerà TUTTI i movimenti, TUTTE le giacenze live e TUTTO l'import Excel originale.\n\nL'operazione è irreversibile.\n\nVuoi continuare?"
+      "ATTENZIONE:\n\nQuesta operazione cancellerà TUTTI i movimenti, TUTTO l'inventario live e TUTTO l'import Excel originale.\n\nL'operazione è irreversibile.\n\nVuoi continuare?"
     );
     if (!ok1) return;
     const text = window.prompt('Per confermare davvero il reset, scrivi esattamente: RESET MAGAZZINO');

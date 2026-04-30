@@ -34,6 +34,6 @@ Queste funzioni devono esistere nel DB (se non le hai già):
 - `admin_revoke_admin(target_user uuid)`
 - `admin_update_profile(target_user uuid, p_badge text, p_first_name text, p_last_name text)`
 - `reset_magazzino()`
-- `giacenze_list(p_view, p_search, p_sort_key, p_sort_dir, p_limit, p_offset)` → lista giacenze
+- `giacenze_list(p_view, p_search, p_sort_key, p_sort_dir, p_limit, p_offset)` → lista inventario
 
 Se mancano, crea un file di migration separato per le RPC.

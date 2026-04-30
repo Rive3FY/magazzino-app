@@ -365,7 +365,7 @@ export default function MovimentiPage() {
         wizardMatOpen?: boolean;
         cartOpen?: boolean;
       };
-      // Le entrate si gestiscono da Giacenze: su Movimenti restiamo sempre in uscita/prelievo.
+      // Le entrate si gestiscono da Inventario: su Movimenti restiamo sempre in uscita/prelievo.
       setType("OUT");
       if (draft.warehouse === "PRM" || draft.warehouse === "REALE" || draft.warehouse === "MISTO") setWarehouse(draft.warehouse);
       if (typeof draft.qty === "string") setQty(draft.qty);
@@ -1766,7 +1766,7 @@ function finalizeMaterialPickupSuccess() {
     if (!userId) return setMsg("Devi essere loggato per salvare movimenti.");
     if (!picked) return setMsg("Seleziona un materiale.");
     if (type === "IN") {
-      return setMsg("Le entrate merci si registrano da Magazzino · Giacenze. Per le uscite usa Avvia prelievo.");
+      return setMsg("Le entrate merci si registrano da Magazzino · Inventario. Per le uscite usa Avvia prelievo.");
     }
     const noteParsed = movementNoteSchema.safeParse({ note: note.trim() });
     if (!noteParsed.success) return setMsg(noteParsed.error.flatten().formErrors[0] ?? "Le note sono obbligatorie.");
@@ -1945,7 +1945,7 @@ function finalizeMaterialPickupSuccess() {
     setMsg(
       excelLiveOk
         ? "Movimento salvato ✅"
-        : "Movimento salvato ✅\n\n⚠️ Giacenze (excel_live) non aggiornate: materiale non presente. Importa l'Excel o verifica il codice."
+        : "Movimento salvato ✅\n\n⚠️ Inventario (excel_live) non aggiornato: materiale non presente. Importa l'Excel o verifica il codice."
     );
     toast.success("Movimento salvato");
 
@@ -2808,7 +2808,7 @@ function finalizeMaterialPickupSuccess() {
     }
     let successMsg = emailErr ? `Movimento chiuso ✅ (email non inviata: ${emailErr})` : "Movimento chiuso ✅";
     if (!excelLiveOk && r > 0) {
-      successMsg += "\n\n⚠️ Giacenze (excel_live) non aggiornate: materiale non presente. Importa l'Excel o verifica il codice.";
+      successMsg += "\n\n⚠️ Inventario (excel_live) non aggiornato: materiale non presente. Importa l'Excel o verifica il codice.";
     }
     setMsg(successMsg);
     toast.success("Movimento chiuso");

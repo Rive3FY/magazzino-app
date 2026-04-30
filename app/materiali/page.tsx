@@ -522,8 +522,8 @@ export default function Home() {
   const filterHint = useMemo(() => {
     if (!picked || !stock) return null;
 
-    if (warehouseFilter === "PRM" && stock.PRM <= 0) return "In PRM non c’è giacenza.";
-    if (warehouseFilter === "REALE" && stock.REALE <= 0) return "In REALE non c’è giacenza.";
+    if (warehouseFilter === "PRM" && stock.PRM <= 0) return "In PRM non c’è inventario.";
+    if (warehouseFilter === "REALE" && stock.REALE <= 0) return "In REALE non c’è inventario.";
     return null;
   }, [picked, stock, warehouseFilter]);
 
@@ -541,7 +541,7 @@ export default function Home() {
             <div>
               <div style={{ fontWeight: 900, fontSize: 16 }}> Controllo veloce materiale</div>
               <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
-                Cerca per codice/descrizione o scansiona Barcode / QR. Vedi giacenze PRM/REALE, dove si trova e lo scaffale.
+                Cerca per codice/descrizione o scansiona Barcode / QR. Vedi inventario PRM/REALE, dove si trova e lo scaffale.
               </div>
             </div>
 

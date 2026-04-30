@@ -6,7 +6,7 @@ export default function GiacenzeLayout({ children }: { children: React.ReactNode
       fallback={
         <main className="panel" style={{ overflowX: "hidden" }}>
           <div className="pageBar">
-            <div className="pageBarTitle">Magazzino - Giacenze</div>
+            <div className="pageBarTitle">Magazzino - Inventario</div>
           </div>
           <div className="card" style={{ padding: 24 }}>
             Caricamento…

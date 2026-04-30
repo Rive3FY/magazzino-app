@@ -1,6 +1,6 @@
 # Gestionale Magazzino
 
-Applicazione Next.js per la gestione di magazzino: movimenti (entrate/uscite), giacenze, referenti, import Excel, audit log.
+Applicazione Next.js per la gestione di magazzino: movimenti (entrate/uscite), inventario, referenti, import Excel, audit log.
 
 ## Setup
 
@@ -30,7 +30,7 @@ Esegui le migration in `supabase/migrations/` tramite Supabase SQL Editor o CLI.
 - `app/` – App Router, pagine e API
 - `app/_components/` – SideNav, TopBar
 - `app/_lib/` – Supabase client, utils, hooks (useAuth, useIsAdmin), tipi, validazioni Zod, ToastContext
-- `app/api/excel-live/download` – Export Excel giacenze (solo admin)
+- `app/api/excel-live/download` – Export Excel inventario (solo admin)
 
 ## Getting Started
 

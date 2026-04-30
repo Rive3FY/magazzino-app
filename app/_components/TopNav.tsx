@@ -12,7 +12,7 @@ export default function TopNav({ email }: Props) {
           <img src="/logo.svg" alt="" className="erpLogo" width={80} height={29} style={{ objectFit: "contain" }} />
           <span>
             <div className="erpBrandTitle">Gestionale Magazzino</div>
-            <div className="erpBrandSub">Movimenti · Giacenze</div>
+            <div className="erpBrandSub">Movimenti · Inventario</div>
           </span>
         </Link>
 

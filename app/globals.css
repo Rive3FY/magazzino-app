@@ -398,6 +398,7 @@ body:has(.appLogin) {
   grid-column: 1;
   grid-row: 2;
   position: relative;
+  overflow: hidden;
 }
 
 .sidebarHeader{
@@ -443,7 +444,7 @@ body:has(.appLogin) {
 
 .sideNav{
   display: grid;
-  gap: 6px;
+  gap: 7px;
   margin-top: 8px;
 }
 
@@ -461,11 +462,11 @@ body:has(.appLogin) {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 14px;
-  border-radius: var(--radius-md);
-  color: rgba(255,255,255,0.9) !important;
+  padding: 11px 13px;
+  border-radius: 13px;
+  color: rgba(255,255,255,0.84) !important;
   text-decoration: none !important;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   font-weight: var(--fw-semibold);
   font-size: var(--font-base);
@@ -473,14 +474,16 @@ body:has(.appLogin) {
 }
 
 .sideLink:hover{
-  background: rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.10);
   color: #fff !important;
+  border-color: rgba(255,255,255,0.08);
 }
 
 .sideLink.active{
-  background: rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.16);
   color: #fff !important;
-  border: none;
+  border-color: rgba(255,255,255,0.12);
+  box-shadow: inset 3px 0 0 rgba(255,255,255,0.55);
 }
 
 .sideNavUsersCount{
@@ -556,6 +559,7 @@ body:has(.appLogin) {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr;
     padding-top: var(--banner-height);
+    background: var(--bg);
   }
   .app.appWithSidebar .topbar {
     position: fixed;
@@ -1004,16 +1008,16 @@ body:has(.appLogin) {
 /* Pannello / Card */
 .panel{
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
+  border: 1px solid rgba(15,23,42,0.09);
+  border-radius: 18px;
+  box-shadow: 0 10px 30px rgba(15,23,42,0.08);
   overflow: hidden;
 }
 
 /* pageBar sovrascrive il bordo del panel per evitare linea bianca */
 .panel > .pageBar:first-child{
   margin: -1px -1px 0 -1px;
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-radius: 18px 18px 0 0;
 }
 
 /* Barra titolo pagina - banner unificato */
@@ -1164,9 +1168,9 @@ body:has(.appLogin) {
 
 .tableWrap {
   overflow-x: auto;
-  border-radius: 14px;
-  border: 1px solid rgba(15, 23, 42, 0.10);
-  background: rgba(255,255,255,0.92);
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.09);
+  background: rgba(255,255,255,0.96);
 }
 
 .table {
@@ -1702,73 +1706,151 @@ textarea.input{
   line-height:1.45;
 }
 
+.launcherPanel {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.launcherPanel > .pageBar:first-child {
+  margin: 0;
+  border-radius: 18px 18px 0 0;
+}
+
+.launcherPanel > .card {
+  padding: 28px !important;
+  border-radius: 0 0 22px 22px;
+  border: 1px solid rgba(15,23,42,0.08);
+  border-top: 0;
+  background:
+    radial-gradient(circle at top left, rgba(41,94,185,0.12), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(15,118,110,0.08), transparent 32%),
+    linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.98) 100%);
+  box-shadow: 0 18px 48px rgba(15,23,42,0.08);
+}
+
 .launcherHero{
   display:grid;
-  gap:10px;
-  margin-bottom:24px;
+  gap:12px;
+  margin-bottom:26px;
+  padding:22px;
+  border-radius:20px;
+  background:
+    linear-gradient(135deg, rgba(15,23,42,0.04), rgba(41,94,185,0.08)),
+    rgba(255,255,255,0.78);
+  border:1px solid rgba(15,23,42,0.07);
 }
 
 .launcherTitle{
-  font-size:24px;
-  line-height:1.2;
-  font-weight:800;
+  font-size:clamp(28px, 3.2vw, 44px);
+  line-height:1.02;
+  font-weight:900;
   color:#0f172a;
-  letter-spacing:-0.02em;
+  letter-spacing:-0.055em;
 }
 
 .launcherText{
   color:#64748b;
-  font-size:14px;
-  line-height:1.6;
-  max-width:760px;
+  font-size:15px;
+  line-height:1.65;
+  max-width:780px;
 }
 
 .launcherGrid{
   display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(min(260px, 100%),1fr));
+  grid-template-columns:repeat(2,minmax(0,1fr));
   gap:18px;
 }
 
 .launcherCard{
+  --launcher-accent:#295eb9;
+  --launcher-accent-soft:rgba(41,94,185,0.10);
   position:relative;
   overflow:hidden;
-  min-height:190px;
-  border-radius:16px;
+  min-height:230px;
+  border-radius:22px;
   padding:0;
-  background:#ffffff;
+  background:rgba(255,255,255,0.96);
   color:#0f172a;
-  box-shadow:0 10px 24px rgba(15,23,42,0.06);
+  box-shadow:0 12px 32px rgba(15,23,42,0.07);
   display:grid;
   align-content:space-between;
   gap:0;
   text-decoration:none !important;
   border:1px solid rgba(15,23,42,0.08);
-  border-top-width:4px;
+  border-top-width:0;
   transition:box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
 
+.launcherCard:nth-child(2){
+  --launcher-accent:#0f766e;
+  --launcher-accent-soft:rgba(15,118,110,0.11);
+}
+
+.launcherCard:nth-child(3){
+  --launcher-accent:#475569;
+  --launcher-accent-soft:rgba(71,85,105,0.10);
+}
+
+.launcherCard:nth-child(4){
+  --launcher-accent:#9f1239;
+  --launcher-accent-soft:rgba(159,18,57,0.10);
+}
+
+.launcherCard::before{
+  content:"";
+  position:absolute;
+  inset:0 auto 0 0;
+  width:6px;
+  background:var(--launcher-accent, currentColor);
+  opacity:0.9;
+}
+
+.launcherCard::after{
+  content:"";
+  position:absolute;
+  right:-48px;
+  top:-48px;
+  width:150px;
+  height:150px;
+  border-radius:999px;
+  background:var(--launcher-accent-soft);
+  opacity:1;
+}
+
 .launcherCard:hover{
-  box-shadow:0 16px 34px rgba(15,23,42,0.10);
+  box-shadow:0 20px 44px rgba(15,23,42,0.12);
   border-color:rgba(15,23,42,0.14);
-  transform:translateY(-2px);
+  transform:translateY(-3px);
 }
 
 .launcherCard:hover .launcherArrow{
-  background:#dbeafe;
-  color:#0f172a;
-}
-
-.launcherCard::before,
-.launcherCard::after{
-  display:none;
+  background:#0f172a;
+  color:#fff;
 }
 
 .launcherCardContent{
   position:relative;
   z-index:1;
   display:grid;
-  gap:10px;
-  padding:18px 20px 16px;
+  gap:11px;
+  padding:22px 24px 18px 28px;
+}
+
+.launcherIcon{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:46px;
+  height:46px;
+  border-radius:16px;
+  background:var(--launcher-accent-soft);
+  border:1px solid color-mix(in srgb, var(--launcher-accent) 22%, transparent);
+  color:var(--launcher-accent);
+  font-size:17px;
+  font-weight:900;
+  letter-spacing:-0.04em;
 }
 
 .launcherCardBadge{
@@ -1778,26 +1860,46 @@ textarea.input{
   width:max-content;
   padding:5px 10px;
   border-radius:999px;
-  background:#e2e8f0;
-  color:#334155;
+  background:var(--launcher-accent-soft);
+  color:var(--launcher-accent);
   font-size:11px;
-  font-weight:800;
-  letter-spacing:0.35px;
+  font-weight:900;
+  letter-spacing:0.4px;
   text-transform:uppercase;
 }
 
-.launcherCardTitle{
-  font-size:20px;
-  line-height:1.25;
+.launcherMeta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:7px;
+  margin-top:2px;
+}
+
+.launcherMeta span{
+  display:inline-flex;
+  align-items:center;
+  padding:5px 9px;
+  border-radius:999px;
+  background:#f8fafc;
+  border:1px solid rgba(15,23,42,0.07);
+  color:#475569;
+  font-size:12px;
   font-weight:800;
+}
+
+.launcherCardTitle{
+  font-size:24px;
+  line-height:1.14;
+  font-weight:900;
   color:#0f172a;
+  letter-spacing:-0.035em;
 }
 
 .launcherCardText{
-  font-size:13px;
+  font-size:14px;
   line-height:1.6;
   color:#64748b;
-  max-width:40ch;
+  max-width:48ch;
 }
 
 .launcherCardFooter{
@@ -1807,25 +1909,41 @@ textarea.input{
   align-items:center;
   justify-content:space-between;
   gap:10px;
-  font-weight:700;
+  font-weight:800;
   font-size:13px;
-  color:#475569;
-  padding:14px 20px 16px;
-  border-top:1px solid rgba(15,23,42,0.08);
-  background:linear-gradient(180deg, rgba(248,250,252,0.8) 0%, rgba(255,255,255,1) 100%);
+  color:#334155;
+  padding:15px 20px 18px 28px;
+  border-top:1px solid rgba(15,23,42,0.07);
+  background:rgba(248,250,252,0.72);
 }
 
 .launcherArrow{
-  width:32px;
-  height:32px;
-  border-radius:10px;
+  width:34px;
+  height:34px;
+  border-radius:12px;
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  background:#eff6ff;
+  background:var(--launcher-accent-soft);
   border:1px solid rgba(15,23,42,0.08);
-  color:#475569;
+  color:var(--launcher-accent);
+  transition:background 0.2s ease, color 0.2s ease, transform 0.2s ease;
 }
+
+@media (max-width: 780px){
+  .launcherPanel > .card {
+    padding: 16px !important;
+  }
+
+  .launcherGrid{
+    grid-template-columns:1fr;
+  }
+
+  .launcherHero{
+    padding:16px;
+  }
+}
+
 /* =========================
    GIACENZE: layout con tabella scrollabile
 ========================= */
@@ -2032,7 +2150,7 @@ html, body {
     max-width: 100%;
   }
 
-  /* Nascondi scrollbar gemella giacenze su mobile */
+  /* Nascondi scrollbar gemella inventario su mobile */
   .hideOnMobile {
     display: none !important;
   }

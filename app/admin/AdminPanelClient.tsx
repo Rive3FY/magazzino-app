@@ -428,7 +428,7 @@ export default function AdminPanelClient() {
             {resetting ? "Reset in corso..." : "Reset magazzino"}
           </button>
 
-          <a className="btn" href="/giacenze">Giacenze</a>
+          <a className="btn" href="/giacenze">Inventario</a>
           <a className="btn" href="/movimenti">Movimenti</a>
         </div>
       </div>
@@ -723,7 +723,7 @@ export default function AdminPanelClient() {
       <ConfirmWithInputModal
         open={resetMagazzinoModalOpen}
         title="Reset magazzino"
-        message="ATTENZIONE: Questa operazione cancellerà completamente il magazzino materiali: anagrafica materiali, giacenze live, import Excel originali, scaffali/NFC/barcode, movimenti, referenti, richieste, audit materiali e archivio backup file importati. L'operazione è irreversibile."
+        message="ATTENZIONE: Questa operazione cancellerà completamente il magazzino materiali: anagrafica materiali, inventario live, import Excel originali, scaffali/NFC/barcode, movimenti, referenti, richieste, audit materiali e archivio backup file importati. L'operazione è irreversibile."
         inputLabel="Scrivi esattamente per confermare:"
         confirmPhrase="RESET MAGAZZINO"
         confirmLabel="Esegui reset"

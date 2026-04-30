@@ -14,6 +14,20 @@ function LauncherArrow() {
   );
 }
 
+function LauncherIcon({ label }: { label: string }) {
+  return <span className="launcherIcon" aria-hidden="true">{label}</span>;
+}
+
+function LauncherMeta({ items }: { items: string[] }) {
+  return (
+    <div className="launcherMeta">
+      {items.map((item) => (
+        <span key={item}>{item}</span>
+      ))}
+    </div>
+  );
+}
+
 export default function HubLauncher() {
   const { isSuperAdmin, loading } = useIsAdmin();
 
@@ -34,11 +48,13 @@ export default function HubLauncher() {
           style={{ borderTopColor: "#1d4ed8" }}
         >
           <div className="launcherCardContent">
+            <LauncherIcon label="M" />
             <div className="launcherCardBadge">Materiali</div>
             <div className="launcherCardTitle">Materiali</div>
             <div className="launcherCardText">
-              Entra nel flusso materiali per dashboard, movimenti, giacenze, scaffali, etichette e gestione operativa.
+              Entra nel flusso materiali per dashboard, movimenti, inventario, scaffali, etichette e gestione operativa.
             </div>
+            <LauncherMeta items={["Movimenti", "Inventario", "Etichette"]} />
           </div>
           <div className="launcherCardFooter">
             <span>Apri modulo materiali</span>
@@ -52,11 +68,13 @@ export default function HubLauncher() {
           style={{ borderTopColor: "#0f766e" }}
         >
           <div className="launcherCardContent">
+            <LauncherIcon label="A" />
             <div className="launcherCardBadge">Attrezzature</div>
             <div className="launcherCardTitle">Attrezzature</div>
             <div className="launcherCardText">
               Accedi alle attrezzature e scegli il registro corretto tra Linee e Stazioni.
             </div>
+            <LauncherMeta items={["Linee", "Stazioni", "Manutenzioni"]} />
           </div>
           <div className="launcherCardFooter">
             <span>Scegli area attrezzature</span>
@@ -70,11 +88,13 @@ export default function HubLauncher() {
           style={{ borderTopColor: "#6366f1" }}
         >
           <div className="launcherCardContent">
+            <LauncherIcon label="P" />
             <div className="launcherCardBadge">Profilo</div>
             <div className="launcherCardTitle">Gestione Profilo</div>
             <div className="launcherCardText">
               Modifica badge, nome e cognome del tuo profilo.
             </div>
+            <LauncherMeta items={["Badge", "Anagrafica", "Account"]} />
           </div>
           <div className="launcherCardFooter">
             <span>Apri profilo</span>
@@ -89,11 +109,13 @@ export default function HubLauncher() {
             style={{ borderTopColor: "#b91c1c" }}
           >
             <div className="launcherCardContent">
+              <LauncherIcon label="SA" />
               <div className="launcherCardBadge">Amministrazione</div>
               <div className="launcherCardTitle">Super Admin</div>
               <div className="launcherCardText">
                 Gestione utenti, approvazioni, permessi admin e funzioni di sistema.
               </div>
+              <LauncherMeta items={["Utenti", "Permessi", "Audit"]} />
             </div>
             <div className="launcherCardFooter">
               <span>Apri Super Admin</span>

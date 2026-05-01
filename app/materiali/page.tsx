@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import AppScanStatusModal from "../_components/AppScanStatusModal";
+import RemoteNfcScanModal from "../attrezzature/_components/RemoteNfcScanModal";
 
 type Movement = {
   id: string;
@@ -148,6 +149,7 @@ export default function Home() {
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const [scanning, setScanning] = useState(false);
   const [nfcScanning, setNfcScanning] = useState(false);
+  const [remoteNfcOpen, setRemoteNfcOpen] = useState(false);
   const [isNfcSupported, setIsNfcSupported] = useState(false);
 
   async function loadSuggestions(text: string) {
@@ -315,6 +317,8 @@ export default function Home() {
 
   function resetSearch() {
     stopScan();
+    stopNfcScan();
+    setRemoteNfcOpen(false);
     setSearch("");
     setSuggestions([]);
     setPicked(null);
@@ -425,6 +429,29 @@ export default function Home() {
 
   function stopNfcScan() {
     setNfcScanning(false);
+  }
+
+  async function pickItemByNfcTag(nfcTagId: string) {
+    const tag = nfcTagId.trim();
+    if (!tag) return;
+
+    const { data: shelf, error } = await supabase
+      .from("material_shelves")
+      .select("code,warehouse")
+      .eq("nfc_tag_id", tag)
+      .maybeSingle();
+
+    if (error) {
+      setMsg("Errore ricerca NFC: " + error.message);
+      return;
+    }
+
+    if (!shelf) {
+      setMsg("Tag NFC non associato a nessun materiale.");
+      return;
+    }
+
+    await pickItemByCode((shelf as any).code);
   }
 
   useEffect(() => {
@@ -561,7 +588,7 @@ export default function Home() {
                 type="button"
                 className="btn"
                 onClick={() => (scanning ? stopScan() : startScan())}
-                disabled={nfcScanning}
+                disabled={nfcScanning || remoteNfcOpen}
                 style={{ display: "flex", alignItems: "center", gap: 6 }}
               >
                 <BarcodeIcon />
@@ -571,11 +598,27 @@ export default function Home() {
                 type="button"
                 className="btn"
                 onClick={startNfcScan}
-                disabled={scanning || nfcScanning}
+                disabled={scanning || nfcScanning || remoteNfcOpen}
                 style={{ display: "flex", alignItems: "center", gap: 6 }}
               >
                 {nfcScanning ? <SpinnerIcon /> : <NfcIcon />}
                 {nfcScanning ? "NFC..." : "NFC"}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  stopScan();
+                  stopNfcScan();
+                  setMsg(null);
+                  setRemoteNfcOpen(true);
+                }}
+                disabled={scanning || nfcScanning}
+                title="Usa telefono come lettore NFC"
+                style={{ display: "flex", alignItems: "center", gap: 6 }}
+              >
+                <NfcIcon />
+                Telefono NFC
               </button>
               <button type="button" className="btn" onClick={resetSearch} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <SearchIcon />
@@ -684,6 +727,17 @@ export default function Home() {
             onClose={scanning ? stopScan : stopNfcScan}
             barcodeTitle="Scanner Barcode / QR"
             barcodeHint="Inquadra il barcode o il QR code"
+          />
+
+          <RemoteNfcScanModal
+            open={remoteNfcOpen}
+            onClose={() => setRemoteNfcOpen(false)}
+            context="movement_select"
+            title="Usa telefono come lettore NFC materiali"
+            scanPath="/materiali/scan-remoto"
+            onTagReceived={(nfcTagId) => {
+              void pickItemByNfcTag(nfcTagId);
+            }}
           />
 
           {msg && <div style={{ marginTop: 10, fontWeight: 800 }}>{msg}</div>}

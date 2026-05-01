@@ -14,6 +14,8 @@ type Props = {
   onTagReceived: (nfcTagId: string, context?: { equipmentId?: string }) => void;
   allowMultiple?: boolean;
   title?: string;
+  sessionEndpoint?: string;
+  scanPath?: string;
 };
 
 const POLL_INTERVAL_MS = 1500;
@@ -28,6 +30,8 @@ export default function RemoteNfcScanModal({
   onTagReceived,
   allowMultiple = false,
   title = "Usa telefono come lettore NFC",
+  sessionEndpoint = "/api/attrezzature/remote-nfc-session",
+  scanPath = "/attrezzature/scan-remoto",
 }: Props) {
   const [code, setCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -40,7 +44,7 @@ export default function RemoteNfcScanModal({
     setError(null);
     setProcessedCount(0);
     try {
-      const res = await fetch("/api/attrezzature/remote-nfc-session", {
+      const res = await fetch(sessionEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -61,7 +65,7 @@ export default function RemoteNfcScanModal({
     } finally {
       setLoading(false);
     }
-  }, [context, equipmentId, equipmentIds, area]);
+  }, [context, equipmentId, equipmentIds, area, sessionEndpoint]);
 
   useEffect(() => {
     if (!open) return;
@@ -76,7 +80,7 @@ export default function RemoteNfcScanModal({
 
     const poll = async () => {
       try {
-        const res = await fetch(`/api/attrezzature/remote-nfc-session?code=${encodeURIComponent(code)}`);
+        const res = await fetch(`${sessionEndpoint}?code=${encodeURIComponent(code)}`);
         const json = await res.json().catch(() => ({}));
         if (!res.ok) return;
 
@@ -112,12 +116,12 @@ export default function RemoteNfcScanModal({
         pollRef.current = null;
       }
     };
-  }, [open, code, processedCount, allowMultiple, onTagReceived, onClose]);
+  }, [open, code, processedCount, allowMultiple, onTagReceived, onClose, sessionEndpoint]);
 
   if (!open) return null;
 
   const scanUrl = typeof window !== "undefined" && code
-    ? `${window.location.origin}/attrezzature/scan-remoto?code=${encodeURIComponent(code)}`
+    ? `${window.location.origin}${scanPath}?code=${encodeURIComponent(code)}`
     : "";
 
   return (

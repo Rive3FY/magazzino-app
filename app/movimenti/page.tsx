@@ -11,6 +11,7 @@ import { useAuth } from "../_lib/hooks/useAuth";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import { useToast } from "../_lib/ToastContext";
 import ConfirmModal from "../_components/ConfirmModal";
+import RemoteNfcScanModal from "../attrezzature/_components/RemoteNfcScanModal";
 import { movementNoteSchema } from "../_lib/validations";
 import type { CartRow, QuickMaterialInfo, DbItem, MovementRow, ReferentRow, ExcelLiveRow } from "../_lib/types";
 
@@ -296,6 +297,7 @@ export default function MovimentiPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [remoteMaterialScanOpen, setRemoteMaterialScanOpen] = useState(false);
 
   const [closeOpen, setCloseOpen] = useState(false);
   const [closing, setClosing] = useState<MovementRow | null>(null);
@@ -1106,6 +1108,24 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
     }
 
     if (!item) {
+      const { data: shelfByBarcode, error: barcodeError } = await supabase
+        .from("material_shelves")
+        .select("code")
+        .eq("barcode", code)
+        .maybeSingle();
+
+      if (barcodeError) {
+        console.error("pickItemByCode barcode error:", barcodeError);
+        setMsg("Errore ricerca barcode: " + barcodeError.message);
+        return;
+      }
+
+      const shelfBarcodeCode = (shelfByBarcode as { code?: string } | null)?.code;
+      if (shelfBarcodeCode && shelfBarcodeCode !== code) {
+        await pickItemByCode(shelfBarcodeCode, forCart);
+        return;
+      }
+
       setPicked(null);
       setMsg(`Codice "${code}" non trovato in anagrafica.`);
       setSearch(code);
@@ -1179,6 +1199,46 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
       setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
       stopScan();
     }
+  }
+
+  async function pickItemByRemoteScan(value: string) {
+    const scanValue = value.trim();
+    if (!scanValue) return;
+
+    setCartOpen(false);
+    setScanInfo(null);
+    setScanPopupOpen(false);
+    setMsg(null);
+
+    const { data: shelf, error } = await supabase
+      .from("material_shelves")
+      .select("code,warehouse")
+      .eq("nfc_tag_id", scanValue)
+      .maybeSingle();
+
+    if (error) {
+      setMsg("Errore ricerca NFC: " + error.message);
+      return;
+    }
+
+    const shelfCode = (shelf as { code?: string } | null)?.code;
+    if (shelfCode) {
+      await pickItemByCode(shelfCode, scanMode === "CART");
+      return;
+    }
+
+    await pickItemByCode(scanValue, scanMode === "CART");
+  }
+
+  function openRemoteMaterialScan() {
+    stopScan();
+    stopNfcScan();
+    setOpen(false);
+    setCartOpen(false);
+    setScanPopupOpen(false);
+    setScanInfo(null);
+    setMsg(null);
+    setRemoteMaterialScanOpen(true);
   }
   async function addScannedToCart() {
   if (!scanInfo) return;
@@ -1396,6 +1456,7 @@ function addMixedCartToCart() {
 function switchPickupMode(mode: "NORMAL" | "CART") {
   if (mode === scanMode) return;
   stopScan();
+  setRemoteMaterialScanOpen(false);
   setScanMode(mode);
   setQty("");
   setMixedSplit({ code: null, fromPrm: 0, fromReale: 0, manual: false });
@@ -1596,6 +1657,7 @@ function syncMixedPreviewState(code: string, prmFree: number, realeFree: number,
 
   function resetSearch() {
     stopScan();
+    setRemoteMaterialScanOpen(false);
     setSearch("");
     setSuggestions([]);
     setPicked(null);
@@ -1608,6 +1670,7 @@ function syncMixedPreviewState(code: string, prmFree: number, realeFree: number,
 
 function cancelMaterialPickupDraft() {
   stopScan();
+  setRemoteMaterialScanOpen(false);
   setType("OUT");
   setWarehouse("PRM");
   setQty("");
@@ -1647,6 +1710,7 @@ function cancelMaterialPickupDraft() {
 
 function finalizeMaterialPickupSuccess() {
   stopScan();
+  setRemoteMaterialScanOpen(false);
   setType("OUT");
   setWarehouse("PRM");
   setQty("");
@@ -3041,6 +3105,17 @@ function finalizeMaterialPickupSuccess() {
     }, 0);
   }
 
+  function startDashboardPhonePickup() {
+    setType("OUT");
+    setScanMode("NORMAL");
+    setWizardMatOpen(true);
+    setOutboundStepMat(1);
+    setMsg(null);
+    window.setTimeout(() => {
+      openRemoteMaterialScan();
+    }, 0);
+  }
+
   const active = useMemo(() => suggestions[activeIndex], [suggestions, activeIndex]);
 
   const displayHistory = useMemo(() => {
@@ -3221,6 +3296,15 @@ function finalizeMaterialPickupSuccess() {
                 <BarcodeIcon />
                 Barcode / QR
               </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={startDashboardPhonePickup}
+                style={{ padding: "10px 20px", fontWeight: 800, display: "inline-flex", alignItems: "center", gap: 6 }}
+              >
+                <BarcodeIcon />
+                Telefono
+              </button>
             </>
           )}
 
@@ -3330,13 +3414,17 @@ function finalizeMaterialPickupSuccess() {
                 </div>
 
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
-                  <button className="btn" type="button" onClick={() => (scanning ? stopScan() : startScan())} disabled={cartNfcScanning} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <button className="btn" type="button" onClick={() => (scanning ? stopScan() : startScan())} disabled={cartNfcScanning || remoteMaterialScanOpen} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <BarcodeIcon />
                     Barcode / QR
                   </button>
-                  <button className="btn" type="button" onClick={startNfcScan} disabled={scanning || cartNfcScanning} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <button className="btn" type="button" onClick={startNfcScan} disabled={scanning || cartNfcScanning || remoteMaterialScanOpen} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     {cartNfcScanning ? <SpinnerIcon /> : <NfcIcon />}
                     NFC
+                  </button>
+                  <button className="btn" type="button" onClick={openRemoteMaterialScan} disabled={scanning || cartNfcScanning} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <BarcodeIcon />
+                    Telefono
                   </button>
                   <button className="btn" type="button" onClick={resetSearch}>
                     Pulisci
@@ -4927,6 +5015,21 @@ function finalizeMaterialPickupSuccess() {
           </div>
         </div>
       )}
+      <RemoteNfcScanModal
+        open={remoteMaterialScanOpen}
+        onClose={() => {
+          setRemoteMaterialScanOpen(false);
+          if (scanMode === "CART" && cart.length > 0) setCartOpen(true);
+        }}
+        context="movement_select"
+        allowMultiple={scanMode === "CART"}
+        title={scanMode === "CART" ? "Aggiungi materiali con telefono" : "Seleziona materiale con telefono"}
+        subtitle="Inquadra il QR con il telefono, poi scegli NFC oppure Barcode / QR. Il materiale arriverà in questo movimento."
+        scanPath="/materiali/scan-remoto"
+        onTagReceived={(scanValue) => {
+          void pickItemByRemoteScan(scanValue);
+        }}
+      />
       {(scanning || cartNfcScanning || (scanInfo && scanMode === "CART") || (mixedCartInfo && scanMode === "CART")) && (
   <div
     style={{

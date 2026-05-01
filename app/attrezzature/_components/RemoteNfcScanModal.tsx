@@ -14,6 +14,7 @@ type Props = {
   onTagReceived: (nfcTagId: string, context?: { equipmentId?: string }) => void;
   allowMultiple?: boolean;
   title?: string;
+  subtitle?: string;
   sessionEndpoint?: string;
   scanPath?: string;
 };
@@ -30,6 +31,7 @@ export default function RemoteNfcScanModal({
   onTagReceived,
   allowMultiple = false,
   title = "Usa telefono come lettore NFC",
+  subtitle,
   sessionEndpoint = "/api/attrezzature/remote-nfc-session",
   scanPath = "/attrezzature/scan-remoto",
 }: Props) {
@@ -129,9 +131,10 @@ export default function RemoteNfcScanModal({
       open={open}
       title={title}
       subtitle={
-        allowMultiple
+        subtitle ??
+        (allowMultiple
           ? "Inquadra il QR, poi scansiona i tag. Ogni scansione apparirà sul PC."
-          : "Inquadra il QR con il telefono, poi avvicina il tag NFC."
+          : "Inquadra il QR con il telefono, poi avvicina il tag NFC.")
       }
       onClose={onClose}
       width="min(460px, 100%)"

@@ -245,6 +245,25 @@ export default function Home() {
     }
 
     if (!item) {
+      const { data: shelfByBarcode, error: barcodeError } = await supabase
+        .from("material_shelves")
+        .select("code")
+        .eq("barcode", code)
+        .maybeSingle();
+
+      if (barcodeError) {
+        console.error(barcodeError);
+        setMsg("Errore ricerca barcode: " + barcodeError.message);
+        setPicked(null);
+        setStock(null);
+        return;
+      }
+
+      if (shelfByBarcode && (shelfByBarcode as any).code !== code) {
+        await pickItemByCode((shelfByBarcode as any).code);
+        return;
+      }
+
       setMsg(`Codice "${code}" non trovato in anagrafica.`);
       setPicked(null);
       setStock(null);
@@ -431,14 +450,14 @@ export default function Home() {
     setNfcScanning(false);
   }
 
-  async function pickItemByNfcTag(nfcTagId: string) {
-    const tag = nfcTagId.trim();
-    if (!tag) return;
+  async function pickItemByRemoteScan(value: string) {
+    const scanValue = value.trim();
+    if (!scanValue) return;
 
     const { data: shelf, error } = await supabase
       .from("material_shelves")
       .select("code,warehouse")
-      .eq("nfc_tag_id", tag)
+      .eq("nfc_tag_id", scanValue)
       .maybeSingle();
 
     if (error) {
@@ -447,7 +466,7 @@ export default function Home() {
     }
 
     if (!shelf) {
-      setMsg("Tag NFC non associato a nessun materiale.");
+      await pickItemByCode(scanValue);
       return;
     }
 
@@ -614,11 +633,11 @@ export default function Home() {
                   setRemoteNfcOpen(true);
                 }}
                 disabled={scanning || nfcScanning}
-                title="Usa telefono come lettore NFC"
+                title="Usa telefono come lettore NFC, Barcode o QR"
                 style={{ display: "flex", alignItems: "center", gap: 6 }}
               >
-                <NfcIcon />
-                Telefono NFC
+                <BarcodeIcon />
+                Telefono
               </button>
               <button type="button" className="btn" onClick={resetSearch} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <SearchIcon />
@@ -733,10 +752,11 @@ export default function Home() {
             open={remoteNfcOpen}
             onClose={() => setRemoteNfcOpen(false)}
             context="movement_select"
-            title="Usa telefono come lettore NFC materiali"
+            title="Usa telefono come lettore materiali"
+            subtitle="Inquadra il QR con il telefono, poi scegli NFC oppure Barcode / QR. Il risultato arriverà su questo PC."
             scanPath="/materiali/scan-remoto"
-            onTagReceived={(nfcTagId) => {
-              void pickItemByNfcTag(nfcTagId);
+            onTagReceived={(scanValue) => {
+              void pickItemByRemoteScan(scanValue);
             }}
           />
 

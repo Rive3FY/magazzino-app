@@ -48,6 +48,12 @@ type Props = {
   basePath: string;
 };
 
+type ActionMenuPosition = {
+  top: number;
+  right: number;
+  maxHeight: number;
+};
+
 type AssetFormState = {
   serial_number: string;
   name: string;
@@ -183,6 +189,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const [techSheetBusyId, setTechSheetBusyId] = useState<string | null>(null);
   const [techSheetTargetRow, setTechSheetTargetRow] = useState<EquipmentAssetRow | null>(null);
   const [actionMenuOpenRowId, setActionMenuOpenRowId] = useState<string | null>(null);
+  const [actionMenuPosition, setActionMenuPosition] = useState<ActionMenuPosition | null>(null);
   const [remoteScanRow, setRemoteScanRow] = useState<EquipmentAssetRow | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<FastBarcodeReader | null>(null);
@@ -214,11 +221,53 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     if (!actionMenuOpenRowId) return;
     function onDocClick(e: MouseEvent) {
       const t = e.target as HTMLElement;
-      if (!t.closest("[data-action-menu]")) setActionMenuOpenRowId(null);
+      if (!t.closest("[data-action-menu]")) {
+        setActionMenuOpenRowId(null);
+        setActionMenuPosition(null);
+      }
     }
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [actionMenuOpenRowId]);
+
+  useEffect(() => {
+    if (!actionMenuOpenRowId) return;
+    function closeActionMenu() {
+      setActionMenuOpenRowId(null);
+      setActionMenuPosition(null);
+    }
+    window.addEventListener("resize", closeActionMenu);
+    window.addEventListener("scroll", closeActionMenu, true);
+    return () => {
+      window.removeEventListener("resize", closeActionMenu);
+      window.removeEventListener("scroll", closeActionMenu, true);
+    };
+  }, [actionMenuOpenRowId]);
+
+  function toggleActionMenu(rowId: string, button: HTMLButtonElement) {
+    if (actionMenuOpenRowId === rowId) {
+      setActionMenuOpenRowId(null);
+      setActionMenuPosition(null);
+      return;
+    }
+
+    const rect = button.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const margin = 8;
+    const estimatedMenuHeight = isAdmin ? 308 : 52;
+    const spaceBelow = viewportHeight - rect.bottom - margin;
+    const spaceAbove = rect.top - margin;
+    const openUp = spaceBelow < estimatedMenuHeight && spaceAbove > spaceBelow;
+    const availableHeight = Math.max(120, openUp ? spaceAbove : spaceBelow);
+    const maxHeight = Math.min(estimatedMenuHeight, availableHeight);
+
+    setActionMenuPosition({
+      top: openUp ? Math.max(margin, rect.top - maxHeight - 4) : Math.min(rect.bottom + 4, viewportHeight - maxHeight - margin),
+      right: Math.max(margin, window.innerWidth - rect.right),
+      maxHeight,
+    });
+    setActionMenuOpenRowId(rowId);
+  }
 
   async function saveNfcAssociation(row: EquipmentAssetRow, serialNumber: string) {
     await supabase.from("equipment_assets").update({ nfc_tag_id: null }).eq("nfc_tag_id", serialNumber);
@@ -1438,26 +1487,26 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                           <button
                             type="button"
                             className="btn"
-                            onClick={() => setActionMenuOpenRowId((id) => (id === row.id ? null : row.id))}
+                            onClick={(e) => toggleActionMenu(row.id, e.currentTarget)}
                             title="Azioni"
                             style={{ padding: "6px 10px", minWidth: 36 }}
                           >
                             ⋮
                           </button>
-                          {actionMenuOpenRowId === row.id && (
+                          {actionMenuOpenRowId === row.id && actionMenuPosition && (
                             <div
                               style={{
-                                position: "absolute",
-                                right: 0,
-                                top: "100%",
-                                marginTop: 4,
+                                position: "fixed",
+                                right: actionMenuPosition.right,
+                                top: actionMenuPosition.top,
                                 background: "#fff",
                                 border: "1px solid rgba(15,23,42,0.12)",
                                 borderRadius: 8,
                                 boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
                                 zIndex: 60,
                                 minWidth: 180,
-                                overflow: "hidden",
+                                maxHeight: actionMenuPosition.maxHeight,
+                                overflowY: "auto",
                               }}
                             >
                               <button

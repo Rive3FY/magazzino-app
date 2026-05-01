@@ -31,6 +31,20 @@ async function getSessionArea(sessionCode: string): Promise<EquipmentArea | null
   return area === "LINEE" || area === "STAZIONI" ? area : null;
 }
 
+async function getSessionEvents(sessionCode: string): Promise<unknown[]> {
+  if (!sessionCode) return [];
+  const admin = getSupabaseAdmin();
+  if (!admin) return [];
+
+  const { data } = await admin
+    .from("remote_nfc_sessions")
+    .select("nfc_tag_ids")
+    .eq("code", sessionCode)
+    .maybeSingle();
+
+  return Array.isArray(data?.nfc_tag_ids) ? data.nfc_tag_ids : [];
+}
+
 export async function POST(req: Request) {
   try {
     const supabase = await createClient();
@@ -89,10 +103,23 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Attrezzatura "${rawValue}" non trovata` }, { status: 404 });
     }
 
+    const sessionEvents = await getSessionEvents(sessionCode);
+    const alreadyInSession = sessionEvents.some((event) => {
+      const record = asRecord(event);
+      if (record) {
+        if (record.type !== "equipment_scan") return false;
+        if (record.assetId === asset.id) return true;
+        const eventRaw = String(record.rawValue ?? "").trim().toLowerCase();
+        return !!eventRaw && eventRaw === normalized;
+      }
+      return source === "nfc" && String(event ?? "").trim().toLowerCase() === String(asset.nfc_tag_id ?? "").trim().toLowerCase();
+    });
+
     return NextResponse.json({
       rawValue,
       source,
       asset,
+      alreadyInSession,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Errore sconosciuto";

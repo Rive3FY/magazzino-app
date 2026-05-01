@@ -13,6 +13,7 @@ type Status = "idle" | "scanning_nfc" | "scanning_code" | "resolving" | "equipme
 type ResolvedEquipment = {
   rawValue: string;
   source: ScanSource;
+  alreadyInSession?: boolean;
   asset: {
     id: string;
     asset_code: string;
@@ -118,6 +119,11 @@ export default function ScanRemotoPage() {
 
   const sendScanToPc = useCallback(async () => {
     if (!resolved) return;
+    if (resolved.alreadyInSession) {
+      setStatus("equipment");
+      setMsg("Questa attrezzatura è già stata aggiunta in questa sessione.");
+      return;
+    }
     const value = resolved.rawValue.trim();
     const source = resolved.source;
 
@@ -132,6 +138,10 @@ export default function ScanRemotoPage() {
         nfcTagId: source === "nfc" ? value : undefined,
         event: {
           type: "equipment_scan",
+          assetId: resolved.asset.id,
+          assetCode: resolved.asset.asset_code,
+          serialNumber: resolved.asset.serial_number,
+          name: resolved.asset.name,
           rawValue: value,
           source,
         },
@@ -390,14 +400,23 @@ export default function ScanRemotoPage() {
                 </div>
               </div>
 
-              {msg ? <div style={{ fontSize: 13, fontWeight: 900, color: "#b91c1c" }}>{msg}</div> : null}
+              {resolved.alreadyInSession ? (
+                <div style={{ borderRadius: 14, border: "1px solid rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.10)", padding: 12, fontSize: 13, fontWeight: 900, color: "#92400e" }}>
+                  Questa attrezzatura è già stata aggiunta in questa sessione.
+                </div>
+              ) : msg ? <div style={{ fontSize: 13, fontWeight: 900, color: "#b91c1c" }}>{msg}</div> : null}
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1.35fr", gap: 10 }}>
                 <button type="button" onClick={resetReader} style={{ borderRadius: 18, border: "1px solid rgba(15,23,42,0.12)", background: "#fff", padding: "15px 12px", color: "#0f172a", fontSize: 13, fontWeight: 950 }}>
                   Annulla
                 </button>
-                <button type="button" onClick={() => void sendScanToPc()} style={{ borderRadius: 18, border: "none", background: "#34d399", padding: "15px 12px", color: "#0f172a", fontSize: 13, fontWeight: 950 }}>
-                  Aggiungi al prelievo
+                <button
+                  type="button"
+                  onClick={() => void sendScanToPc()}
+                  disabled={!!resolved.alreadyInSession}
+                  style={{ borderRadius: 18, border: "none", background: resolved.alreadyInSession ? "#cbd5e1" : "#34d399", padding: "15px 12px", color: "#0f172a", fontSize: 13, fontWeight: 950, opacity: resolved.alreadyInSession ? 0.65 : 1 }}
+                >
+                  {resolved.alreadyInSession ? "Già aggiunta" : "Aggiungi al prelievo"}
                 </button>
               </div>
             </div>

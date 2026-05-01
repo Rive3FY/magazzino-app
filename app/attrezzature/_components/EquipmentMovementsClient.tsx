@@ -1259,7 +1259,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       setCartOpen(true);
       return;
     }
-    setCart((prev) => [...prev, matched.id]);
+    setCart((prev) => (prev.includes(matched.id) ? prev : [...prev, matched.id]));
     setCartOpen(true);
     setScanMode("CART");
     setMsg(`Attrezzatura aggiunta al carrello. Totale: ${cart.length + 1}.`);
@@ -1302,7 +1302,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       setCartOpen(true);
       return;
     }
-    setCart((prev) => [...prev, matched.id]);
+    setCart((prev) => (prev.includes(matched.id) ? prev : [...prev, matched.id]));
     setCartOpen(true);
     setScanMode("CART");
     setMsg(`Attrezzatura aggiunta al carrello. Totale: ${cart.length + 1}.`);

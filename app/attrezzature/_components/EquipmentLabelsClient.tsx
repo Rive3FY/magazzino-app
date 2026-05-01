@@ -31,7 +31,7 @@ type LabelAsset = EquipmentAssetRow & {
   barcode_value: string;
 };
 
-type PrintMode = "complete" | "qrOnly" | "barcodeOnly";
+type PrintMode = "complete" | "barcodeQr" | "qrDescription" | "barcodeDescription" | "qrOnly" | "barcodeOnly";
 
 const ROWS_PER_PAGE = 15;
 
@@ -351,7 +351,17 @@ export default function EquipmentLabelsClient({ area }: Props) {
           return `<div class="etichetta-label etichetta-barcode-only"><div class="etichetta-barcode-only-inner">${barcodeHtml}</div></div>`;
         }
         const shelfLine = [row.shelf, row.place].filter(Boolean).join(" · ");
-        return `<div class="etichetta-label"><div class="etichetta-content etichetta-content-with-qr"><div class="etichetta-left"><div class="etichetta-text"><div class="etichetta-code">${esc(row.serial_number || row.asset_code)}</div><div class="etichetta-name">${esc(row.name)}</div><div class="etichetta-shelf">${esc(EQUIPMENT_AREA_LABELS[row.equipment_area])}</div>${shelfLine ? `<div class="etichetta-shelf">Scaffale: ${esc(shelfLine)}</div>` : ""}</div><div class="etichetta-barcode">${barcodeHtml}</div></div><div class="etichetta-qr">${qrHtml}</div></div></div>`;
+        const descriptionHtml = `<div class="etichetta-text"><div class="etichetta-code">${esc(row.serial_number || row.asset_code)}</div><div class="etichetta-name">${esc(row.name)}</div><div class="etichetta-shelf">${esc(EQUIPMENT_AREA_LABELS[row.equipment_area])}</div>${shelfLine ? `<div class="etichetta-shelf">Scaffale: ${esc(shelfLine)}</div>` : ""}</div>`;
+        if (printMode === "barcodeQr") {
+          return `<div class="etichetta-label etichetta-code-pair"><div class="etichetta-code-pair-inner"><div class="etichetta-barcode-only-inner">${barcodeHtml}</div><div class="etichetta-qr-only-inner">${qrHtml}</div></div></div>`;
+        }
+        if (printMode === "qrDescription") {
+          return `<div class="etichetta-label"><div class="etichetta-content etichetta-content-with-qr"><div class="etichetta-left">${descriptionHtml}</div><div class="etichetta-qr">${qrHtml}</div></div></div>`;
+        }
+        if (printMode === "barcodeDescription") {
+          return `<div class="etichetta-label"><div class="etichetta-content">${descriptionHtml}<div class="etichetta-barcode">${barcodeHtml}</div></div></div>`;
+        }
+        return `<div class="etichetta-label"><div class="etichetta-content etichetta-content-with-qr"><div class="etichetta-left">${descriptionHtml}<div class="etichetta-barcode">${barcodeHtml}</div></div><div class="etichetta-qr">${qrHtml}</div></div></div>`;
       })
       .join("");
 
@@ -381,6 +391,9 @@ body{margin:0;padding:0;background:#fff}
 .etichetta-barcode-only{display:flex;align-items:center;justify-content:center;padding:3mm}
 .etichetta-barcode-only-inner{display:flex;align-items:center;justify-content:center;width:100%;height:100%}
 .etichetta-barcode-only svg{width:58mm!important;height:auto!important;display:block}
+.etichetta-code-pair{display:flex;align-items:center;justify-content:center;padding:2mm}
+.etichetta-code-pair-inner{display:grid;grid-template-columns:1fr 20mm;gap:2mm;align-items:center;width:100%;height:100%}
+.etichetta-code-pair .etichetta-barcode-only-inner svg{width:42mm!important;height:auto!important;display:block}
 </style>
 </head><body><div class="etichette-print-grid">${labelsHtml}</div></body></html>`;
   }
@@ -512,7 +525,10 @@ body{margin:0;padding:0;background:#fff}
             <div style={{ minWidth: 0 }}>
               <label className="label" htmlFor={`labels-print-mode-${area}`}>Stampa</label>
               <select id={`labels-print-mode-${area}`} className="input" value={printMode} onChange={(e) => setPrintMode(e.target.value as PrintMode)}>
-                <option value="complete">Barcode + QR</option>
+                <option value="complete">Descrizione + Barcode + QR</option>
+                <option value="barcodeQr">Barcode + QR</option>
+                <option value="qrDescription">QR + descrizione</option>
+                <option value="barcodeDescription">Barcode + descrizione</option>
                 <option value="qrOnly">Solo QR</option>
                 <option value="barcodeOnly">Solo Barcode</option>
               </select>
@@ -779,17 +795,61 @@ function EquipmentLabelPreview({
   }
 
   const shelfLine = [row.shelf, row.place].filter(Boolean).join(" · ");
+  const description = (
+    <div className="etichetta-text">
+      <div className="etichetta-code">{row.serial_number || row.asset_code}</div>
+      <div className="etichetta-name">{row.name}</div>
+      <div className="etichetta-shelf">{areaLabel}</div>
+      {shelfLine ? <div className="etichetta-shelf">Scaffale: {shelfLine}</div> : null}
+    </div>
+  );
+
+  if (printMode === "barcodeQr") {
+    return (
+      <div className="etichetta-label etichetta-code-pair">
+        <div className="etichetta-code-pair-inner">
+          <div className="etichetta-barcode-only-inner">
+            <BarcodeSvg value={row.barcode_value} />
+          </div>
+          <div className="etichetta-qr-only-inner">
+            <QRCodeSVG value={row.barcode_value} size={88} level="M" marginSize={2} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (printMode === "qrDescription") {
+    return (
+      <div className="etichetta-label">
+        <div className="etichetta-content etichetta-content-with-qr">
+          <div className="etichetta-left">{description}</div>
+          <div className="etichetta-qr">
+            <QRCodeSVG value={row.barcode_value} size={88} level="M" marginSize={2} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (printMode === "barcodeDescription") {
+    return (
+      <div className="etichetta-label">
+        <div className="etichetta-content">
+          {description}
+          <div className="etichetta-barcode">
+            <BarcodeSvg value={row.barcode_value} />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="etichetta-label">
       <div className="etichetta-content etichetta-content-with-qr">
         <div className="etichetta-left">
-          <div className="etichetta-text">
-            <div className="etichetta-code">{row.serial_number || row.asset_code}</div>
-            <div className="etichetta-name">{row.name}</div>
-            <div className="etichetta-shelf">{areaLabel}</div>
-            {shelfLine ? <div className="etichetta-shelf">Scaffale: {shelfLine}</div> : null}
-          </div>
+          {description}
           <div className="etichetta-barcode">
             <BarcodeSvg value={row.barcode_value} />
           </div>

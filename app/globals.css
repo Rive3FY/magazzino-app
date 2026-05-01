@@ -2655,6 +2655,25 @@ html, body {
   height: auto !important;
   display: block;
 }
+.etichetta-code-pair {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2mm;
+}
+.etichetta-code-pair-inner {
+  display: grid;
+  grid-template-columns: 1fr 20mm;
+  gap: 2mm;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+}
+.etichetta-code-pair .etichetta-barcode-only-inner svg {
+  width: 42mm !important;
+  height: auto !important;
+  display: block;
+}
 .etichette-preview-wrap {
   overflow: auto;
   max-height: 520px;

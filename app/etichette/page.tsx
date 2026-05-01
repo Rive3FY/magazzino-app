@@ -20,7 +20,7 @@ type LabelItem = {
   barcodeValue: string;
 };
 
-type PrintMode = "complete" | "qrOnly" | "barcodeOnly";
+type PrintMode = "complete" | "barcodeQr" | "qrDescription" | "barcodeDescription" | "qrOnly" | "barcodeOnly";
 
 const supabase = createClient();
 
@@ -257,7 +257,17 @@ export default function EtichettePage() {
         return `<div class="etichetta-label etichetta-barcode-only"><div class="etichetta-barcode-only-inner">${bcHtml}</div></div>`;
       }
       const shelfLine = labelType === "scaffale" ? `<div class="etichetta-shelf"><b>${esc(l.warehouse)}</b> · ${esc(l.shelf)}${l.place ? ` · ${esc(l.place)}` : ""}</div>` : "";
-      return `<div class="etichetta-label"><div class="etichetta-content etichetta-content-with-qr"><div class="etichetta-left"><div class="etichetta-text"><div class="etichetta-code">${esc(l.code)}</div><div class="etichetta-name">${esc(l.name)}</div>${shelfLine}</div><div class="etichetta-barcode">${bcHtml}</div></div><div class="etichetta-qr">${qrHtml}</div></div></div>`;
+      const descriptionHtml = `<div class="etichetta-text"><div class="etichetta-code">${esc(l.code)}</div><div class="etichetta-name">${esc(l.name)}</div>${shelfLine}</div>`;
+      if (printMode === "barcodeQr") {
+        return `<div class="etichetta-label etichetta-code-pair"><div class="etichetta-code-pair-inner"><div class="etichetta-barcode-only-inner">${bcHtml}</div><div class="etichetta-qr-only-inner">${qrHtml}</div></div></div>`;
+      }
+      if (printMode === "qrDescription") {
+        return `<div class="etichetta-label"><div class="etichetta-content etichetta-content-with-qr"><div class="etichetta-left">${descriptionHtml}</div><div class="etichetta-qr">${qrHtml}</div></div></div>`;
+      }
+      if (printMode === "barcodeDescription") {
+        return `<div class="etichetta-label"><div class="etichetta-content">${descriptionHtml}<div class="etichetta-barcode">${bcHtml}</div></div></div>`;
+      }
+      return `<div class="etichetta-label"><div class="etichetta-content etichetta-content-with-qr"><div class="etichetta-left">${descriptionHtml}<div class="etichetta-barcode">${bcHtml}</div></div><div class="etichetta-qr">${qrHtml}</div></div></div>`;
     }).join("");
     tmp.remove();
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etichette</title>
@@ -284,6 +294,9 @@ body{margin:0;padding:0;background:#fff}
 .etichetta-barcode-only{display:flex;align-items:center;justify-content:center;padding:3mm}
 .etichetta-barcode-only-inner{display:flex;align-items:center;justify-content:center;width:100%;height:100%}
 .etichetta-barcode-only svg{width:58mm!important;height:auto!important;display:block}
+.etichetta-code-pair{display:flex;align-items:center;justify-content:center;padding:2mm}
+.etichetta-code-pair-inner{display:grid;grid-template-columns:1fr 20mm;gap:2mm;align-items:center;width:100%;height:100%}
+.etichetta-code-pair .etichetta-barcode-only-inner svg{width:42mm!important;height:auto!important;display:block}
 </style>
 </head><body><div class="etichette-print-grid">${labelHtml}</div></body></html>`;
   }
@@ -382,8 +395,11 @@ body{margin:0;padding:0;background:#fff}
           </div>
           <div>
             <label className="label" style={{ fontSize: 12 }}>Stampa</label>
-            <select className="input" value={printMode} onChange={(e) => setPrintMode(e.target.value as PrintMode)} style={{ width: 150 }}>
-              <option value="complete">Barcode + QR</option>
+            <select className="input" value={printMode} onChange={(e) => setPrintMode(e.target.value as PrintMode)} style={{ width: 230 }}>
+              <option value="complete">Descrizione + Barcode + QR</option>
+              <option value="barcodeQr">Barcode + QR</option>
+              <option value="qrDescription">QR + descrizione</option>
+              <option value="barcodeDescription">Barcode + descrizione</option>
               <option value="qrOnly">Solo QR</option>
               <option value="barcodeOnly">Solo Barcode</option>
             </select>
@@ -545,19 +561,64 @@ function LabelPreview({
     );
   }
 
+  const description = (
+    <div className="etichetta-text">
+      <div className="etichetta-code">{label.code}</div>
+      <div className="etichetta-name">{label.name}</div>
+      {labelType === "scaffale" && (
+        <div className="etichetta-shelf">
+          <b>{label.warehouse}</b> · {label.shelf}{label.place ? ` · ${label.place}` : ""}
+        </div>
+      )}
+    </div>
+  );
+
+  if (printMode === "barcodeQr") {
+    return (
+      <div className="etichetta-label etichetta-code-pair">
+        <div className="etichetta-code-pair-inner">
+          <div className="etichetta-barcode-only-inner">
+            <BarcodeSvg value={label.barcodeValue} />
+          </div>
+          <div className="etichetta-qr-only-inner">
+            <QRCodeSVG value={label.barcodeValue} size={88} level="M" marginSize={2} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (printMode === "qrDescription") {
+    return (
+      <div className="etichetta-label">
+        <div className="etichetta-content etichetta-content-with-qr">
+          <div className="etichetta-left">{description}</div>
+          <div className="etichetta-qr">
+            <QRCodeSVG value={label.barcodeValue} size={88} level="M" marginSize={2} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (printMode === "barcodeDescription") {
+    return (
+      <div className="etichetta-label">
+        <div className="etichetta-content">
+          {description}
+          <div className="etichetta-barcode">
+            <BarcodeSvg value={label.barcodeValue} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="etichetta-label">
       <div className="etichetta-content etichetta-content-with-qr">
         <div className="etichetta-left">
-          <div className="etichetta-text">
-            <div className="etichetta-code">{label.code}</div>
-            <div className="etichetta-name">{label.name}</div>
-            {labelType === "scaffale" && (
-              <div className="etichetta-shelf">
-                <b>{label.warehouse}</b> · {label.shelf}{label.place ? ` · ${label.place}` : ""}
-              </div>
-            )}
-          </div>
+          {description}
           <div className="etichetta-barcode">
             <BarcodeSvg value={label.barcodeValue} />
           </div>

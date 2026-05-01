@@ -3512,7 +3512,7 @@ function finalizeMaterialPickupSuccess() {
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{
-              width: "min(560px, 100%)",
+              width: "min(920px, calc(100vw - 32px))",
               maxHeight: "90vh",
               overflow: open && search.trim() ? "visible" : "auto",
               background: "#fff",
@@ -3668,7 +3668,7 @@ function finalizeMaterialPickupSuccess() {
                     <div
                       style={{
                         display: "grid",
-                        gridTemplateColumns: "auto 1fr",
+                        gridTemplateColumns: "auto minmax(0, 1fr)",
                         gap: 12,
                         alignItems: "center",
                         padding: 12,

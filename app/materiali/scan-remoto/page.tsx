@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BrowserMultiFormatReader } from "@zxing/browser";
-import { useAuth } from "../../_lib/hooks/useAuth";
+import type { User } from "@supabase/supabase-js";
+import { createClient } from "../../_lib/supabase/client";
 
 type ScannerControls = {
   reset?: () => void;
@@ -50,9 +50,10 @@ function toNumber(value: string) {
 export default function MaterialiScanRemotoPage() {
   const searchParams = useSearchParams();
   const code = searchParams.get("code")?.trim().toUpperCase() ?? "";
-  const { user, loading: authLoading } = useAuth();
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const readerRef = useRef<ScannerControls | null>(null);
   const nfcAbortRef = useRef<AbortController | null>(null);
   const scanTokenRef = useRef(0);
 
@@ -63,12 +64,24 @@ export default function MaterialiScanRemotoPage() {
   const [qty, setQty] = useState("1");
 
   useEffect(() => {
-    if (authLoading) return;
-    if (!user) {
-      const returnTo = `/materiali/scan-remoto${code ? `?code=${encodeURIComponent(code)}` : ""}`;
-      window.location.href = `/login?redirect=${encodeURIComponent(returnTo)}`;
-    }
-  }, [user, authLoading, code]);
+    const supabase = createClient();
+    let active = true;
+
+    void supabase.auth.getUser().then(({ data }) => {
+      if (!active) return;
+      const nextUser = data.user ?? null;
+      setUser(nextUser);
+      setAuthLoading(false);
+      if (!nextUser) {
+        const returnTo = `/materiali/scan-remoto${code ? `?code=${encodeURIComponent(code)}` : ""}`;
+        window.location.href = `/login?redirect=${encodeURIComponent(returnTo)}`;
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [code]);
 
   const stopCameraScan = useCallback(() => {
     try {
@@ -269,8 +282,10 @@ export default function MaterialiScanRemotoPage() {
         throw new Error("Timeout: nessun Barcode/QR rilevato entro 30 secondi");
       }
 
-      readerRef.current = new BrowserMultiFormatReader();
-      const result = await readerRef.current.decodeOnceFromConstraints(videoConstraints, videoEl);
+      const { BrowserMultiFormatReader } = await import("@zxing/browser");
+      const reader = new BrowserMultiFormatReader();
+      readerRef.current = reader;
+      const result = await reader.decodeOnceFromConstraints(videoConstraints, videoEl);
       stopCameraScan();
       const text = String(result?.getText?.() ?? "").trim();
       await resolveScanValue(text, "barcode");

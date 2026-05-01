@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useSidebar } from "../_lib/SidebarContext";
 import SideNav from "./SideNav";
@@ -20,11 +19,11 @@ function shouldHideSidebar(pathname: string) {
 export default function AppShell({ hasUser, displayName, displayBadge, children }: Props) {
   const pathname = usePathname();
   const { isOpen } = useSidebar();
-  const [mounted, setMounted] = useState(false);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const isScannerPage = pathname === "/materiali/scan-remoto" || pathname === "/attrezzature/scan-remoto";
+  if (isScannerPage) {
+    return <>{children}</>;
+  }
 
   const hideSidebar = hasUser && shouldHideSidebar(pathname);
   const sidebarCollapsed = hasUser && !hideSidebar && !isOpen;
@@ -45,7 +44,7 @@ export default function AppShell({ hasUser, displayName, displayBadge, children 
 
       <div className="main">
         <div className="content">
-          {mounted ? children : <div style={{ minHeight: 120 }} aria-hidden="true" />}
+          {children}
           <footer className="app-footer">
             © <span suppressHydrationWarning>{new Date().getFullYear()}</span> · Gestionale Magazzino
           </footer>

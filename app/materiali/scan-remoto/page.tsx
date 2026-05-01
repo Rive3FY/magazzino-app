@@ -121,7 +121,7 @@ export default function MaterialiScanRemotoPage() {
     const res = await fetch("/api/materiali/remote-scan-resolve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rawValue: value, source }),
+      body: JSON.stringify({ rawValue: value, source, sessionCode: code }),
     });
     const json = await res.json().catch(() => ({}));
 
@@ -138,7 +138,7 @@ export default function MaterialiScanRemotoPage() {
     setQty("1");
     setMsg("");
     setStatus("material");
-  }, []);
+  }, [code]);
 
   const startNfcScan = useCallback(async () => {
     if (!code) {
@@ -358,48 +358,51 @@ export default function MaterialiScanRemotoPage() {
   }
 
   return (
-    <div style={{ minHeight: "calc(100dvh - 120px)", background: "#0f172a", padding: 14, color: "#fff" }}>
-      <div style={{ maxWidth: 460, margin: "0 auto", display: "grid", gap: 14 }}>
+    <div style={{ minHeight: "calc(100dvh - 120px)", background: "#f1f5f9", padding: 10, color: "#0f172a", overflowX: "hidden" }}>
+      <div style={{ width: "100%", maxWidth: 430, margin: "0 auto", display: "grid", gap: 12, boxSizing: "border-box" }}>
         <div
           style={{
-            borderRadius: 26,
-            border: "1px solid rgba(255,255,255,0.12)",
-            background: "linear-gradient(180deg, rgba(30,41,59,0.96), rgba(15,23,42,0.98))",
-            padding: 18,
-            boxShadow: "0 18px 50px rgba(0,0,0,0.28)",
+            width: "100%",
+            maxWidth: "100%",
+            boxSizing: "border-box",
+            borderRadius: 20,
+            border: "1px solid rgba(15,23,42,0.10)",
+            background: "rgba(255,255,255,0.96)",
+            padding: 14,
+            boxShadow: "0 14px 38px rgba(15,23,42,0.12)",
           }}
         >
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 18 }}>
-            <div>
-              <p style={{ margin: 0, fontSize: 11, fontWeight: 900, letterSpacing: "0.18em", textTransform: "uppercase", color: "#7dd3fc" }}>Terminale prelievo</p>
-              <h1 style={{ margin: "8px 0 0", fontSize: 30, lineHeight: 1, fontWeight: 950 }}>Materiali</h1>
-              <p style={{ margin: "10px 0 0", fontSize: 14, lineHeight: 1.45, color: "#cbd5e1" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 14 }}>
+            <div style={{ minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: 10, fontWeight: 900, letterSpacing: "0.16em", textTransform: "uppercase", color: "#0284c7" }}>Terminale prelievo</p>
+              <h1 style={{ margin: "6px 0 0", fontSize: 28, lineHeight: 1, fontWeight: 950, color: "#0f172a" }}>Materiali</h1>
+              <p style={{ margin: "9px 0 0", fontSize: 14, lineHeight: 1.35, color: "#475569" }}>
                 Leggi, scegli quantità e aggiungi al carrello del PC.
               </p>
             </div>
-            <div style={{ borderRadius: 16, background: "rgba(52,211,153,0.14)", padding: "9px 11px", textAlign: "right", flexShrink: 0 }}>
-              <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase", color: "#a7f3d0" }}>Sessione</div>
-              <div style={{ marginTop: 3, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 18, fontWeight: 950, letterSpacing: "0.12em", color: "#d1fae5" }}>{code}</div>
+            <div style={{ borderRadius: 14, background: "rgba(16,185,129,0.12)", border: "1px solid rgba(16,185,129,0.18)", padding: "8px 10px", textAlign: "right", flexShrink: 0 }}>
+              <div style={{ fontSize: 9, fontWeight: 900, letterSpacing: "0.10em", textTransform: "uppercase", color: "#047857" }}>Sessione</div>
+              <div style={{ marginTop: 3, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 17, fontWeight: 950, letterSpacing: "0.10em", color: "#065f46" }}>{code}</div>
             </div>
           </div>
 
           {status === "idle" && (
             <div style={{ display: "grid", gap: 12 }}>
-              <button type="button" onClick={startCodeScan} style={{ display: "flex", alignItems: "center", gap: 14, width: "100%", borderRadius: 20, border: "1px solid rgba(52,211,153,0.35)", background: "rgba(16,185,129,0.16)", padding: 14, color: "#fff", textAlign: "left" }}>
+              <button type="button" onClick={startCodeScan} style={{ display: "flex", alignItems: "center", gap: 14, width: "100%", borderRadius: 18, border: "1px solid rgba(16,185,129,0.28)", background: "rgba(16,185,129,0.08)", padding: 14, color: "#0f172a", textAlign: "left" }}>
                 <span style={{ display: "flex", width: 54, height: 54, alignItems: "center", justifyContent: "center", borderRadius: 16, background: "#34d399", color: "#0f172a", fontSize: 20, fontWeight: 950, flexShrink: 0 }}>QR</span>
                 <span style={{ display: "block", minWidth: 0, flex: 1 }}>
                   <span style={{ display: "block", fontSize: 18, fontWeight: 950 }}>Barcode / QR</span>
-                  <span style={{ display: "block", marginTop: 4, fontSize: 13, lineHeight: 1.35, color: "#cbd5e1" }}>Apri camera compatta e leggi il codice.</span>
+                  <span style={{ display: "block", marginTop: 4, fontSize: 13, lineHeight: 1.35, color: "#475569" }}>Apri camera compatta e leggi il codice.</span>
                 </span>
-                <span style={{ fontSize: 28, color: "#a7f3d0" }}>›</span>
+                <span style={{ fontSize: 28, color: "#059669" }}>›</span>
               </button>
-              <button type="button" onClick={startNfcScan} style={{ display: "flex", alignItems: "center", gap: 14, width: "100%", borderRadius: 20, border: "1px solid rgba(125,211,252,0.35)", background: "rgba(14,165,233,0.16)", padding: 14, color: "#fff", textAlign: "left" }}>
+              <button type="button" onClick={startNfcScan} style={{ display: "flex", alignItems: "center", gap: 14, width: "100%", borderRadius: 18, border: "1px solid rgba(2,132,199,0.24)", background: "rgba(2,132,199,0.08)", padding: 14, color: "#0f172a", textAlign: "left" }}>
                 <span style={{ display: "flex", width: 54, height: 54, alignItems: "center", justifyContent: "center", borderRadius: 16, background: "#38bdf8", color: "#0f172a", fontSize: 18, fontWeight: 950, flexShrink: 0 }}>NFC</span>
                 <span style={{ display: "block", minWidth: 0, flex: 1 }}>
                   <span style={{ display: "block", fontSize: 18, fontWeight: 950 }}>Tag NFC</span>
-                  <span style={{ display: "block", marginTop: 4, fontSize: 13, lineHeight: 1.35, color: "#cbd5e1" }}>Avvicina il telefono al tag materiale.</span>
+                  <span style={{ display: "block", marginTop: 4, fontSize: 13, lineHeight: 1.35, color: "#475569" }}>Avvicina il telefono al tag materiale.</span>
                 </span>
-                <span style={{ fontSize: 28, color: "#bae6fd" }}>›</span>
+                <span style={{ fontSize: 28, color: "#0284c7" }}>›</span>
               </button>
             </div>
           )}
@@ -429,16 +432,16 @@ export default function MaterialiScanRemotoPage() {
           )}
 
           {(status === "scanning_nfc" || status === "resolving" || status === "sending") && (
-            <div style={{ borderRadius: 22, border: "1px solid rgba(125,211,252,0.22)", background: "rgba(14,165,233,0.12)", padding: 26, textAlign: "center" }}>
-              <div style={{ margin: "0 auto 16px", display: "flex", width: 76, height: 76, alignItems: "center", justifyContent: "center", borderRadius: 999, background: "rgba(56,189,248,0.18)" }}>
-                <div style={{ width: 46, height: 46, borderRadius: 999, border: "4px solid #bae6fd", borderTopColor: "transparent", animation: "spin 1s linear infinite" }} />
+            <div style={{ borderRadius: 18, border: "1px solid rgba(2,132,199,0.18)", background: "rgba(2,132,199,0.06)", padding: 24, textAlign: "center" }}>
+              <div style={{ margin: "0 auto 16px", display: "flex", width: 76, height: 76, alignItems: "center", justifyContent: "center", borderRadius: 999, background: "rgba(2,132,199,0.10)" }}>
+                <div style={{ width: 46, height: 46, borderRadius: 999, border: "4px solid #0284c7", borderTopColor: "transparent", animation: "spin 1s linear infinite" }} />
               </div>
-              <div style={{ fontSize: 18, fontWeight: 950 }}>
+              <div style={{ fontSize: 18, fontWeight: 950, color: "#0f172a" }}>
                 {status === "sending" ? "Invio al PC..." : status === "resolving" ? "Ricerca materiale..." : "Lettura NFC attiva"}
               </div>
-              <div style={{ marginTop: 8, fontSize: 14, color: "#cbd5e1" }}>{msg}</div>
+              <div style={{ marginTop: 8, fontSize: 14, color: "#475569" }}>{msg}</div>
               {status === "scanning_nfc" ? (
-                <button type="button" onClick={cancelActiveScan} style={{ marginTop: 18, borderRadius: 16, border: "1px solid rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.10)", padding: "13px 16px", color: "#fff", fontSize: 14, fontWeight: 900 }}>
+                <button type="button" onClick={cancelActiveScan} style={{ marginTop: 18, borderRadius: 14, border: "1px solid rgba(15,23,42,0.12)", background: "#fff", padding: "13px 16px", color: "#0f172a", fontSize: 14, fontWeight: 900 }}>
                   Annulla e scegli altro lettore
                 </button>
               ) : null}
@@ -447,11 +450,11 @@ export default function MaterialiScanRemotoPage() {
 
           {status === "material" && resolved && (
             <div style={{ display: "grid", gap: 14 }}>
-              <div style={{ borderRadius: 22, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.10)", padding: 15 }}>
-                <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase", color: "#cbd5e1" }}>Materiale letto</div>
-                <div style={{ marginTop: 8, fontSize: 28, lineHeight: 1, fontWeight: 950 }}>{resolved.item.code}</div>
-                <div style={{ marginTop: 8, fontSize: 14, lineHeight: 1.35, color: "#cbd5e1" }}>{resolved.item.name}</div>
-                <div style={{ marginTop: 8, fontSize: 12, color: "#94a3b8" }}>UM: {resolved.item.um ?? "-"}</div>
+              <div style={{ borderRadius: 18, border: "1px solid rgba(15,23,42,0.10)", background: "#f8fafc", padding: 15, boxSizing: "border-box", minWidth: 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase", color: "#64748b" }}>Materiale letto</div>
+                <div style={{ marginTop: 8, fontSize: 23, lineHeight: 1.08, fontWeight: 950, color: "#0f172a", overflowWrap: "anywhere", wordBreak: "break-word" }}>{resolved.item.code}</div>
+                <div style={{ marginTop: 8, fontSize: 14, lineHeight: 1.35, color: "#334155" }}>{resolved.item.name}</div>
+                <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>UM: {resolved.item.um ?? "-"}</div>
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -467,24 +470,25 @@ export default function MaterialiScanRemotoPage() {
                       onClick={() => setSelectedWarehouse(row.warehouse)}
                       style={{
                         borderRadius: 18,
-                        border: active ? "1px solid #6ee7b7" : "1px solid rgba(255,255,255,0.12)",
-                        background: active ? "rgba(52,211,153,0.22)" : "rgba(255,255,255,0.06)",
+                        border: active ? "1px solid rgba(16,185,129,0.55)" : "1px solid rgba(15,23,42,0.10)",
+                        background: active ? "rgba(16,185,129,0.12)" : "#f8fafc",
                         padding: 12,
                         textAlign: "left",
-                        color: "#fff",
+                        color: "#0f172a",
                         opacity: disabled ? 0.45 : 1,
+                        minWidth: 0,
                       }}
                     >
                       <div style={{ fontSize: 13, fontWeight: 950 }}>{row.warehouse}</div>
                       <div style={{ marginTop: 5, fontSize: 26, lineHeight: 1, fontWeight: 950 }}>{row.qtyFree}</div>
-                      <div style={{ marginTop: 7, minHeight: 34, fontSize: 11, lineHeight: 1.3, color: "#cbd5e1" }}>{place || "Posizione non assegnata"}</div>
+                      <div style={{ marginTop: 7, minHeight: 34, fontSize: 11, lineHeight: 1.3, color: "#64748b" }}>{place || "Posizione non assegnata"}</div>
                     </button>
                   );
                 })}
               </div>
 
               <div>
-                <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 900, color: "#e2e8f0" }} htmlFor="pickupQty">Quantità da prelevare</label>
+                <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 900, color: "#0f172a" }} htmlFor="pickupQty">Quantità da prelevare</label>
                 <input
                   id="pickupQty"
                   style={{ width: "100%", borderRadius: 18, border: "1px solid rgba(255,255,255,0.14)", background: "#fff", padding: "14px 16px", fontSize: 28, fontWeight: 950, color: "#0f172a", outline: "none", boxSizing: "border-box" }}
@@ -497,13 +501,13 @@ export default function MaterialiScanRemotoPage() {
                   autoFocus
                 />
                 {selectedStock ? (
-                  <div style={{ marginTop: 8, fontSize: 12, color: "#94a3b8" }}>Disponibile in {selectedWarehouse}: {selectedStock.qtyFree}</div>
+                  <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>Disponibile in {selectedWarehouse}: {selectedStock.qtyFree}</div>
                 ) : null}
-                {msg ? <div style={{ marginTop: 8, fontSize: 13, fontWeight: 900, color: "#fecaca" }}>{msg}</div> : null}
+                {msg ? <div style={{ marginTop: 8, fontSize: 13, fontWeight: 900, color: "#b91c1c" }}>{msg}</div> : null}
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1.35fr", gap: 10 }}>
-                <button type="button" onClick={resetReader} style={{ borderRadius: 18, border: "1px solid rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.10)", padding: "15px 12px", color: "#fff", fontSize: 13, fontWeight: 950 }}>
+                <button type="button" onClick={resetReader} style={{ borderRadius: 18, border: "1px solid rgba(15,23,42,0.12)", background: "#fff", padding: "15px 12px", color: "#0f172a", fontSize: 13, fontWeight: 950 }}>
                   Annulla
                 </button>
                 <button type="button" onClick={() => void sendPickToPc()} style={{ borderRadius: 18, border: "none", background: "#34d399", padding: "15px 12px", color: "#0f172a", fontSize: 13, fontWeight: 950 }}>
@@ -514,24 +518,24 @@ export default function MaterialiScanRemotoPage() {
           )}
 
           {status === "success" && (
-            <div style={{ borderRadius: 22, border: "1px solid rgba(52,211,153,0.24)", background: "rgba(52,211,153,0.12)", padding: 24, textAlign: "center" }}>
+            <div style={{ borderRadius: 18, border: "1px solid rgba(16,185,129,0.24)", background: "rgba(16,185,129,0.10)", padding: 24, textAlign: "center" }}>
               <div style={{ margin: "0 auto 12px", display: "flex", width: 64, height: 64, alignItems: "center", justifyContent: "center", borderRadius: 999, background: "#34d399", color: "#0f172a", fontSize: 32, fontWeight: 950 }}>✓</div>
-              <p style={{ margin: 0, fontSize: 18, fontWeight: 950, color: "#d1fae5" }}>{msg}</p>
-              <p style={{ margin: "8px 0 0", fontSize: 14, color: "#cbd5e1" }}>Pronto per il prossimo materiale.</p>
+              <p style={{ margin: 0, fontSize: 18, fontWeight: 950, color: "#065f46" }}>{msg}</p>
+              <p style={{ margin: "8px 0 0", fontSize: 14, color: "#475569" }}>Pronto per il prossimo materiale.</p>
             </div>
           )}
 
           {status === "error" && (
-            <div style={{ borderRadius: 22, border: "1px solid rgba(252,165,165,0.24)", background: "rgba(248,113,113,0.12)", padding: 20, textAlign: "center" }}>
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 900, color: "#fee2e2" }}>{msg}</p>
-              <button type="button" onClick={resetReader} style={{ marginTop: 16, borderRadius: 16, border: "none", background: "#fff", padding: "12px 20px", color: "#0f172a", fontSize: 14, fontWeight: 950 }}>
+            <div style={{ borderRadius: 18, border: "1px solid rgba(239,68,68,0.24)", background: "rgba(239,68,68,0.08)", padding: 20, textAlign: "center" }}>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 900, color: "#991b1b" }}>{msg}</p>
+              <button type="button" onClick={resetReader} style={{ marginTop: 16, borderRadius: 16, border: "none", background: "#0f172a", padding: "12px 20px", color: "#fff", fontSize: 14, fontWeight: 950 }}>
                 Riprova
               </button>
             </div>
           )}
         </div>
 
-        <Link href="/materiali" style={{ textAlign: "center", fontSize: 14, fontWeight: 900, color: "#94a3b8", textDecoration: "underline", textUnderlineOffset: 4 }}>
+        <Link href="/materiali" style={{ textAlign: "center", fontSize: 14, fontWeight: 900, color: "#475569", textDecoration: "underline", textUnderlineOffset: 4 }}>
           Torna ai materiali
         </Link>
       </div>

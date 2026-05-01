@@ -1,3 +1,4 @@
+import { createClient as createSupabaseAdmin } from "@supabase/supabase-js";
 import { createClient } from "../../../_lib/supabase/server";
 import { NextResponse } from "next/server";
 
@@ -22,6 +23,13 @@ function excelFreeQty(row: unknown) {
   return n(rowJson?.["Qnt. a Mag. libero"] ?? 0);
 }
 
+function getSupabaseAdmin() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) return null;
+  return createSupabaseAdmin(url, serviceKey, { auth: { persistSession: false } });
+}
+
 export async function POST(req: Request) {
   try {
     const supabase = await createClient();
@@ -33,6 +41,7 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const rawValue = String(body.rawValue ?? "").trim();
     const source = String(body.source ?? "barcode");
+    const sessionCode = String(body.sessionCode ?? "").trim().toUpperCase();
 
     if (!rawValue) {
       return NextResponse.json({ error: "Valore scansione mancante" }, { status: 400 });
@@ -99,6 +108,26 @@ export async function POST(req: Request) {
       if (shelf.warehouse === "PRM" || shelf.warehouse === "REALE") {
         warehouses[shelf.warehouse].shelf = shelf.shelf ?? "";
         warehouses[shelf.warehouse].place = (shelf.place ?? "").trim();
+      }
+    }
+
+    if (sessionCode) {
+      const admin = getSupabaseAdmin();
+      if (admin) {
+        const { data: session } = await admin
+          .from("remote_nfc_sessions")
+          .select("nfc_tag_ids")
+          .eq("code", sessionCode)
+          .maybeSingle();
+
+        const events = Array.isArray(session?.nfc_tag_ids) ? session.nfc_tag_ids : [];
+        for (const event of events) {
+          const record = asRecord(event);
+          if (!record || record.type !== "material_pick" || record.code !== item.code) continue;
+          const wh = record.warehouse;
+          if (wh !== "PRM" && wh !== "REALE") continue;
+          warehouses[wh].qtyFree = Math.max(0, warehouses[wh].qtyFree - n(record.qty));
+        }
       }
     }
 

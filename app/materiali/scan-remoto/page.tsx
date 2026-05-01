@@ -160,15 +160,43 @@ export default function MaterialiScanRemotoPage() {
 
     try {
       const NativeDetector = (window as unknown as { BarcodeDetector?: NativeBarcodeDetectorCtor }).BarcodeDetector;
+      const videoConstraints: MediaStreamConstraints = {
+        audio: false,
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+      };
 
       if (NativeDetector) {
+        const stream = await navigator.mediaDevices.getUserMedia(videoConstraints);
+        videoEl.srcObject = stream;
+        await videoEl.play();
+
+        for (let i = 0; i < 30 && videoEl.readyState < HTMLMediaElement.HAVE_CURRENT_DATA; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+
         const detector = new NativeDetector({
           formats: ["qr_code", "ean_13", "ean_8", "code_128", "code_39", "codabar", "upc_a", "upc_e"],
         });
         const startedAt = Date.now();
 
         while (Date.now() - startedAt < 30000) {
-          const detections = await detector.detect(videoEl);
+          if (videoEl.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            continue;
+          }
+
+          let detections: NativeBarcodeDetection[] = [];
+          try {
+            detections = await detector.detect(videoEl);
+          } catch {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            continue;
+          }
+
           const rawValue = String(detections?.[0]?.rawValue ?? "").trim();
           if (rawValue) {
             stopCameraScan();
@@ -183,14 +211,7 @@ export default function MaterialiScanRemotoPage() {
 
       readerRef.current = new BrowserMultiFormatReader();
       const result = await readerRef.current.decodeOnceFromConstraints(
-        {
-          audio: false,
-          video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-        },
+        videoConstraints,
         videoEl
       );
       stopCameraScan();

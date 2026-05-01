@@ -9,6 +9,7 @@ import { createClient } from "../../_lib/supabase/client";
 type ScannerControls = {
   reset?: () => void;
   stopContinuousDecode?: () => void;
+  decodeOnceFromConstraints?: unknown;
 };
 
 type NativeBarcodeDetection = {

@@ -1,8 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import AppModalFrame from "../../_components/AppModalFrame";
+
+export type RemoteScanEvent = {
+  type?: string;
+  code?: string;
+  name?: string;
+  um?: string | null;
+  warehouse?: "PRM" | "REALE";
+  qty?: number;
+  source?: string;
+  rawValue?: string;
+};
 
 type Props = {
   open: boolean;
@@ -12,11 +24,14 @@ type Props = {
   equipmentIds?: string[];
   area?: string;
   onTagReceived: (nfcTagId: string, context?: { equipmentId?: string }) => void;
+  onScanEventReceived?: (event: RemoteScanEvent) => void;
   allowMultiple?: boolean;
   title?: string;
   subtitle?: string;
+  liveContent?: ReactNode;
   sessionEndpoint?: string;
   scanPath?: string;
+  width?: string;
 };
 
 const POLL_INTERVAL_MS = 1500;
@@ -29,11 +44,14 @@ export default function RemoteNfcScanModal({
   equipmentIds,
   area,
   onTagReceived,
+  onScanEventReceived,
   allowMultiple = false,
   title = "Usa telefono come lettore NFC",
   subtitle,
+  liveContent,
   sessionEndpoint = "/api/attrezzature/remote-nfc-session",
   scanPath = "/attrezzature/scan-remoto",
+  width = "min(460px, 100%)",
 }: Props) {
   const [code, setCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -86,14 +104,19 @@ export default function RemoteNfcScanModal({
         const json = await res.json().catch(() => ({}));
         if (!res.ok) return;
 
-        const ids = (json.nfcTagIds ?? (json.nfcTagId ? [json.nfcTagId] : [])) as string[];
+        const ids = (json.nfcTagIds ?? (json.nfcTagId ? [json.nfcTagId] : [])) as Array<string | RemoteScanEvent>;
         const newCount = ids.length;
 
         if (newCount > processedCount) {
           const eqIds = (json.contextData?.equipmentIds ?? []) as string[];
           for (let i = processedCount; i < newCount; i++) {
+            const entry = ids[i];
+            if (entry && typeof entry === "object") {
+              onScanEventReceived?.(entry);
+              continue;
+            }
             const ctx = eqIds[i] ? { equipmentId: eqIds[i] } : undefined;
-            onTagReceived(ids[i], ctx);
+            onTagReceived(String(entry ?? ""), ctx);
           }
           setProcessedCount(newCount);
 
@@ -118,7 +141,7 @@ export default function RemoteNfcScanModal({
         pollRef.current = null;
       }
     };
-  }, [open, code, processedCount, allowMultiple, onTagReceived, onClose, sessionEndpoint]);
+  }, [open, code, processedCount, allowMultiple, onTagReceived, onScanEventReceived, onClose, sessionEndpoint]);
 
   if (!open) return null;
 
@@ -137,7 +160,7 @@ export default function RemoteNfcScanModal({
           : "Inquadra il QR con il telefono, poi avvicina il tag NFC.")
       }
       onClose={onClose}
-      width="min(460px, 100%)"
+      width={width}
       footer={
         <button type="button" className="btn btnPrimary" onClick={onClose}>
           Chiudi
@@ -220,6 +243,8 @@ export default function RemoteNfcScanModal({
             </div>
           </div>
         ) : null}
+
+        {liveContent ? liveContent : null}
       </div>
     </AppModalFrame>
   );

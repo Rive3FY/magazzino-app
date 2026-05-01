@@ -11,7 +11,7 @@ import { useAuth } from "../_lib/hooks/useAuth";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import { useToast } from "../_lib/ToastContext";
 import ConfirmModal from "../_components/ConfirmModal";
-import RemoteNfcScanModal from "../attrezzature/_components/RemoteNfcScanModal";
+import RemoteNfcScanModal, { type RemoteScanEvent } from "../attrezzature/_components/RemoteNfcScanModal";
 import { movementNoteSchema } from "../_lib/validations";
 import type { CartRow, QuickMaterialInfo, DbItem, MovementRow, ReferentRow, ExcelLiveRow } from "../_lib/types";
 
@@ -1228,6 +1228,80 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
     }
 
     await pickItemByCode(scanValue, scanMode === "CART");
+  }
+
+  async function addRemotePickToCart(event: RemoteScanEvent) {
+    if (event.type !== "material_pick") return;
+    const code = String(event.code ?? "").trim();
+    const wh = event.warehouse;
+    const qtyPick = Number(event.qty ?? 0);
+
+    if (!code || (wh !== "PRM" && wh !== "REALE") || !Number.isFinite(qtyPick) || qtyPick <= 0) {
+      setMsg("Riga ricevuta dal telefono non valida.");
+      return;
+    }
+
+    const info = await loadMaterialForScan(code, wh);
+    if (!info) {
+      setMsg(`Materiale ${code} non disponibile in ${wh}.`);
+      return;
+    }
+
+    if (qtyPick > info.qtyFree) {
+      setMsg(`Quantità superiore alla disponibilità (${info.qtyFree}) per ${code} in ${wh}.`);
+      return;
+    }
+
+    let shelf = "";
+    let place = "";
+    try {
+      const { data: shelfRow } = await supabase
+        .from("material_shelves")
+        .select("shelf,place")
+        .eq("code", code)
+        .eq("warehouse", wh)
+        .maybeSingle();
+      shelf = (shelfRow as { shelf?: string | null } | null)?.shelf ?? "";
+      place = ((shelfRow as { place?: string | null } | null)?.place ?? "").trim();
+    } catch {}
+
+    setType("OUT");
+    setScanMode("CART");
+    setWizardMatOpen(true);
+    setOutboundStepMat(1);
+    setPicked(null);
+    setSearch("");
+    setOpen(false);
+    setCartOpen(true);
+    setMsg(null);
+
+    setCart((prev) => {
+      const idx = prev.findIndex((row) => row.code === code && row.warehouse === wh);
+      if (idx === -1) {
+        return [
+          ...prev,
+          {
+            code,
+            name: info.name,
+            um: info.um,
+            warehouse: wh,
+            qtyAvailable: info.qtyFree,
+            qtyPick,
+            shelf: shelf || undefined,
+            place: place || undefined,
+          },
+        ];
+      }
+
+      const copy = [...prev];
+      const nextQty = copy[idx].qtyPick + qtyPick;
+      if (nextQty > copy[idx].qtyAvailable) {
+        setMsg(`Totale richiesto superiore alla disponibilità (${copy[idx].qtyAvailable}) per ${code}.`);
+        return prev;
+      }
+      copy[idx] = { ...copy[idx], qtyPick: nextQty, shelf: shelf || copy[idx].shelf, place: place || copy[idx].place };
+      return copy;
+    });
   }
 
   function openRemoteMaterialScan() {
@@ -5022,13 +5096,55 @@ function finalizeMaterialPickupSuccess() {
           if (scanMode === "CART" && cart.length > 0) setCartOpen(true);
         }}
         context="movement_select"
-        allowMultiple={scanMode === "CART"}
-        title={scanMode === "CART" ? "Aggiungi materiali con telefono" : "Seleziona materiale con telefono"}
-        subtitle="Inquadra il QR con il telefono, poi scegli NFC oppure Barcode / QR. Il materiale arriverà in questo movimento."
+        allowMultiple
+        title="Terminale telefono prelievo"
+        subtitle="Inquadra il QR con il telefono. Quantità e magazzino si scelgono dal telefono; qui vedi il carrello live."
         scanPath="/materiali/scan-remoto"
+        width="min(760px, 100%)"
         onTagReceived={(scanValue) => {
           void pickItemByRemoteScan(scanValue);
         }}
+        onScanEventReceived={(event) => {
+          void addRemotePickToCart(event);
+        }}
+        liveContent={
+          <div className="appModalSection">
+            <div className="appModalSectionHeader">Carrello live da telefono</div>
+            <div className="appModalSectionBody" style={{ display: "grid", gap: 10 }}>
+              {cart.length === 0 ? (
+                <div style={{ padding: 12, borderRadius: 12, background: "#f8fafc", color: "#475569", fontWeight: 800 }}>
+                  Nessun materiale aggiunto. Usa il telefono per leggere, scegliere quantità e confermare.
+                </div>
+              ) : (
+                cart.map((row) => (
+                  <div
+                    key={`${row.code}-${row.warehouse}`}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr auto",
+                      gap: 10,
+                      alignItems: "center",
+                      padding: 12,
+                      borderRadius: 12,
+                      border: "1px solid rgba(15,23,42,0.10)",
+                      background: "#fff",
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 900, color: "#0f172a" }}>{row.code}</div>
+                      <div style={{ fontSize: 12, color: "#475569", marginTop: 2 }}>{row.name}</div>
+                      <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+                        {row.warehouse}
+                        {row.shelf ? ` · ${row.shelf}${row.place ? ` · ${row.place}` : ""}` : ""}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 20, fontWeight: 900, color: "#0f172a" }}>{row.qtyPick}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        }
       />
       {(scanning || cartNfcScanning || (scanInfo && scanMode === "CART") || (mixedCartInfo && scanMode === "CART")) && (
   <div

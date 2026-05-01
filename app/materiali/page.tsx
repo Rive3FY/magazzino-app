@@ -758,6 +758,9 @@ export default function Home() {
             onTagReceived={(scanValue) => {
               void pickItemByRemoteScan(scanValue);
             }}
+            onScanEventReceived={(event) => {
+              if (event.code) void pickItemByCode(event.code);
+            }}
           />
 
           {msg && <div style={{ marginTop: 10, fontWeight: 800 }}>{msg}</div>}

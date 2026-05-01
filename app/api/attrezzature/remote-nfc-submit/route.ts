@@ -20,11 +20,16 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { code, nfcTagId } = body as { code?: string; nfcTagId?: string };
+    const { code, nfcTagId, event } = body as {
+      code?: string;
+      nfcTagId?: string;
+      event?: Record<string, unknown>;
+    };
     const sessionCode = code?.trim().toUpperCase();
     const scanValue = nfcTagId?.trim();
+    const eventValue = event && typeof event === "object" ? event : null;
 
-    if (!sessionCode || !scanValue) {
+    if (!sessionCode || (!scanValue && !eventValue)) {
       return NextResponse.json({ error: "Codice e nfcTagId obbligatori" }, { status: 400 });
     }
 
@@ -50,12 +55,13 @@ export async function POST(req: Request) {
 
     const existing = Array.isArray(session.nfc_tag_ids)
       ? session.nfc_tag_ids
-      : (session.nfc_tag_ids as string[] | null) ?? [];
-    const updated = [...existing, scanValue];
+      : (session.nfc_tag_ids as unknown[] | null) ?? [];
+    const eventToStore = eventValue ?? scanValue;
+    const updated = [...existing, eventToStore];
 
     const { error: updateError } = await admin
       .from("remote_nfc_sessions")
-      .update({ nfc_tag_ids: updated, nfc_tag_id: scanValue })
+      .update({ nfc_tag_ids: updated, nfc_tag_id: scanValue ?? null })
       .eq("id", session.id);
 
     if (updateError) {

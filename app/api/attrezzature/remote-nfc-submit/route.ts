@@ -1,5 +1,15 @@
+import { createClient as createSupabaseAdmin } from "@supabase/supabase-js";
 import { createClient } from "../../../_lib/supabase/server";
 import { NextResponse } from "next/server";
+
+function getSupabaseAdmin() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) {
+    throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
+  }
+  return createSupabaseAdmin(url, serviceKey, { auth: { persistSession: false } });
+}
 
 export async function POST(req: Request) {
   try {
@@ -11,16 +21,18 @@ export async function POST(req: Request) {
 
     const body = await req.json().catch(() => ({}));
     const { code, nfcTagId } = body as { code?: string; nfcTagId?: string };
+    const sessionCode = code?.trim().toUpperCase();
+    const scanValue = nfcTagId?.trim();
 
-    if (!code?.trim() || !nfcTagId?.trim()) {
+    if (!sessionCode || !scanValue) {
       return NextResponse.json({ error: "Codice e nfcTagId obbligatori" }, { status: 400 });
     }
 
-    const { data: session, error: fetchError } = await supabase
+    const admin = getSupabaseAdmin();
+    const { data: session, error: fetchError } = await admin
       .from("remote_nfc_sessions")
       .select("id, expires_at, nfc_tag_ids")
-      .eq("code", code.trim())
-      .eq("created_by", user.id)
+      .eq("code", sessionCode)
       .maybeSingle();
 
     if (fetchError) {
@@ -39,11 +51,11 @@ export async function POST(req: Request) {
     const existing = Array.isArray(session.nfc_tag_ids)
       ? session.nfc_tag_ids
       : (session.nfc_tag_ids as string[] | null) ?? [];
-    const updated = [...existing, nfcTagId.trim()];
+    const updated = [...existing, scanValue];
 
-    const { error: updateError } = await supabase
+    const { error: updateError } = await admin
       .from("remote_nfc_sessions")
-      .update({ nfc_tag_ids: updated, nfc_tag_id: nfcTagId.trim() })
+      .update({ nfc_tag_ids: updated, nfc_tag_id: scanValue })
       .eq("id", session.id);
 
     if (updateError) {

@@ -11,6 +11,16 @@ type ScannerControls = {
   stopContinuousDecode?: () => void;
 };
 
+type NativeBarcodeDetection = {
+  rawValue?: string;
+};
+
+type NativeBarcodeDetector = {
+  detect: (source: ImageBitmapSource) => Promise<NativeBarcodeDetection[]>;
+};
+
+type NativeBarcodeDetectorCtor = new (options?: { formats?: string[] }) => NativeBarcodeDetector;
+
 export default function MaterialiScanRemotoPage() {
   const searchParams = useSearchParams();
   const code = searchParams.get("code")?.trim() ?? "";
@@ -149,8 +159,40 @@ export default function MaterialiScanRemotoPage() {
     }
 
     try {
+      const NativeDetector = (window as unknown as { BarcodeDetector?: NativeBarcodeDetectorCtor }).BarcodeDetector;
+
+      if (NativeDetector) {
+        const detector = new NativeDetector({
+          formats: ["qr_code", "ean_13", "ean_8", "code_128", "code_39", "codabar", "upc_a", "upc_e"],
+        });
+        const startedAt = Date.now();
+
+        while (Date.now() - startedAt < 30000) {
+          const detections = await detector.detect(videoEl);
+          const rawValue = String(detections?.[0]?.rawValue ?? "").trim();
+          if (rawValue) {
+            stopCameraScan();
+            await sendScanValue(rawValue, "Barcode / QR");
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+
+        throw new Error("Timeout: nessun Barcode/QR rilevato entro 30 secondi");
+      }
+
       readerRef.current = new BrowserMultiFormatReader();
-      const result = await readerRef.current.decodeOnceFromVideoDevice(undefined, videoEl);
+      const result = await readerRef.current.decodeOnceFromConstraints(
+        {
+          audio: false,
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+        },
+        videoEl
+      );
       stopCameraScan();
       const text = String(result?.getText?.() ?? "").trim();
       await sendScanValue(text, "Barcode / QR");
@@ -184,92 +226,138 @@ export default function MaterialiScanRemotoPage() {
   }
 
   return (
-    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-6 p-6">
-      <h1 className="text-xl font-semibold text-slate-800">Scansione remota materiali</h1>
-      <p className="text-center text-slate-600">
-        Usa il telefono come lettore NFC, Barcode o QR. Il risultato verrà inviato al PC.
-      </p>
-      <p className="text-center text-sm text-slate-500">Codice sessione:</p>
-      <div className="rounded-lg bg-slate-100 px-6 py-3 font-mono text-2xl font-bold tracking-wider text-slate-800">
-        {code}
+    <div className="min-h-[100dvh] bg-slate-950 p-4 text-white">
+      <div className="mx-auto flex min-h-[calc(100dvh-2rem)] max-w-md flex-col justify-center gap-5">
+        <div className="rounded-[28px] border border-white/10 bg-white/[0.08] p-5 shadow-2xl shadow-black/30 backdrop-blur">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.22em] text-sky-300">Lettore remoto</p>
+              <h1 className="mt-2 text-2xl font-black tracking-tight">Materiali</h1>
+              <p className="mt-2 text-sm leading-6 text-slate-300">
+                Scegli come leggere il materiale. Il risultato viene inviato subito al PC.
+              </p>
+            </div>
+            <div className="rounded-2xl bg-emerald-400/15 px-3 py-2 text-right">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-200">Sessione</div>
+              <div className="font-mono text-lg font-black tracking-[0.18em] text-emerald-100">{code}</div>
+            </div>
+          </div>
+
+          {status === "idle" && (
+            <div className="grid gap-3">
+              <button
+                type="button"
+                onClick={startNfcScan}
+                className="group flex items-center gap-4 rounded-2xl border border-sky-300/25 bg-sky-500/15 p-4 text-left transition active:scale-[0.99]"
+              >
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-400 text-xl font-black text-slate-950">
+                  NFC
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-lg font-black">Leggi tag NFC</span>
+                  <span className="block text-sm text-slate-300">Avvicina il telefono al tag materiale.</span>
+                </span>
+                <span className="text-2xl text-sky-200">›</span>
+              </button>
+              <button
+                type="button"
+                onClick={startCodeScan}
+                className="group flex items-center gap-4 rounded-2xl border border-emerald-300/25 bg-emerald-500/15 p-4 text-left transition active:scale-[0.99]"
+              >
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-400 text-xl font-black text-slate-950">
+                  QR
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-lg font-black">Leggi Barcode / QR</span>
+                  <span className="block text-sm text-slate-300">Inquadra il codice con la camera.</span>
+                </span>
+                <span className="text-2xl text-emerald-200">›</span>
+              </button>
+            </div>
+          )}
+
+          {(status === "scanning_nfc" || status === "scanning_code" || status === "sending") && (
+            <div className="grid gap-4">
+              {status === "scanning_code" ? (
+                <div className="overflow-hidden rounded-[24px] border border-white/10 bg-black shadow-xl">
+                  <div className="relative aspect-[3/4] max-h-[62vh] w-full bg-black">
+                    <video
+                      ref={videoRef}
+                      muted
+                      playsInline
+                      autoPlay
+                      className="h-full w-full object-cover"
+                    />
+                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0,transparent_38%,rgba(2,6,23,0.62)_72%)]" />
+                    <div className="pointer-events-none absolute inset-x-8 top-1/2 h-0.5 -translate-y-1/2 bg-emerald-300/90 shadow-[0_0_18px_rgba(52,211,153,0.9)]" />
+                    <div className="pointer-events-none absolute inset-10 rounded-3xl border border-white/20">
+                      <div className="absolute -left-0.5 -top-0.5 h-12 w-12 rounded-tl-3xl border-l-4 border-t-4 border-emerald-300" />
+                      <div className="absolute -right-0.5 -top-0.5 h-12 w-12 rounded-tr-3xl border-r-4 border-t-4 border-emerald-300" />
+                      <div className="absolute -bottom-0.5 -left-0.5 h-12 w-12 rounded-bl-3xl border-b-4 border-l-4 border-emerald-300" />
+                      <div className="absolute -bottom-0.5 -right-0.5 h-12 w-12 rounded-br-3xl border-b-4 border-r-4 border-emerald-300" />
+                    </div>
+                    <div className="absolute inset-x-4 bottom-4 rounded-2xl bg-slate-950/75 p-3 text-center text-sm font-bold text-white backdrop-blur">
+                      Centra il Barcode / QR nel riquadro
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-[24px] border border-sky-300/20 bg-sky-400/10 p-8 text-center">
+                  <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-sky-400/20">
+                    <div className="h-12 w-12 animate-spin rounded-full border-4 border-sky-200 border-t-transparent" />
+                  </div>
+                  <div className="text-lg font-black">{status === "sending" ? "Invio al PC..." : "Lettura NFC attiva"}</div>
+                  <div className="mt-2 text-sm text-slate-300">{msg}</div>
+                </div>
+              )}
+              {status === "scanning_code" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopCameraScan();
+                    setStatus("idle");
+                    setMsg("");
+                  }}
+                  className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm font-bold text-white"
+                >
+                  Chiudi camera
+                </button>
+              )}
+            </div>
+          )}
+
+          {status === "success" && (
+            <div className="rounded-[24px] border border-emerald-300/20 bg-emerald-400/10 p-6 text-center">
+              <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-400 text-3xl font-black text-slate-950">
+                ✓
+              </div>
+              <p className="text-lg font-black text-emerald-100">{msg}</p>
+              <p className="mt-2 text-sm text-slate-300">Puoi tornare al PC o avviare una nuova scansione.</p>
+            </div>
+          )}
+
+          {status === "error" && (
+            <div className="rounded-[24px] border border-red-300/20 bg-red-400/10 p-5 text-center">
+              <p className="text-sm font-bold text-red-100">{msg}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  stopCameraScan();
+                  setStatus("idle");
+                  setMsg("");
+                }}
+                className="mt-4 rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950"
+              >
+                Riprova
+              </button>
+            </div>
+          )}
+        </div>
+
+        <Link href="/materiali" className="text-center text-sm font-bold text-slate-400 underline underline-offset-4">
+          Torna ai materiali
+        </Link>
       </div>
-
-      {status === "idle" && (
-        <div className="flex flex-col items-center gap-3 sm:flex-row">
-          <button
-            type="button"
-            onClick={startNfcScan}
-            className="rounded-lg bg-sky-600 px-6 py-3 font-medium text-white hover:bg-sky-700 disabled:opacity-50"
-          >
-            Leggi NFC
-          </button>
-          <button
-            type="button"
-            onClick={startCodeScan}
-            className="rounded-lg bg-slate-800 px-6 py-3 font-medium text-white hover:bg-slate-900 disabled:opacity-50"
-          >
-            Leggi Barcode / QR
-          </button>
-        </div>
-      )}
-
-      {(status === "scanning_nfc" || status === "scanning_code" || status === "sending") && (
-        <div className="flex flex-col items-center gap-2">
-          {status === "scanning_code" ? (
-            <video
-              ref={videoRef}
-              muted
-              playsInline
-              autoPlay
-              className="w-full max-w-sm rounded-xl border border-slate-200 bg-black"
-            />
-          ) : (
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-sky-600 border-t-transparent" />
-          )}
-          <p className="text-sm text-slate-600">{msg}</p>
-          {status === "scanning_code" && (
-            <button
-              type="button"
-              onClick={() => {
-                stopCameraScan();
-                setStatus("idle");
-                setMsg("");
-              }}
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700"
-            >
-              Chiudi camera
-            </button>
-          )}
-        </div>
-      )}
-
-      {status === "success" && (
-        <div className="flex flex-col items-center gap-3">
-          <p className="font-medium text-green-600">{msg}</p>
-          <p className="text-center text-xs text-slate-500">Puoi tornare al PC o avviare una nuova scansione.</p>
-        </div>
-      )}
-
-      {status === "error" && (
-        <div className="flex flex-col items-center gap-3">
-          <p className="text-center text-red-600">{msg}</p>
-          <button
-            type="button"
-            onClick={() => {
-              stopCameraScan();
-              setStatus("idle");
-              setMsg("");
-            }}
-            className="rounded-lg bg-sky-600 px-4 py-2 text-sm text-white hover:bg-sky-700"
-          >
-            Riprova
-          </button>
-        </div>
-      )}
-
-      <Link href="/materiali" className="text-sm text-slate-500 underline">
-        Torna ai materiali
-      </Link>
     </div>
   );
 }

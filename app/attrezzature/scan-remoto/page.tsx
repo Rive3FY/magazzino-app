@@ -8,7 +8,28 @@ import { createClient } from "../../_lib/supabase/client";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../../_lib/fastBarcodeScanner";
 
 type ScanSource = "barcode" | "nfc";
-type Status = "idle" | "scanning_nfc" | "scanning_code" | "sending" | "success" | "error";
+type Status = "idle" | "scanning_nfc" | "scanning_code" | "resolving" | "equipment" | "sending" | "success" | "error";
+
+type ResolvedEquipment = {
+  rawValue: string;
+  source: ScanSource;
+  asset: {
+    id: string;
+    asset_code: string;
+    serial_number: string | null;
+    name: string;
+    category: string | null;
+    brand: string | null;
+    model: string | null;
+    equipment_area: "LINEE" | "STAZIONI";
+    warehouse: string | null;
+    status: string;
+    shelf: string | null;
+    place: string | null;
+    barcode: string | null;
+    nfc_tag_id: string | null;
+  };
+};
 
 export default function ScanRemotoPage() {
   const searchParams = useSearchParams();
@@ -22,6 +43,7 @@ export default function ScanRemotoPage() {
 
   const [status, setStatus] = useState<Status>("idle");
   const [msg, setMsg] = useState<string>("");
+  const [resolved, setResolved] = useState<ResolvedEquipment | null>(null);
 
   useEffect(() => {
     const supabase = createClient();
@@ -55,6 +77,7 @@ export default function ScanRemotoPage() {
       nfcAbortRef.current?.abort();
     } catch {}
     nfcAbortRef.current = null;
+    setResolved(null);
     setMsg("");
     setStatus("idle");
   }, [stopCameraScan]);
@@ -63,13 +86,40 @@ export default function ScanRemotoPage() {
     return () => stopCameraScan();
   }, [stopCameraScan]);
 
-  const sendScanToPc = useCallback(async (rawValue: string, source: ScanSource) => {
+  const resolveScanValue = useCallback(async (rawValue: string, source: ScanSource) => {
     const value = rawValue.trim();
     if (!value || value === "unknown") {
       setStatus("error");
       setMsg(source === "nfc" ? "Tag NFC non leggibile. Riprova." : "Barcode / QR non leggibile. Riprova.");
       return;
     }
+
+    setStatus("resolving");
+    setMsg("Ricerca attrezzatura...");
+    setResolved(null);
+
+    const res = await fetch("/api/attrezzature/remote-scan-resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rawValue: value, source, sessionCode: code }),
+    });
+    const json = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      setStatus("error");
+      setMsg(json.error ?? "Attrezzatura non trovata.");
+      return;
+    }
+
+    setResolved(json as ResolvedEquipment);
+    setMsg("");
+    setStatus("equipment");
+  }, [code]);
+
+  const sendScanToPc = useCallback(async () => {
+    if (!resolved) return;
+    const value = resolved.rawValue.trim();
+    const source = resolved.source;
 
     setStatus("sending");
     setMsg("Invio al PC...");
@@ -97,12 +147,13 @@ export default function ScanRemotoPage() {
     }
 
     setStatus("success");
-    setMsg("Codice inviato al PC");
+    setMsg(`${resolved.asset.serial_number || resolved.asset.asset_code} inviato al PC`);
+    setResolved(null);
     window.setTimeout(() => {
       setMsg("");
       setStatus("idle");
     }, 1100);
-  }, [code]);
+  }, [code, resolved]);
 
   const startNfcScan = useCallback(async () => {
     if (!code) {
@@ -142,7 +193,7 @@ export default function ScanRemotoPage() {
 
       if (scanTokenRef.current !== token) return;
       nfcAbortRef.current = null;
-      await sendScanToPc(nfcTagId, "nfc");
+      await resolveScanValue(nfcTagId, "nfc");
     } catch (error) {
       if (scanTokenRef.current !== token) return;
       nfcAbortRef.current = null;
@@ -150,7 +201,7 @@ export default function ScanRemotoPage() {
       setStatus("error");
       setMsg(error instanceof Error ? error.message : "Errore lettura NFC");
     }
-  }, [code, sendScanToPc, stopCameraScan]);
+  }, [code, resolveScanValue, stopCameraScan]);
 
   const startCodeScan = useCallback(async () => {
     if (!code) {
@@ -189,13 +240,13 @@ export default function ScanRemotoPage() {
         },
       });
       stopCameraScan();
-      await sendScanToPc(text, "barcode");
+      await resolveScanValue(text, "barcode");
     } catch (error) {
       stopCameraScan();
       setStatus("error");
       setMsg(error instanceof Error ? error.message : "Errore camera/scansione");
     }
-  }, [code, sendScanToPc, stopCameraScan]);
+  }, [code, resolveScanValue, stopCameraScan]);
 
   function resetReader() {
     cancelActiveScan();
@@ -243,7 +294,7 @@ export default function ScanRemotoPage() {
               <p style={{ margin: 0, fontSize: 10, fontWeight: 900, letterSpacing: "0.16em", textTransform: "uppercase", color: "#0284c7" }}>Terminale lettore</p>
               <h1 style={{ margin: "6px 0 0", fontSize: 28, lineHeight: 1, fontWeight: 950, color: "#0f172a" }}>Attrezzature</h1>
               <p style={{ margin: "9px 0 0", fontSize: 14, lineHeight: 1.35, color: "#475569" }}>
-                Leggi NFC, barcode o QR e invia la selezione al PC.
+                Leggi NFC, barcode o QR, controlla l&apos;attrezzatura e poi aggiungila al PC.
               </p>
             </div>
             <div style={{ borderRadius: 14, background: "rgba(16,185,129,0.12)", border: "1px solid rgba(16,185,129,0.18)", padding: "8px 10px", textAlign: "right", flexShrink: 0 }}>
@@ -297,13 +348,13 @@ export default function ScanRemotoPage() {
             </div>
           )}
 
-          {(status === "scanning_nfc" || status === "sending") && (
+          {(status === "scanning_nfc" || status === "resolving" || status === "sending") && (
             <div style={{ borderRadius: 18, border: "1px solid rgba(2,132,199,0.18)", background: "rgba(2,132,199,0.06)", padding: 24, textAlign: "center" }}>
               <div style={{ margin: "0 auto 16px", display: "flex", width: 76, height: 76, alignItems: "center", justifyContent: "center", borderRadius: 999, background: "rgba(2,132,199,0.10)" }}>
                 <div style={{ width: 46, height: 46, borderRadius: 999, border: "4px solid #0284c7", borderTopColor: "transparent", animation: "spin 1s linear infinite" }} />
               </div>
               <div style={{ fontSize: 18, fontWeight: 950, color: "#0f172a" }}>
-                {status === "sending" ? "Invio al PC..." : "Lettura NFC attiva"}
+                {status === "sending" ? "Invio al PC..." : status === "resolving" ? "Ricerca attrezzatura..." : "Lettura NFC attiva"}
               </div>
               <div style={{ marginTop: 8, fontSize: 14, color: "#475569" }}>{msg}</div>
               {status === "scanning_nfc" ? (
@@ -311,6 +362,44 @@ export default function ScanRemotoPage() {
                   Annulla e scegli altro lettore
                 </button>
               ) : null}
+            </div>
+          )}
+
+          {status === "equipment" && resolved && (
+            <div style={{ display: "grid", gap: 14 }}>
+              <div style={{ borderRadius: 18, border: "1px solid rgba(15,23,42,0.10)", background: "#f8fafc", padding: 15, boxSizing: "border-box", minWidth: 0 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase", color: "#64748b" }}>Attrezzatura letta</div>
+                    <div style={{ marginTop: 7, fontSize: 22, lineHeight: 1.08, fontWeight: 950, color: "#0f172a", overflowWrap: "anywhere" }}>
+                      {resolved.asset.serial_number || resolved.asset.asset_code}
+                    </div>
+                  </div>
+                  <span style={{ borderRadius: 999, background: resolved.asset.status === "AVAILABLE" ? "rgba(34,197,94,0.14)" : "rgba(239,68,68,0.12)", color: resolved.asset.status === "AVAILABLE" ? "#15803d" : "#b91c1c", padding: "6px 9px", fontSize: 11, fontWeight: 950, flexShrink: 0 }}>
+                    {resolved.asset.status}
+                  </span>
+                </div>
+                <div style={{ fontSize: 15, lineHeight: 1.35, fontWeight: 850, color: "#334155" }}>{resolved.asset.name}</div>
+                <div style={{ marginTop: 10, display: "grid", gap: 6, fontSize: 12, color: "#64748b" }}>
+                  <div>Area: <b style={{ color: "#0f172a" }}>{resolved.asset.equipment_area}</b></div>
+                  <div>Magazzino: <b style={{ color: "#0f172a" }}>{resolved.asset.warehouse || "-"}</b></div>
+                  <div>Scaffale: <b style={{ color: "#0f172a" }}>{[resolved.asset.shelf, resolved.asset.place].filter(Boolean).join(" · ") || "-"}</b></div>
+                  {(resolved.asset.category || resolved.asset.brand || resolved.asset.model) && (
+                    <div>Dettaglio: <b style={{ color: "#0f172a" }}>{[resolved.asset.category, resolved.asset.brand, resolved.asset.model].filter(Boolean).join(" · ")}</b></div>
+                  )}
+                </div>
+              </div>
+
+              {msg ? <div style={{ fontSize: 13, fontWeight: 900, color: "#b91c1c" }}>{msg}</div> : null}
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1.35fr", gap: 10 }}>
+                <button type="button" onClick={resetReader} style={{ borderRadius: 18, border: "1px solid rgba(15,23,42,0.12)", background: "#fff", padding: "15px 12px", color: "#0f172a", fontSize: 13, fontWeight: 950 }}>
+                  Annulla
+                </button>
+                <button type="button" onClick={() => void sendScanToPc()} style={{ borderRadius: 18, border: "none", background: "#34d399", padding: "15px 12px", color: "#0f172a", fontSize: 13, fontWeight: 950 }}>
+                  Aggiungi al prelievo
+                </button>
+              </div>
             </div>
           )}
 

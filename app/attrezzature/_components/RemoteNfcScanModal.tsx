@@ -236,7 +236,7 @@ export default function RemoteNfcScanModal({
                 {code}
               </div>
               <p style={{ margin: 0, fontSize: 12, color: "#64748b", textAlign: "center", lineHeight: 1.5 }}>
-                Sessione valida 15 minuti
+                Sessione valida per questa operazione
                 {allowMultiple && processedCount > 0 && ` · ${processedCount} tag ricevuti`}
                 {" · "}In attesa...
               </p>

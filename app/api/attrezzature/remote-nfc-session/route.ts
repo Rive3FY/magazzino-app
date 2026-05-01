@@ -19,11 +19,12 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { context, equipmentId, equipmentIds, area } = body as {
+    const { context, equipmentId, equipmentIds, area, persistUntilClosed } = body as {
       context?: string;
       equipmentId?: string;
       equipmentIds?: string[];
       area?: string;
+      persistUntilClosed?: boolean;
     };
 
     if (!context || !["equipment_associate", "movement_select"].includes(context)) {
@@ -57,6 +58,7 @@ export async function POST(req: Request) {
       context,
       context_data: contextData,
       created_by: user.id,
+      expires_at: persistUntilClosed ? new Date("2099-12-31T23:59:59.000Z").toISOString() : undefined,
     });
 
     if (error) {

@@ -53,6 +53,8 @@ export default function MaterialiScanRemotoPage() {
   const { user, loading: authLoading } = useAuth();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const nfcAbortRef = useRef<AbortController | null>(null);
+  const scanTokenRef = useRef(0);
 
   const [status, setStatus] = useState<Status>("idle");
   const [msg, setMsg] = useState<string>("");
@@ -82,6 +84,18 @@ export default function MaterialiScanRemotoPage() {
     } catch {}
     readerRef.current = null;
   }, []);
+
+  const cancelActiveScan = useCallback(() => {
+    scanTokenRef.current += 1;
+    stopCameraScan();
+    try {
+      nfcAbortRef.current?.abort();
+    } catch {}
+    nfcAbortRef.current = null;
+    setResolved(null);
+    setMsg("");
+    setStatus("idle");
+  }, [stopCameraScan]);
 
   useEffect(() => {
     return () => stopCameraScan();
@@ -140,13 +154,19 @@ export default function MaterialiScanRemotoPage() {
       return;
     }
 
+    const token = scanTokenRef.current + 1;
+    scanTokenRef.current = token;
     stopCameraScan();
     setStatus("scanning_nfc");
     setMsg("Avvicina il telefono al tag NFC...");
 
     try {
       const ndef = new NDEFReader();
-      await ndef.scan();
+      const abortController = new AbortController();
+      nfcAbortRef.current = abortController;
+      await (ndef as unknown as { scan: (options?: { signal?: AbortSignal }) => Promise<void> }).scan({
+        signal: abortController.signal,
+      });
       const nfcTagId = await new Promise<string>((resolve, reject) => {
         const handler = (event: NDEFReadingEvent) => {
           ndef.removeEventListener("reading", handler);
@@ -156,8 +176,13 @@ export default function MaterialiScanRemotoPage() {
         setTimeout(() => reject(new Error("Timeout: avvicina il telefono al tag entro 30 secondi")), 30000);
       });
 
+      if (scanTokenRef.current !== token) return;
+      nfcAbortRef.current = null;
       await resolveScanValue(nfcTagId === "unknown" ? "" : nfcTagId, "nfc");
     } catch (error) {
+      if (scanTokenRef.current !== token) return;
+      nfcAbortRef.current = null;
+      if (error instanceof DOMException && error.name === "AbortError") return;
       setStatus("error");
       setMsg(error instanceof Error ? error.message : "Errore lettura NFC");
     }
@@ -307,10 +332,7 @@ export default function MaterialiScanRemotoPage() {
   }
 
   function resetReader() {
-    stopCameraScan();
-    setResolved(null);
-    setMsg("");
-    setStatus("idle");
+    cancelActiveScan();
   }
 
   if (authLoading || !user) {
@@ -336,90 +358,103 @@ export default function MaterialiScanRemotoPage() {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-slate-950 p-4 text-white">
-      <div className="mx-auto flex min-h-[calc(100dvh-2rem)] max-w-md flex-col justify-center gap-4">
-        <div className="rounded-[28px] border border-white/10 bg-white/[0.08] p-5 shadow-2xl shadow-black/30 backdrop-blur">
-          <div className="mb-4 flex items-start justify-between gap-3">
+    <div style={{ minHeight: "calc(100dvh - 120px)", background: "#0f172a", padding: 14, color: "#fff" }}>
+      <div style={{ maxWidth: 460, margin: "0 auto", display: "grid", gap: 14 }}>
+        <div
+          style={{
+            borderRadius: 26,
+            border: "1px solid rgba(255,255,255,0.12)",
+            background: "linear-gradient(180deg, rgba(30,41,59,0.96), rgba(15,23,42,0.98))",
+            padding: 18,
+            boxShadow: "0 18px 50px rgba(0,0,0,0.28)",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 18 }}>
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.22em] text-sky-300">Terminale prelievo</p>
-              <h1 className="mt-2 text-2xl font-black tracking-tight">Materiali</h1>
-              <p className="mt-2 text-sm leading-6 text-slate-300">
+              <p style={{ margin: 0, fontSize: 11, fontWeight: 900, letterSpacing: "0.18em", textTransform: "uppercase", color: "#7dd3fc" }}>Terminale prelievo</p>
+              <h1 style={{ margin: "8px 0 0", fontSize: 30, lineHeight: 1, fontWeight: 950 }}>Materiali</h1>
+              <p style={{ margin: "10px 0 0", fontSize: 14, lineHeight: 1.45, color: "#cbd5e1" }}>
                 Leggi, scegli quantità e aggiungi al carrello del PC.
               </p>
             </div>
-            <div className="rounded-2xl bg-emerald-400/15 px-3 py-2 text-right">
-              <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-200">Sessione</div>
-              <div className="font-mono text-lg font-black tracking-[0.18em] text-emerald-100">{code}</div>
+            <div style={{ borderRadius: 16, background: "rgba(52,211,153,0.14)", padding: "9px 11px", textAlign: "right", flexShrink: 0 }}>
+              <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase", color: "#a7f3d0" }}>Sessione</div>
+              <div style={{ marginTop: 3, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 18, fontWeight: 950, letterSpacing: "0.12em", color: "#d1fae5" }}>{code}</div>
             </div>
           </div>
 
           {status === "idle" && (
-            <div className="grid gap-3">
-              <button type="button" onClick={startCodeScan} className="flex items-center gap-4 rounded-2xl border border-emerald-300/25 bg-emerald-500/15 p-4 text-left transition active:scale-[0.99]">
-                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-400 text-xl font-black text-slate-950">QR</span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-lg font-black">Barcode / QR</span>
-                  <span className="block text-sm text-slate-300">Apri camera compatta e leggi il codice.</span>
+            <div style={{ display: "grid", gap: 12 }}>
+              <button type="button" onClick={startCodeScan} style={{ display: "flex", alignItems: "center", gap: 14, width: "100%", borderRadius: 20, border: "1px solid rgba(52,211,153,0.35)", background: "rgba(16,185,129,0.16)", padding: 14, color: "#fff", textAlign: "left" }}>
+                <span style={{ display: "flex", width: 54, height: 54, alignItems: "center", justifyContent: "center", borderRadius: 16, background: "#34d399", color: "#0f172a", fontSize: 20, fontWeight: 950, flexShrink: 0 }}>QR</span>
+                <span style={{ display: "block", minWidth: 0, flex: 1 }}>
+                  <span style={{ display: "block", fontSize: 18, fontWeight: 950 }}>Barcode / QR</span>
+                  <span style={{ display: "block", marginTop: 4, fontSize: 13, lineHeight: 1.35, color: "#cbd5e1" }}>Apri camera compatta e leggi il codice.</span>
                 </span>
-                <span className="text-2xl text-emerald-200">›</span>
+                <span style={{ fontSize: 28, color: "#a7f3d0" }}>›</span>
               </button>
-              <button type="button" onClick={startNfcScan} className="flex items-center gap-4 rounded-2xl border border-sky-300/25 bg-sky-500/15 p-4 text-left transition active:scale-[0.99]">
-                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-400 text-xl font-black text-slate-950">NFC</span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-lg font-black">Tag NFC</span>
-                  <span className="block text-sm text-slate-300">Avvicina il telefono al tag materiale.</span>
+              <button type="button" onClick={startNfcScan} style={{ display: "flex", alignItems: "center", gap: 14, width: "100%", borderRadius: 20, border: "1px solid rgba(125,211,252,0.35)", background: "rgba(14,165,233,0.16)", padding: 14, color: "#fff", textAlign: "left" }}>
+                <span style={{ display: "flex", width: 54, height: 54, alignItems: "center", justifyContent: "center", borderRadius: 16, background: "#38bdf8", color: "#0f172a", fontSize: 18, fontWeight: 950, flexShrink: 0 }}>NFC</span>
+                <span style={{ display: "block", minWidth: 0, flex: 1 }}>
+                  <span style={{ display: "block", fontSize: 18, fontWeight: 950 }}>Tag NFC</span>
+                  <span style={{ display: "block", marginTop: 4, fontSize: 13, lineHeight: 1.35, color: "#cbd5e1" }}>Avvicina il telefono al tag materiale.</span>
                 </span>
-                <span className="text-2xl text-sky-200">›</span>
+                <span style={{ fontSize: 28, color: "#bae6fd" }}>›</span>
               </button>
             </div>
           )}
 
           {status === "scanning_code" && (
-            <div className="grid gap-3">
-              <div className="overflow-hidden rounded-[24px] border border-white/10 bg-black shadow-xl">
-                <div className="relative mx-auto aspect-[4/5] max-h-[430px] w-full bg-black">
-                  <video ref={videoRef} muted playsInline autoPlay className="h-full w-full object-cover" />
-                  <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0,transparent_38%,rgba(2,6,23,0.62)_72%)]" />
-                  <div className="pointer-events-none absolute inset-x-8 top-1/2 h-0.5 -translate-y-1/2 bg-emerald-300/90 shadow-[0_0_18px_rgba(52,211,153,0.9)]" />
-                  <div className="pointer-events-none absolute inset-10 rounded-3xl border border-white/20">
-                    <div className="absolute -left-0.5 -top-0.5 h-12 w-12 rounded-tl-3xl border-l-4 border-t-4 border-emerald-300" />
-                    <div className="absolute -right-0.5 -top-0.5 h-12 w-12 rounded-tr-3xl border-r-4 border-t-4 border-emerald-300" />
-                    <div className="absolute -bottom-0.5 -left-0.5 h-12 w-12 rounded-bl-3xl border-b-4 border-l-4 border-emerald-300" />
-                    <div className="absolute -bottom-0.5 -right-0.5 h-12 w-12 rounded-br-3xl border-b-4 border-r-4 border-emerald-300" />
+            <div style={{ display: "grid", gap: 12 }}>
+              <div style={{ overflow: "hidden", borderRadius: 22, border: "1px solid rgba(255,255,255,0.12)", background: "#000", boxShadow: "0 18px 45px rgba(0,0,0,0.35)" }}>
+                <div style={{ position: "relative", width: "100%", height: "min(58vh, 420px)", minHeight: 300, background: "#000" }}>
+                  <video ref={videoRef} muted playsInline autoPlay style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  <div style={{ position: "absolute", inset: 0, background: "radial-gradient(circle at center, transparent 0, transparent 38%, rgba(2,6,23,0.62) 72%)", pointerEvents: "none" }} />
+                  <div style={{ position: "absolute", left: 30, right: 30, top: "50%", height: 2, background: "#6ee7b7", boxShadow: "0 0 18px rgba(52,211,153,0.9)", pointerEvents: "none" }} />
+                  <div style={{ position: "absolute", inset: 42, borderRadius: 24, border: "1px solid rgba(255,255,255,0.25)", pointerEvents: "none" }}>
+                    <div style={{ position: "absolute", left: -2, top: -2, width: 44, height: 44, borderLeft: "4px solid #6ee7b7", borderTop: "4px solid #6ee7b7", borderTopLeftRadius: 24 }} />
+                    <div style={{ position: "absolute", right: -2, top: -2, width: 44, height: 44, borderRight: "4px solid #6ee7b7", borderTop: "4px solid #6ee7b7", borderTopRightRadius: 24 }} />
+                    <div style={{ position: "absolute", left: -2, bottom: -2, width: 44, height: 44, borderLeft: "4px solid #6ee7b7", borderBottom: "4px solid #6ee7b7", borderBottomLeftRadius: 24 }} />
+                    <div style={{ position: "absolute", right: -2, bottom: -2, width: 44, height: 44, borderRight: "4px solid #6ee7b7", borderBottom: "4px solid #6ee7b7", borderBottomRightRadius: 24 }} />
                   </div>
-                  <div className="absolute inset-x-4 bottom-4 rounded-2xl bg-slate-950/75 p-3 text-center text-sm font-bold text-white backdrop-blur">
+                  <div style={{ position: "absolute", left: 14, right: 14, bottom: 14, borderRadius: 16, background: "rgba(15,23,42,0.78)", padding: 12, textAlign: "center", fontSize: 13, fontWeight: 900 }}>
                     Centra il Barcode / QR nel riquadro
                   </div>
                 </div>
               </div>
-              <button type="button" onClick={resetReader} className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm font-bold text-white">
+              <button type="button" onClick={resetReader} style={{ borderRadius: 16, border: "1px solid rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.10)", padding: "13px 16px", color: "#fff", fontSize: 14, fontWeight: 900 }}>
                 Chiudi camera
               </button>
             </div>
           )}
 
           {(status === "scanning_nfc" || status === "resolving" || status === "sending") && (
-            <div className="rounded-[24px] border border-sky-300/20 bg-sky-400/10 p-8 text-center">
-              <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-sky-400/20">
-                <div className="h-12 w-12 animate-spin rounded-full border-4 border-sky-200 border-t-transparent" />
+            <div style={{ borderRadius: 22, border: "1px solid rgba(125,211,252,0.22)", background: "rgba(14,165,233,0.12)", padding: 26, textAlign: "center" }}>
+              <div style={{ margin: "0 auto 16px", display: "flex", width: 76, height: 76, alignItems: "center", justifyContent: "center", borderRadius: 999, background: "rgba(56,189,248,0.18)" }}>
+                <div style={{ width: 46, height: 46, borderRadius: 999, border: "4px solid #bae6fd", borderTopColor: "transparent", animation: "spin 1s linear infinite" }} />
               </div>
-              <div className="text-lg font-black">
+              <div style={{ fontSize: 18, fontWeight: 950 }}>
                 {status === "sending" ? "Invio al PC..." : status === "resolving" ? "Ricerca materiale..." : "Lettura NFC attiva"}
               </div>
-              <div className="mt-2 text-sm text-slate-300">{msg}</div>
+              <div style={{ marginTop: 8, fontSize: 14, color: "#cbd5e1" }}>{msg}</div>
+              {status === "scanning_nfc" ? (
+                <button type="button" onClick={cancelActiveScan} style={{ marginTop: 18, borderRadius: 16, border: "1px solid rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.10)", padding: "13px 16px", color: "#fff", fontSize: 14, fontWeight: 900 }}>
+                  Annulla e scegli altro lettore
+                </button>
+              ) : null}
             </div>
           )}
 
           {status === "material" && resolved && (
-            <div className="grid gap-4">
-              <div className="rounded-[24px] border border-white/10 bg-white/10 p-4">
-                <div className="text-xs font-bold uppercase tracking-widest text-slate-300">Materiale letto</div>
-                <div className="mt-2 text-2xl font-black">{resolved.item.code}</div>
-                <div className="mt-1 text-sm leading-5 text-slate-300">{resolved.item.name}</div>
-                <div className="mt-2 text-xs text-slate-400">UM: {resolved.item.um ?? "-"}</div>
+            <div style={{ display: "grid", gap: 14 }}>
+              <div style={{ borderRadius: 22, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.10)", padding: 15 }}>
+                <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase", color: "#cbd5e1" }}>Materiale letto</div>
+                <div style={{ marginTop: 8, fontSize: 28, lineHeight: 1, fontWeight: 950 }}>{resolved.item.code}</div>
+                <div style={{ marginTop: 8, fontSize: 14, lineHeight: 1.35, color: "#cbd5e1" }}>{resolved.item.name}</div>
+                <div style={{ marginTop: 8, fontSize: 12, color: "#94a3b8" }}>UM: {resolved.item.um ?? "-"}</div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 {resolved.warehouses.map((row) => {
                   const active = selectedWarehouse === row.warehouse;
                   const disabled = row.qtyFree <= 0;
@@ -430,23 +465,29 @@ export default function MaterialiScanRemotoPage() {
                       type="button"
                       disabled={disabled}
                       onClick={() => setSelectedWarehouse(row.warehouse)}
-                      className={`rounded-2xl border p-3 text-left transition ${
-                        active ? "border-emerald-300 bg-emerald-400/20" : "border-white/10 bg-white/5"
-                      } ${disabled ? "opacity-45" : "active:scale-[0.99]"}`}
+                      style={{
+                        borderRadius: 18,
+                        border: active ? "1px solid #6ee7b7" : "1px solid rgba(255,255,255,0.12)",
+                        background: active ? "rgba(52,211,153,0.22)" : "rgba(255,255,255,0.06)",
+                        padding: 12,
+                        textAlign: "left",
+                        color: "#fff",
+                        opacity: disabled ? 0.45 : 1,
+                      }}
                     >
-                      <div className="text-sm font-black">{row.warehouse}</div>
-                      <div className="mt-1 text-2xl font-black">{row.qtyFree}</div>
-                      <div className="mt-1 min-h-8 text-xs text-slate-300">{place || "Posizione non assegnata"}</div>
+                      <div style={{ fontSize: 13, fontWeight: 950 }}>{row.warehouse}</div>
+                      <div style={{ marginTop: 5, fontSize: 26, lineHeight: 1, fontWeight: 950 }}>{row.qtyFree}</div>
+                      <div style={{ marginTop: 7, minHeight: 34, fontSize: 11, lineHeight: 1.3, color: "#cbd5e1" }}>{place || "Posizione non assegnata"}</div>
                     </button>
                   );
                 })}
               </div>
 
               <div>
-                <label className="mb-2 block text-sm font-bold text-slate-200" htmlFor="pickupQty">Quantità da prelevare</label>
+                <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 900, color: "#e2e8f0" }} htmlFor="pickupQty">Quantità da prelevare</label>
                 <input
                   id="pickupQty"
-                  className="w-full rounded-2xl border border-white/10 bg-white px-4 py-4 text-2xl font-black text-slate-950 outline-none"
+                  style={{ width: "100%", borderRadius: 18, border: "1px solid rgba(255,255,255,0.14)", background: "#fff", padding: "14px 16px", fontSize: 28, fontWeight: 950, color: "#0f172a", outline: "none", boxSizing: "border-box" }}
                   value={qty}
                   onChange={(event) => {
                     setQty(event.target.value);
@@ -456,16 +497,16 @@ export default function MaterialiScanRemotoPage() {
                   autoFocus
                 />
                 {selectedStock ? (
-                  <div className="mt-2 text-xs text-slate-400">Disponibile in {selectedWarehouse}: {selectedStock.qtyFree}</div>
+                  <div style={{ marginTop: 8, fontSize: 12, color: "#94a3b8" }}>Disponibile in {selectedWarehouse}: {selectedStock.qtyFree}</div>
                 ) : null}
-                {msg ? <div className="mt-2 text-sm font-bold text-red-200">{msg}</div> : null}
+                {msg ? <div style={{ marginTop: 8, fontSize: 13, fontWeight: 900, color: "#fecaca" }}>{msg}</div> : null}
               </div>
 
-              <div className="grid grid-cols-[1fr_1.4fr] gap-3">
-                <button type="button" onClick={resetReader} className="rounded-2xl border border-white/15 bg-white/10 px-4 py-4 text-sm font-black text-white">
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1.35fr", gap: 10 }}>
+                <button type="button" onClick={resetReader} style={{ borderRadius: 18, border: "1px solid rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.10)", padding: "15px 12px", color: "#fff", fontSize: 13, fontWeight: 950 }}>
                   Annulla
                 </button>
-                <button type="button" onClick={() => void sendPickToPc()} className="rounded-2xl bg-emerald-400 px-4 py-4 text-sm font-black text-slate-950">
+                <button type="button" onClick={() => void sendPickToPc()} style={{ borderRadius: 18, border: "none", background: "#34d399", padding: "15px 12px", color: "#0f172a", fontSize: 13, fontWeight: 950 }}>
                   Aggiungi al prelievo
                 </button>
               </div>
@@ -473,24 +514,24 @@ export default function MaterialiScanRemotoPage() {
           )}
 
           {status === "success" && (
-            <div className="rounded-[24px] border border-emerald-300/20 bg-emerald-400/10 p-6 text-center">
-              <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-400 text-3xl font-black text-slate-950">✓</div>
-              <p className="text-lg font-black text-emerald-100">{msg}</p>
-              <p className="mt-2 text-sm text-slate-300">Pronto per il prossimo materiale.</p>
+            <div style={{ borderRadius: 22, border: "1px solid rgba(52,211,153,0.24)", background: "rgba(52,211,153,0.12)", padding: 24, textAlign: "center" }}>
+              <div style={{ margin: "0 auto 12px", display: "flex", width: 64, height: 64, alignItems: "center", justifyContent: "center", borderRadius: 999, background: "#34d399", color: "#0f172a", fontSize: 32, fontWeight: 950 }}>✓</div>
+              <p style={{ margin: 0, fontSize: 18, fontWeight: 950, color: "#d1fae5" }}>{msg}</p>
+              <p style={{ margin: "8px 0 0", fontSize: 14, color: "#cbd5e1" }}>Pronto per il prossimo materiale.</p>
             </div>
           )}
 
           {status === "error" && (
-            <div className="rounded-[24px] border border-red-300/20 bg-red-400/10 p-5 text-center">
-              <p className="text-sm font-bold text-red-100">{msg}</p>
-              <button type="button" onClick={resetReader} className="mt-4 rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950">
+            <div style={{ borderRadius: 22, border: "1px solid rgba(252,165,165,0.24)", background: "rgba(248,113,113,0.12)", padding: 20, textAlign: "center" }}>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 900, color: "#fee2e2" }}>{msg}</p>
+              <button type="button" onClick={resetReader} style={{ marginTop: 16, borderRadius: 16, border: "none", background: "#fff", padding: "12px 20px", color: "#0f172a", fontSize: 14, fontWeight: 950 }}>
                 Riprova
               </button>
             </div>
           )}
         </div>
 
-        <Link href="/materiali" className="text-center text-sm font-bold text-slate-400 underline underline-offset-4">
+        <Link href="/materiali" style={{ textAlign: "center", fontSize: 14, fontWeight: 900, color: "#94a3b8", textDecoration: "underline", textUnderlineOffset: 4 }}>
           Torna ai materiali
         </Link>
       </div>

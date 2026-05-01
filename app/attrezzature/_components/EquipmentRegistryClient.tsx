@@ -1,6 +1,5 @@
 "use client";
 
-import { BrowserMultiFormatReader } from "@zxing/browser";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../../_lib/supabase/client";
 import { notifyEquipmentSync, subscribeEquipmentSync } from "../../_lib/equipmentSync";
@@ -24,6 +23,7 @@ import { isRelationMissingOrNotExposedError } from "../../_lib/postgrestErrors";
 import EquipmentStatusManager from "./EquipmentStatusManager";
 import AppScanStatusModal from "../../_components/AppScanStatusModal";
 import ConfirmModal from "../../_components/ConfirmModal";
+import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../../_lib/fastBarcodeScanner";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentMovementRow, EquipmentStatus } from "../../_lib/types";
 
 type Props = {
@@ -243,7 +243,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   const [statusChanging, setStatusChanging] = useState(false);
   const [statusModalOpen, setStatusModalOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const readerRef = useRef<FastBarcodeReader | null>(null);
   const quickBoxRef = useRef<HTMLDivElement | null>(null);
   const quickPickBoxRef = useRef<HTMLDivElement | null>(null);
   const categoryGroupsTableMissingRef = useRef(false);
@@ -509,7 +509,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   }, [filteredRows]);
 
   const quickMatches = useMemo(() => {
-    let base = filteredRows;
+    const base = filteredRows;
     const search = quickSearch.trim().toLowerCase();
     if (!search) return base;
     return base
@@ -687,15 +687,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   }
 
   function stopCameraScan() {
-    try {
-      (readerRef.current as { reset?: () => void } | null)?.reset?.();
-    } catch {}
-    try {
-      const video = videoRef.current;
-      const stream = video?.srcObject as MediaStream | null;
-      if (stream) stream.getTracks().forEach((track) => track.stop());
-      if (video) video.srcObject = null;
-    } catch {}
+    stopFastBarcodeScan(videoRef.current, readerRef.current);
     readerRef.current = null;
     setCameraScanning(false);
   }
@@ -724,10 +716,12 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     }
 
     try {
-      readerRef.current = new BrowserMultiFormatReader();
-      const result = await readerRef.current.decodeOnceFromVideoDevice(undefined, videoEl);
+      const text = await scanFastBarcode(videoEl, {
+        onReader: (reader) => {
+          readerRef.current = reader;
+        },
+      });
       stopCameraScan();
-      const text = String(result?.getText?.() ?? "").trim();
       if (text) applyQuickResult(text, "barcode");
     } catch (error) {
       stopCameraScan();

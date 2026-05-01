@@ -5,22 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "../../_lib/supabase/client";
-
-type ScannerControls = {
-  reset?: () => void;
-  stopContinuousDecode?: () => void;
-  decodeOnceFromConstraints?: unknown;
-};
-
-type NativeBarcodeDetection = {
-  rawValue?: string;
-};
-
-type NativeBarcodeDetector = {
-  detect: (source: ImageBitmapSource) => Promise<NativeBarcodeDetection[]>;
-};
-
-type NativeBarcodeDetectorCtor = new (options?: { formats?: string[] }) => NativeBarcodeDetector;
+import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../../_lib/fastBarcodeScanner";
 
 type Warehouse = "PRM" | "REALE";
 
@@ -54,7 +39,7 @@ export default function MaterialiScanRemotoPage() {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const readerRef = useRef<ScannerControls | null>(null);
+  const readerRef = useRef<FastBarcodeReader | null>(null);
   const nfcAbortRef = useRef<AbortController | null>(null);
   const scanTokenRef = useRef(0);
 
@@ -85,17 +70,7 @@ export default function MaterialiScanRemotoPage() {
   }, [code]);
 
   const stopCameraScan = useCallback(() => {
-    try {
-      (readerRef.current as ScannerControls | null)?.reset?.();
-    } catch {}
-    try {
-      (readerRef.current as ScannerControls | null)?.stopContinuousDecode?.();
-    } catch {}
-    try {
-      const stream = videoRef.current?.srcObject as MediaStream | null;
-      if (stream) stream.getTracks().forEach((track) => track.stop());
-      if (videoRef.current) videoRef.current.srcObject = null;
-    } catch {}
+    stopFastBarcodeScan(videoRef.current, readerRef.current);
     readerRef.current = null;
   }, []);
 
@@ -233,62 +208,12 @@ export default function MaterialiScanRemotoPage() {
     }
 
     try {
-      const NativeDetector = (window as unknown as { BarcodeDetector?: NativeBarcodeDetectorCtor }).BarcodeDetector;
-      const videoConstraints: MediaStreamConstraints = {
-        audio: false,
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+      const text = await scanFastBarcode(videoEl, {
+        onReader: (reader) => {
+          readerRef.current = reader;
         },
-      };
-
-      if (NativeDetector) {
-        const stream = await navigator.mediaDevices.getUserMedia(videoConstraints);
-        videoEl.srcObject = stream;
-        await videoEl.play();
-
-        for (let i = 0; i < 30 && videoEl.readyState < HTMLMediaElement.HAVE_CURRENT_DATA; i++) {
-          await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-
-        const detector = new NativeDetector({
-          formats: ["qr_code", "ean_13", "ean_8", "code_128", "code_39", "codabar", "upc_a", "upc_e"],
-        });
-        const startedAt = Date.now();
-
-        while (Date.now() - startedAt < 30000) {
-          if (videoEl.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            continue;
-          }
-
-          let detections: NativeBarcodeDetection[] = [];
-          try {
-            detections = await detector.detect(videoEl);
-          } catch {
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            continue;
-          }
-
-          const rawValue = String(detections?.[0]?.rawValue ?? "").trim();
-          if (rawValue) {
-            stopCameraScan();
-            await resolveScanValue(rawValue, "barcode");
-            return;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
-
-        throw new Error("Timeout: nessun Barcode/QR rilevato entro 30 secondi");
-      }
-
-      const { BrowserMultiFormatReader } = await import("@zxing/browser");
-      const reader = new BrowserMultiFormatReader();
-      readerRef.current = reader;
-      const result = await reader.decodeOnceFromConstraints(videoConstraints, videoEl);
+      });
       stopCameraScan();
-      const text = String(result?.getText?.() ?? "").trim();
       await resolveScanValue(text, "barcode");
     } catch (error) {
       stopCameraScan();

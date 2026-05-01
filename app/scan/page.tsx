@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { BrowserMultiFormatReader } from "@zxing/browser";
+import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../_lib/fastBarcodeScanner";
 
 export default function ScanPage() {
   const router = useRouter();
@@ -10,7 +10,7 @@ export default function ScanPage() {
   const target = sp.get("target") || "dashboard";
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const readerRef = useRef<FastBarcodeReader | null>(null);
 
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -24,8 +24,10 @@ export default function ScanPage() {
 
   function beepOnce() {
     try {
+      const win = window as Window & { webkitAudioContext?: typeof AudioContext };
       const AudioCtx =
-        window.AudioContext || (window as any).webkitAudioContext;
+        window.AudioContext || win.webkitAudioContext;
+      if (!AudioCtx) return;
       const ctx = new AudioCtx();
 
       const oscillator = ctx.createOscillator();
@@ -49,20 +51,7 @@ export default function ScanPage() {
   /* ---------- STOP ---------- */
 
   function stopCamera() {
-    try {
-      (readerRef.current as any)?.reset?.();
-    } catch {}
-
-    try {
-      const v = videoRef.current;
-      if (v) {
-        const stream = v.srcObject as MediaStream | null;
-        if (stream) stream.getTracks().forEach((t) => t.stop());
-        v.pause();
-        v.srcObject = null;
-      }
-    } catch {}
-
+    stopFastBarcodeScan(videoRef.current, readerRef.current);
     readerRef.current = null;
   }
 
@@ -92,14 +81,11 @@ export default function ScanPage() {
     }
 
     try {
-      readerRef.current = new BrowserMultiFormatReader();
-
-      const result = await readerRef.current.decodeOnceFromVideoDevice(
-        undefined,
-        video
-      );
-
-      const code = String(result?.getText?.() ?? "").trim();
+      const code = await scanFastBarcode(video, {
+        onReader: (reader) => {
+          readerRef.current = reader;
+        },
+      });
       if (!code) return;
 
       vibrateOnce();
@@ -113,9 +99,9 @@ export default function ScanPage() {
       router.replace(
         `${backTo}?code=${encodeURIComponent(code)}`
       );
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      setMsg("Errore camera: " + (e?.message ?? "sconosciuto"));
+      setMsg("Errore camera: " + (e instanceof Error ? e.message : "sconosciuto"));
       stopCamera();
     }
   }

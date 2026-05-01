@@ -3,9 +3,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
-import { BrowserMultiFormatReader } from "@zxing/browser";
 import AppScanStatusModal from "../_components/AppScanStatusModal";
-import RemoteNfcScanModal from "../attrezzature/_components/RemoteNfcScanModal";
+import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../_lib/fastBarcodeScanner";
 
 type Movement = {
   id: string;
@@ -146,10 +145,9 @@ export default function Home() {
   const boxRef = useRef<HTMLDivElement | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const readerRef = useRef<FastBarcodeReader | null>(null);
   const [scanning, setScanning] = useState(false);
   const [nfcScanning, setNfcScanning] = useState(false);
-  const [remoteNfcOpen, setRemoteNfcOpen] = useState(false);
   const [isNfcSupported, setIsNfcSupported] = useState(false);
 
   async function loadSuggestions(text: string) {
@@ -276,20 +274,7 @@ export default function Home() {
   }
 
   function stopScan() {
-    try {
-      (readerRef.current as any)?.reset?.();
-    } catch {}
-    try {
-      (readerRef.current as any)?.stopContinuousDecode?.();
-    } catch {}
-
-    try {
-      const v = videoRef.current;
-      const stream = v?.srcObject as MediaStream | null;
-      if (stream) stream.getTracks().forEach((t) => t.stop());
-      if (v) v.srcObject = null;
-    } catch {}
-
+    stopFastBarcodeScan(videoRef.current, readerRef.current);
     readerRef.current = null;
     setScanning(false);
   }
@@ -322,10 +307,12 @@ export default function Home() {
     }
 
     try {
-      readerRef.current = new BrowserMultiFormatReader();
-      const result = await readerRef.current.decodeOnceFromVideoDevice(undefined, videoEl);
+      const text = await scanFastBarcode(videoEl, {
+        onReader: (reader) => {
+          readerRef.current = reader;
+        },
+      });
       stopScan();
-      const text = String(result?.getText?.() ?? "").trim();
       if (text) await pickItemByCode(text);
     } catch (e: any) {
       console.error(e);
@@ -337,7 +324,6 @@ export default function Home() {
   function resetSearch() {
     stopScan();
     stopNfcScan();
-    setRemoteNfcOpen(false);
     setSearch("");
     setSuggestions([]);
     setPicked(null);
@@ -448,29 +434,6 @@ export default function Home() {
 
   function stopNfcScan() {
     setNfcScanning(false);
-  }
-
-  async function pickItemByRemoteScan(value: string) {
-    const scanValue = value.trim();
-    if (!scanValue) return;
-
-    const { data: shelf, error } = await supabase
-      .from("material_shelves")
-      .select("code,warehouse")
-      .eq("nfc_tag_id", scanValue)
-      .maybeSingle();
-
-    if (error) {
-      setMsg("Errore ricerca NFC: " + error.message);
-      return;
-    }
-
-    if (!shelf) {
-      await pickItemByCode(scanValue);
-      return;
-    }
-
-    await pickItemByCode((shelf as any).code);
   }
 
   useEffect(() => {
@@ -607,7 +570,7 @@ export default function Home() {
                 type="button"
                 className="btn"
                 onClick={() => (scanning ? stopScan() : startScan())}
-                disabled={nfcScanning || remoteNfcOpen}
+                disabled={nfcScanning}
                 style={{ display: "flex", alignItems: "center", gap: 6 }}
               >
                 <BarcodeIcon />
@@ -617,27 +580,11 @@ export default function Home() {
                 type="button"
                 className="btn"
                 onClick={startNfcScan}
-                disabled={scanning || nfcScanning || remoteNfcOpen}
+                disabled={scanning || nfcScanning}
                 style={{ display: "flex", alignItems: "center", gap: 6 }}
               >
                 {nfcScanning ? <SpinnerIcon /> : <NfcIcon />}
                 {nfcScanning ? "NFC..." : "NFC"}
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  stopScan();
-                  stopNfcScan();
-                  setMsg(null);
-                  setRemoteNfcOpen(true);
-                }}
-                disabled={scanning || nfcScanning}
-                title="Usa telefono come lettore NFC, Barcode o QR"
-                style={{ display: "flex", alignItems: "center", gap: 6 }}
-              >
-                <BarcodeIcon />
-                Telefono
               </button>
               <button type="button" className="btn" onClick={resetSearch} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <SearchIcon />
@@ -746,21 +693,6 @@ export default function Home() {
             onClose={scanning ? stopScan : stopNfcScan}
             barcodeTitle="Scanner Barcode / QR"
             barcodeHint="Inquadra il barcode o il QR code"
-          />
-
-          <RemoteNfcScanModal
-            open={remoteNfcOpen}
-            onClose={() => setRemoteNfcOpen(false)}
-            context="movement_select"
-            title="Usa telefono come lettore materiali"
-            subtitle="Inquadra il QR con il telefono, poi scegli NFC oppure Barcode / QR. Il risultato arriverà su questo PC."
-            scanPath="/materiali/scan-remoto"
-            onTagReceived={(scanValue) => {
-              void pickItemByRemoteScan(scanValue);
-            }}
-            onScanEventReceived={(event) => {
-              if (event.code) void pickItemByCode(event.code);
-            }}
           />
 
           {msg && <div style={{ marginTop: 10, fontWeight: 800 }}>{msg}</div>}

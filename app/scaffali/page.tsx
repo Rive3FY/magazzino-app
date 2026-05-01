@@ -3,8 +3,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
-import { BrowserMultiFormatReader } from "@zxing/browser";
 import AppScanStatusModal from "../_components/AppScanStatusModal";
+import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../_lib/fastBarcodeScanner";
 
 function BarcodeIcon() {
   return (
@@ -129,7 +129,7 @@ export default function ScaffaliPage() {
   const [isIOS, setIsIOS] = useState(false);
   const [cameraScanning, setCameraScanning] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const readerRef = useRef<FastBarcodeReader | null>(null);
 
   async function load() {
     setLoading(true);
@@ -388,10 +388,12 @@ export default function ScaffaliPage() {
       return;
     }
     try {
-      readerRef.current = new BrowserMultiFormatReader();
-      const result = await readerRef.current.decodeOnceFromVideoDevice(undefined, videoEl);
+      const text = await scanFastBarcode(videoEl, {
+        onReader: (reader) => {
+          readerRef.current = reader;
+        },
+      });
       stopCameraScan();
-      const text = String(result?.getText?.() ?? "").trim();
       if (text) searchByBarcode(text);
     } catch (e: any) {
       setMsg("Errore camera: " + (e?.message ?? "sconosciuto"));
@@ -490,18 +492,7 @@ export default function ScaffaliPage() {
   }
 
   function stopCameraScan() {
-    try {
-      (readerRef.current as any)?.reset?.();
-    } catch {}
-    try {
-      (readerRef.current as any)?.stopContinuousDecode?.();
-    } catch {}
-    try {
-      const v = videoRef.current;
-      const stream = v?.srcObject as MediaStream | null;
-      if (stream) stream.getTracks().forEach((t) => t.stop());
-      if (v) v.srcObject = null;
-    } catch {}
+    stopFastBarcodeScan(videoRef.current, readerRef.current);
     readerRef.current = null;
     setCameraScanning(false);
   }

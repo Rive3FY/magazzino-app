@@ -1,6 +1,5 @@
 "use client";
 
-import { BrowserMultiFormatReader } from "@zxing/browser";
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -23,6 +22,7 @@ import AppScanStatusModal from "../../_components/AppScanStatusModal";
 import ConfirmModal from "../../_components/ConfirmModal";
 import RemoteNfcScanModal from "./RemoteNfcScanModal";
 import { equipmentAssetSchema } from "../../_lib/validations";
+import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../../_lib/fastBarcodeScanner";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentStatus } from "../../_lib/types";
 
 const EQUIPMENT_TABLE_SORT_STATUS_ORDER: Record<EquipmentStatus, number> = EQUIPMENT_STATUS_OPTIONS.reduce(
@@ -185,7 +185,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const [actionMenuOpenRowId, setActionMenuOpenRowId] = useState<string | null>(null);
   const [remoteScanRow, setRemoteScanRow] = useState<EquipmentAssetRow | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const readerRef = useRef<FastBarcodeReader | null>(null);
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
   const techSheetInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -468,15 +468,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   }
 
   function stopCameraScan() {
-    try {
-      (readerRef.current as { reset?: () => void } | null)?.reset?.();
-    } catch {}
-    try {
-      const video = videoRef.current;
-      const stream = video?.srcObject as MediaStream | null;
-      if (stream) stream.getTracks().forEach((track) => track.stop());
-      if (video) video.srcObject = null;
-    } catch {}
+    stopFastBarcodeScan(videoRef.current, readerRef.current);
     readerRef.current = null;
     setCameraScanning(false);
   }
@@ -505,10 +497,12 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     }
 
     try {
-      readerRef.current = new BrowserMultiFormatReader();
-      const result = await readerRef.current.decodeOnceFromVideoDevice(undefined, videoEl);
+      const text = await scanFastBarcode(videoEl, {
+        onReader: (reader) => {
+          readerRef.current = reader;
+        },
+      });
       stopCameraScan();
-      const text = String(result?.getText?.() ?? "").trim();
       if (text) applySearchResult(text, "barcode");
     } catch (error) {
       stopCameraScan();

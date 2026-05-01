@@ -31,7 +31,7 @@ type LabelAsset = EquipmentAssetRow & {
   barcode_value: string;
 };
 
-type PrintMode = "complete" | "qrOnly";
+type PrintMode = "complete" | "qrOnly" | "barcodeOnly";
 
 const ROWS_PER_PAGE = 15;
 
@@ -347,6 +347,9 @@ export default function EquipmentLabelsClient({ area }: Props) {
         } catch {}
         const barcodeHtml = svg.outerHTML;
         tmp.removeChild(svg);
+        if (printMode === "barcodeOnly") {
+          return `<div class="etichetta-label etichetta-barcode-only"><div class="etichetta-barcode-only-inner">${barcodeHtml}</div></div>`;
+        }
         const shelfLine = [row.shelf, row.place].filter(Boolean).join(" · ");
         return `<div class="etichetta-label"><div class="etichetta-content etichetta-content-with-qr"><div class="etichetta-left"><div class="etichetta-text"><div class="etichetta-code">${esc(row.serial_number || row.asset_code)}</div><div class="etichetta-name">${esc(row.name)}</div><div class="etichetta-shelf">${esc(EQUIPMENT_AREA_LABELS[row.equipment_area])}</div>${shelfLine ? `<div class="etichetta-shelf">Scaffale: ${esc(shelfLine)}</div>` : ""}</div><div class="etichetta-barcode">${barcodeHtml}</div></div><div class="etichetta-qr">${qrHtml}</div></div></div>`;
       })
@@ -375,6 +378,9 @@ body{margin:0;padding:0;background:#fff}
 .etichetta-qr-only{display:flex;align-items:center;justify-content:center;padding:2mm}
 .etichetta-qr-only-inner{display:flex;align-items:center;justify-content:center;width:100%;height:100%}
 .etichetta-qr-only svg{width:26mm!important;height:26mm!important;display:block}
+.etichetta-barcode-only{display:flex;align-items:center;justify-content:center;padding:3mm}
+.etichetta-barcode-only-inner{display:flex;align-items:center;justify-content:center;width:100%;height:100%}
+.etichetta-barcode-only svg{width:58mm!important;height:auto!important;display:block}
 </style>
 </head><body><div class="etichette-print-grid">${labelsHtml}</div></body></html>`;
   }
@@ -508,6 +514,7 @@ body{margin:0;padding:0;background:#fff}
               <select id={`labels-print-mode-${area}`} className="input" value={printMode} onChange={(e) => setPrintMode(e.target.value as PrintMode)}>
                 <option value="complete">Barcode + QR</option>
                 <option value="qrOnly">Solo QR</option>
+                <option value="barcodeOnly">Solo Barcode</option>
               </select>
             </div>
           </div>
@@ -756,6 +763,16 @@ function EquipmentLabelPreview({
       <div className="etichetta-label etichetta-qr-only">
         <div className="etichetta-qr-only-inner">
           <QRCodeSVG value={row.barcode_value} size={112} level="M" marginSize={2} />
+        </div>
+      </div>
+    );
+  }
+
+  if (printMode === "barcodeOnly") {
+    return (
+      <div className="etichetta-label etichetta-barcode-only">
+        <div className="etichetta-barcode-only-inner">
+          <BarcodeSvg value={row.barcode_value} />
         </div>
       </div>
     );

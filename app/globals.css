@@ -2637,6 +2637,24 @@ html, body {
   height: 26mm !important;
   display: block;
 }
+.etichetta-barcode-only {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3mm;
+}
+.etichetta-barcode-only-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+.etichetta-barcode-only svg {
+  width: 58mm !important;
+  height: auto !important;
+  display: block;
+}
 .etichette-preview-wrap {
   overflow: auto;
   max-height: 520px;

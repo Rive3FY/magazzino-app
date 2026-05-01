@@ -1,6 +1,6 @@
 "use client";
 
-import { BrowserMultiFormatReader } from "@zxing/browser";
+import { QRCodeSVG } from "qrcode.react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../../_lib/supabase/client";
@@ -24,7 +24,7 @@ import { isRelationMissingOrNotExposedError } from "../../_lib/postgrestErrors";
 import AppModalFrame from "../../_components/AppModalFrame";
 import AppScanStatusModal from "../../_components/AppScanStatusModal";
 import ConfirmModal from "../../_components/ConfirmModal";
-import RemoteNfcScanModal from "./RemoteNfcScanModal";
+import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../../_lib/fastBarcodeScanner";
 import type {
   EquipmentArea,
   EquipmentAssetRow,
@@ -35,6 +35,12 @@ import type {
 type Props = {
   area: EquipmentArea;
   basePath: string;
+};
+
+type RemoteEquipmentScanEvent = {
+  type?: string;
+  rawValue?: string;
+  source?: "barcode" | "nfc";
 };
 
 type MovementFormState = {
@@ -302,7 +308,11 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const [searchByNfcScanning, setSearchByNfcScanning] = useState(false);
   const [scanResult, setScanResult] = useState<ScanResultState | null>(null);
   const [remoteScanOpen, setRemoteScanOpen] = useState(false);
-  const [remoteScanSessionKey, setRemoteScanSessionKey] = useState(0);
+  const [remoteScanCode, setRemoteScanCode] = useState<string | null>(null);
+  const [remoteScanLoading, setRemoteScanLoading] = useState(false);
+  const [remoteScanError, setRemoteScanError] = useState<string | null>(null);
+  const [remoteQrVisible, setRemoteQrVisible] = useState(false);
+  const [remoteProcessedCount, setRemoteProcessedCount] = useState(0);
   const [categorySelectModalOpen, setCategorySelectModalOpen] = useState(false);
   const [categorySelectModalCategory, setCategorySelectModalCategory] = useState<string | null>(null);
   const [categorySelectModalSelected, setCategorySelectModalSelected] = useState<Set<string>>(new Set());
@@ -328,9 +338,10 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const movementDraftRestoredRef = useRef(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const readerRef = useRef<FastBarcodeReader | null>(null);
   const assetBoxRef = useRef<HTMLDivElement | null>(null);
   const categoryGroupsTableMissingRef = useRef(false);
+  const remotePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (authLoading) return;
@@ -1062,15 +1073,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   }
 
   function stopCameraScan() {
-    try {
-      (readerRef.current as { reset?: () => void } | null)?.reset?.();
-    } catch {}
-    try {
-      const video = videoRef.current;
-      const stream = video?.srcObject as MediaStream | null;
-      if (stream) stream.getTracks().forEach((track) => track.stop());
-      if (video) video.srcObject = null;
-    } catch {}
+    stopFastBarcodeScan(videoRef.current, readerRef.current);
     readerRef.current = null;
     setCameraScanning(false);
   }
@@ -1099,10 +1102,12 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     }
 
     try {
-      readerRef.current = new BrowserMultiFormatReader();
-      const result = await readerRef.current.decodeOnceFromVideoDevice(undefined, videoEl);
+      const text = await scanFastBarcode(videoEl, {
+        onReader: (reader) => {
+          readerRef.current = reader;
+        },
+      });
       stopCameraScan();
-      const text = String(result?.getText?.() ?? "").trim();
       if (text) applySearchResult(text, "barcode");
     } catch (error) {
       stopCameraScan();
@@ -1260,18 +1265,158 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     setMsg(`Attrezzatura aggiunta al carrello. Totale: ${cart.length + 1}.`);
   }
 
+  async function addAssetByRemoteScanToCart(rawValue: string, source: "barcode" | "nfc") {
+    if (source === "nfc") {
+      await addAssetByNfcToCart(rawValue);
+      return;
+    }
+    if (scanMode !== "CART") {
+      setMsg("La selezione multipla da telefono è disponibile solo in modalità Carrello.");
+      return;
+    }
+    if (!warehouseSelected) return;
+    const normalized = rawValue.trim().toLowerCase();
+    if (!normalized) return;
+    const matched = assetsByWarehouse.find((asset) =>
+      [asset.barcode, asset.serial_number, asset.asset_code]
+        .filter(Boolean)
+        .some((item) => String(item).trim().toLowerCase() === normalized)
+    );
+    if (!matched) {
+      setMsg("Nessuna attrezzatura trovata per questo Barcode/QR nel magazzino selezionato.");
+      return;
+    }
+    if (matched.status !== "AVAILABLE") {
+      setMsg("L'attrezzatura non è disponibile.");
+      return;
+    }
+    const hasOpen = history.some(
+      (row) => row.equipment_id === matched.id && getMovementStatus(row) === "OPEN"
+    );
+    if (hasOpen) {
+      setMsg("Questa attrezzatura ha già un movimento aperto.");
+      return;
+    }
+    if (cart.includes(matched.id)) {
+      setMsg("Attrezzatura già nel carrello.");
+      setCartOpen(true);
+      return;
+    }
+    setCart((prev) => [...prev, matched.id]);
+    setCartOpen(true);
+    setScanMode("CART");
+    setMsg(`Attrezzatura aggiunta al carrello. Totale: ${cart.length + 1}.`);
+  }
+
+  async function handleRemoteEquipmentScanEvent(event: RemoteEquipmentScanEvent) {
+    const rawValue = String(event.rawValue ?? "").trim();
+    const source = event.source === "barcode" ? "barcode" : "nfc";
+    if (!rawValue) return;
+
+    if (scanMode === "CART") {
+      await addAssetByRemoteScanToCart(rawValue, source);
+      return;
+    }
+
+    await applySearchResult(rawValue, source);
+  }
+
   function removeCartItem(id: string) {
     setCart((prev) => prev.filter((item) => item !== id));
   }
 
   function openRemoteScanModal() {
-    setRemoteScanSessionKey((prev) => prev + 1);
-    setRemoteScanOpen(true);
+    void ensureRemoteEquipmentSession(true);
   }
 
   function closeRemoteScanModal() {
     setRemoteScanOpen(false);
+    setRemoteQrVisible(false);
+    setRemoteScanCode(null);
+    setRemoteScanError(null);
+    setRemoteProcessedCount(0);
+    if (remotePollRef.current) {
+      clearInterval(remotePollRef.current);
+      remotePollRef.current = null;
+    }
   }
+
+  async function ensureRemoteEquipmentSession(showQr = true) {
+    if (!warehouseSelected) {
+      setMsg("Seleziona il magazzino prima di usare il telefono.");
+      return;
+    }
+
+    setRemoteScanOpen(true);
+    setRemoteScanError(null);
+    if (showQr) setRemoteQrVisible(true);
+    if (remoteScanCode) return;
+
+    setRemoteScanLoading(true);
+    setRemoteProcessedCount(0);
+    try {
+      const res = await fetch("/api/attrezzature/remote-nfc-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ context: "movement_select", area, persistUntilClosed: true }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRemoteScanError(json.error ?? "Errore creazione sessione telefono");
+        return;
+      }
+      setRemoteScanCode(String(json.code ?? ""));
+    } catch (error) {
+      setRemoteScanError(error instanceof Error ? error.message : "Errore di rete");
+    } finally {
+      setRemoteScanLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!remoteScanOpen || !remoteScanCode) return;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/attrezzature/remote-nfc-session?code=${encodeURIComponent(remoteScanCode)}`);
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (json.error) setRemoteScanError(json.error);
+          return;
+        }
+
+        const entries = (json.nfcTagIds ?? (json.nfcTagId ? [json.nfcTagId] : [])) as Array<string | RemoteEquipmentScanEvent>;
+        if (entries.length <= remoteProcessedCount) return;
+
+        for (let i = remoteProcessedCount; i < entries.length; i++) {
+          const entry = entries[i];
+          if (entry && typeof entry === "object") {
+            void handleRemoteEquipmentScanEvent(entry);
+          } else if (entry) {
+            if (scanMode === "CART") {
+              void addAssetByNfcToCart(String(entry));
+            } else {
+              void applySearchResult(String(entry), "nfc");
+            }
+          }
+        }
+        setRemoteProcessedCount(entries.length);
+        setRemoteScanError(null);
+      } catch {
+        // polling silenzioso
+      }
+    };
+
+    void poll();
+    remotePollRef.current = setInterval(poll, 1500);
+    return () => {
+      if (remotePollRef.current) {
+        clearInterval(remotePollRef.current);
+        remotePollRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remoteScanOpen, remoteScanCode, remoteProcessedCount]);
 
   function toggleCategoryModalSelection(id: string) {
     setCategorySelectModalSelected((prev) => {
@@ -1614,6 +1759,10 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   }
 
   const areaLabel = EQUIPMENT_AREA_LABELS[area];
+  const remoteScanUrl =
+    remoteScanCode && typeof window !== "undefined"
+      ? `${window.location.origin}/attrezzature/scan-remoto?code=${encodeURIComponent(remoteScanCode)}`
+      : "";
 
   if (authLoading) {
     return (
@@ -1684,7 +1833,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{
-              width: "min(560px, 100%)",
+              width: "min(920px, calc(100vw - 32px))",
               maxHeight: "90vh",
               overflow: "auto",
               background: "#fff",
@@ -1854,6 +2003,68 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                     Telefono
                   </button>
                 </div>
+
+                {remoteScanOpen && (
+                  <div
+                    style={{
+                      border: "1px solid rgba(14,165,233,0.24)",
+                      background: "linear-gradient(135deg, rgba(14,165,233,0.08), rgba(15,23,42,0.02))",
+                      borderRadius: 18,
+                      padding: 14,
+                      display: "grid",
+                      gridTemplateColumns: remoteQrVisible && remoteScanUrl ? "auto minmax(0, 1fr)" : "1fr",
+                      gap: 14,
+                      alignItems: "center",
+                    }}
+                  >
+                    {remoteQrVisible && remoteScanUrl && (
+                      <div style={{ padding: 10, borderRadius: 14, background: "#fff", border: "1px solid rgba(15,23,42,0.08)" }}>
+                        <QRCodeSVG value={remoteScanUrl} size={132} />
+                      </div>
+                    )}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+                        <button
+                          type="button"
+                          onClick={() => setRemoteQrVisible((prev) => !prev)}
+                          title={remoteQrVisible ? "Nascondi QR telefono" : "Mostra QR telefono"}
+                          style={{
+                            width: 18,
+                            height: 18,
+                            borderRadius: "50%",
+                            border: "2px solid #fff",
+                            background: remoteScanCode ? "#22c55e" : "#ef4444",
+                            boxShadow: `0 0 0 3px ${remoteScanCode ? "rgba(34,197,94,0.18)" : "rgba(239,68,68,0.18)"}`,
+                            cursor: "pointer",
+                            flexShrink: 0,
+                          }}
+                          aria-label={remoteQrVisible ? "Nascondi QR telefono" : "Mostra QR telefono"}
+                        />
+                        <div style={{ fontWeight: 900, color: "#0f172a" }}>
+                          Telefono {remoteScanCode ? "collegabile" : remoteScanLoading ? "in preparazione" : "non collegato"}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.45 }}>
+                        Il PC resta interfaccia principale. Dal telefono puoi leggere NFC, Barcode o QR e inviare l&apos;attrezzatura qui.
+                      </div>
+                      {remoteScanLoading && <div style={{ marginTop: 8, fontSize: 13, fontWeight: 800, color: "#0284c7" }}>Genero il QR...</div>}
+                      {remoteScanError && <div style={{ marginTop: 8, fontSize: 13, fontWeight: 800, color: "#b91c1c" }}>{remoteScanError}</div>}
+                      {remoteScanCode && (
+                        <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                          <span style={{ borderRadius: 999, background: "#e0f2fe", color: "#075985", padding: "6px 10px", fontSize: 12, fontWeight: 900 }}>
+                            Sessione {remoteScanCode}
+                          </span>
+                          <button type="button" className="btn" onClick={() => setRemoteQrVisible((prev) => !prev)} style={{ padding: "6px 10px", fontSize: 12 }}>
+                            {remoteQrVisible ? "Nascondi QR" : "Mostra QR"}
+                          </button>
+                          <button type="button" className="btn" onClick={closeRemoteScanModal} style={{ padding: "6px 10px", fontSize: 12 }}>
+                            Chiudi sessione
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 <div style={{ marginTop: 8, paddingTop: 12, borderTop: "1px solid rgba(15,23,42,0.08)" }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginBottom: 8 }}>Oppure selezione manuale</div>
@@ -3152,22 +3363,6 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         onCancel={() => setConfirmCancelPickupOpen(false)}
       />
 
-      <RemoteNfcScanModal
-        key={remoteScanSessionKey}
-        open={remoteScanOpen}
-        onClose={closeRemoteScanModal}
-        context="movement_select"
-        area={area}
-        allowMultiple={scanMode === "CART"}
-        title={scanMode === "CART" ? "Aggiungi attrezzature con telefono" : "Seleziona attrezzatura con telefono"}
-        onTagReceived={(nfcTagId) => {
-          if (scanMode === "CART") {
-            void addAssetByNfcToCart(nfcTagId);
-            return;
-          }
-          void applySearchResult(nfcTagId, "nfc");
-        }}
-      />
     </main>
   );
 }

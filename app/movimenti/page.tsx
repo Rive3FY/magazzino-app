@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams, useRouter } from "next/navigation";
 import { createClient } from "../_lib/supabase/client";
-import { BrowserMultiFormatReader } from "@zxing/browser";
 import { QRCodeSVG } from "qrcode.react";
 import jsPDF from "jspdf";
 import { fmtDate, n, toNumber, toIsoStartOfDay, toIsoEndOfDay } from "../_lib/utils";
@@ -12,6 +11,7 @@ import { useAuth } from "../_lib/hooks/useAuth";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import { useToast } from "../_lib/ToastContext";
 import ConfirmModal from "../_components/ConfirmModal";
+import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../_lib/fastBarcodeScanner";
 import { movementNoteSchema } from "../_lib/validations";
 import type { CartRow, QuickMaterialInfo, DbItem, MovementRow, ReferentRow, ExcelLiveRow } from "../_lib/types";
 
@@ -306,7 +306,7 @@ export default function MovimentiPage() {
   const [fMaterial, setFMaterial] = useState("");
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const readerRef = useRef<FastBarcodeReader | null>(null);
   const [scanning, setScanning] = useState(false);
   const [remoteMaterialScanOpen, setRemoteMaterialScanOpen] = useState(false);
   const [remoteScanCode, setRemoteScanCode] = useState<string | null>(null);
@@ -1155,21 +1155,7 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
   }
 
   function stopScan() {
-    try {
-      (readerRef.current as any)?.reset?.();
-    } catch {}
-
-    try {
-      (readerRef.current as any)?.stopContinuousDecode?.();
-    } catch {}
-
-    try {
-      const v = videoRef.current;
-      const stream = v?.srcObject as MediaStream | null;
-      if (stream) stream.getTracks().forEach((t) => t.stop());
-      if (v) v.srcObject = null;
-    } catch {}
-
+    stopFastBarcodeScan(videoRef.current, readerRef.current);
     readerRef.current = null;
     setScanning(false);
   }
@@ -1204,10 +1190,12 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
     }
 
     try {
-      readerRef.current = new BrowserMultiFormatReader();
-      const result = await readerRef.current.decodeOnceFromVideoDevice(undefined, videoEl);
+      const text = await scanFastBarcode(videoEl, {
+        onReader: (reader) => {
+          readerRef.current = reader;
+        },
+      });
       stopScan();
-      const text = String(result?.getText?.() ?? "").trim();
       if (text) {
         await pickItemByCode(text, scanMode === "CART");
       }
@@ -1269,6 +1257,20 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
       return;
     }
 
+    if (scanMode === "NORMAL") {
+      setType("OUT");
+      setWarehouse(wh);
+      setPicked({ code, name: info.name, um: info.um });
+      setSearch(`${code} — ${info.name}`);
+      setQty(String(qtyPick));
+      setOpen(false);
+      setCartOpen(false);
+      setMsg(null);
+      setWizardMatOpen(true);
+      setOutboundStepMat(1);
+      return;
+    }
+
     let shelf = "";
     let place = "";
     try {
@@ -1323,10 +1325,9 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
 
   async function ensureRemoteMaterialSession(showQr = true) {
     setType("OUT");
-    setScanMode("CART");
     setWizardMatOpen(true);
     setOutboundStepMat(1);
-    setCartOpen(true);
+    setCartOpen(scanMode === "CART");
     setRemoteMaterialScanOpen(true);
     setRemoteScanError(null);
     if (showQr) setRemoteQrVisible(true);
@@ -3282,17 +3283,6 @@ function finalizeMaterialPickupSuccess() {
     }, 0);
   }
 
-  function startDashboardPhonePickup() {
-    setType("OUT");
-    setScanMode("CART");
-    setWizardMatOpen(true);
-    setOutboundStepMat(1);
-    setMsg(null);
-    window.setTimeout(() => {
-      openRemoteMaterialScan();
-    }, 0);
-  }
-
   const active = useMemo(() => suggestions[activeIndex], [suggestions, activeIndex]);
 
   const displayHistory = useMemo(() => {
@@ -3473,15 +3463,6 @@ function finalizeMaterialPickupSuccess() {
                 <BarcodeIcon />
                 Barcode / QR
               </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={startDashboardPhonePickup}
-                style={{ padding: "10px 20px", fontWeight: 800, display: "inline-flex", alignItems: "center", gap: 6 }}
-              >
-                <BarcodeIcon />
-                Telefono
-              </button>
             </>
           )}
 
@@ -3608,99 +3589,101 @@ function finalizeMaterialPickupSuccess() {
                   </button>
                 </div>
 
-                <div
-                  style={{
-                    marginBottom: 12,
-                    padding: 12,
-                    borderRadius: 14,
-                    border: "1px solid rgba(15,23,42,0.10)",
-                    background: remoteMaterialScanOpen ? "rgba(16,185,129,0.08)" : "rgba(15,23,42,0.03)",
-                    display: "grid",
-                    gap: 10,
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-                    <div>
-                      <div style={{ fontWeight: 900, color: "#0f172a" }}>Telefono lettore</div>
-                      <div style={{ marginTop: 3, fontSize: 12, color: "#64748b" }}>
-                        {remoteScanCode
-                          ? "Sessione attiva finché la chiudi tu. Il PC mostra il carrello, il telefono legge e sceglie quantità."
-                          : "Crea una sessione per usare il telefono come terminale di prelievo."}
+                {remoteMaterialScanOpen || remoteScanCode ? (
+                  <div
+                    style={{
+                      marginBottom: 12,
+                      padding: 12,
+                      borderRadius: 14,
+                      border: "1px solid rgba(15,23,42,0.10)",
+                      background: remoteMaterialScanOpen ? "rgba(16,185,129,0.08)" : "rgba(15,23,42,0.03)",
+                      display: "grid",
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                      <div>
+                        <div style={{ fontWeight: 900, color: "#0f172a" }}>Telefono lettore</div>
+                        <div style={{ marginTop: 3, fontSize: 12, color: "#64748b" }}>
+                          {remoteScanCode
+                            ? `Sessione attiva in modalità ${scanMode === "CART" ? "carrello" : "singolo"} finché la chiudi tu.`
+                            : "Crea una sessione per usare il telefono come terminale di prelievo."}
+                        </div>
                       </div>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-                      {remoteScanCode ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                        {remoteScanCode ? (
+                          <button
+                            type="button"
+                            className="btn"
+                            onClick={closeRemoteMaterialSession}
+                            style={{ padding: "6px 10px", fontSize: 12 }}
+                          >
+                            Chiudi sessione
+                          </button>
+                        ) : null}
                         <button
                           type="button"
-                          className="btn"
-                          onClick={closeRemoteMaterialSession}
-                          style={{ padding: "6px 10px", fontSize: 12 }}
-                        >
-                          Chiudi sessione
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() => void ensureRemoteMaterialSession(true)}
-                        title={remoteScanCode ? "Mostra il QR della sessione telefono" : "Crea sessione telefono"}
-                        style={{
-                          width: 42,
-                          height: 42,
-                          borderRadius: 999,
-                          border: "3px solid #fff",
-                          background: remoteScanCode && remoteMaterialScanOpen ? "#22c55e" : "#ef4444",
-                          boxShadow: remoteScanCode && remoteMaterialScanOpen ? "0 0 0 5px rgba(34,197,94,0.16)" : "0 0 0 5px rgba(239,68,68,0.13)",
-                          cursor: "pointer",
-                        }}
-                        aria-label="Apri QR telefono"
-                      />
-                    </div>
-                  </div>
-
-                  {remoteScanLoading ? (
-                    <div style={{ fontSize: 12, color: "#64748b", fontWeight: 800 }}>Creazione sessione telefono...</div>
-                  ) : null}
-                  {remoteScanError ? (
-                    <div style={{ fontSize: 12, color: "#b91c1c", fontWeight: 800 }}>{remoteScanError}</div>
-                  ) : null}
-
-                  {remoteQrVisible && remoteScanCode ? (
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "auto minmax(0, 1fr)",
-                        gap: 12,
-                        alignItems: "center",
-                        padding: 12,
-                        borderRadius: 14,
-                        background: "#fff",
-                        border: "1px solid rgba(15,23,42,0.10)",
-                      }}
-                    >
-                      <div style={{ padding: 8, borderRadius: 12, background: "#f8fafc" }}>
-                        <QRCodeSVG
-                          value={`${typeof window !== "undefined" ? window.location.origin : ""}/materiali/scan-remoto?code=${encodeURIComponent(remoteScanCode)}`}
-                          size={118}
-                          level="M"
+                          onClick={() => void ensureRemoteMaterialSession(true)}
+                          title={remoteScanCode ? "Mostra il QR della sessione telefono" : "Crea sessione telefono"}
+                          style={{
+                            width: 42,
+                            height: 42,
+                            borderRadius: 999,
+                            border: "3px solid #fff",
+                            background: remoteScanCode && remoteMaterialScanOpen ? "#22c55e" : "#ef4444",
+                            boxShadow: remoteScanCode && remoteMaterialScanOpen ? "0 0 0 5px rgba(34,197,94,0.16)" : "0 0 0 5px rgba(239,68,68,0.13)",
+                            cursor: "pointer",
+                          }}
+                          aria-label="Apri QR telefono"
                         />
                       </div>
-                      <div>
-                        <div style={{ fontSize: 12, color: "#64748b", fontWeight: 800 }}>Inquadra dal telefono</div>
-                        <div style={{ marginTop: 4, fontFamily: "ui-monospace, monospace", fontSize: 20, fontWeight: 900, letterSpacing: "0.12em" }}>
-                          {remoteScanCode}
-                        </div>
-                        <button
-                          type="button"
-                          className="btn"
-                          onClick={() => setRemoteQrVisible(false)}
-                          style={{ marginTop: 10, padding: "6px 10px" }}
-                        >
-                          Nascondi QR
-                        </button>
-                      </div>
                     </div>
-                  ) : null}
-                </div>
+
+                    {remoteScanLoading ? (
+                      <div style={{ fontSize: 12, color: "#64748b", fontWeight: 800 }}>Creazione sessione telefono...</div>
+                    ) : null}
+                    {remoteScanError ? (
+                      <div style={{ fontSize: 12, color: "#b91c1c", fontWeight: 800 }}>{remoteScanError}</div>
+                    ) : null}
+
+                    {remoteQrVisible && remoteScanCode ? (
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "auto minmax(0, 1fr)",
+                          gap: 12,
+                          alignItems: "center",
+                          padding: 12,
+                          borderRadius: 14,
+                          background: "#fff",
+                          border: "1px solid rgba(15,23,42,0.10)",
+                        }}
+                      >
+                        <div style={{ padding: 8, borderRadius: 12, background: "#f8fafc" }}>
+                          <QRCodeSVG
+                            value={`${typeof window !== "undefined" ? window.location.origin : ""}/materiali/scan-remoto?code=${encodeURIComponent(remoteScanCode)}`}
+                            size={118}
+                            level="M"
+                          />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 12, color: "#64748b", fontWeight: 800 }}>Inquadra dal telefono</div>
+                          <div style={{ marginTop: 4, fontFamily: "ui-monospace, monospace", fontSize: 20, fontWeight: 900, letterSpacing: "0.12em" }}>
+                            {remoteScanCode}
+                          </div>
+                          <button
+                            type="button"
+                            className="btn"
+                            onClick={() => setRemoteQrVisible(false)}
+                            style={{ marginTop: 10, padding: "6px 10px" }}
+                          >
+                            Nascondi QR
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <div ref={boxRef} style={{ position: "relative", marginBottom: 12 }}>
                   <input

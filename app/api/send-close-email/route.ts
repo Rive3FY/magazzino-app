@@ -8,6 +8,34 @@ function formatItRome(iso: unknown): string {
   return d.toLocaleString("it-IT", { timeZone: "Europe/Rome", dateStyle: "short", timeStyle: "short" });
 }
 
+function parsePickupNote(note: unknown) {
+  const raw = String(note ?? "").trim();
+  if (!raw) return { destination: "-", workDescription: "-" };
+
+  const destinationPrefix = "Destinazione:";
+  const workPrefix = "Descrizione lavori:";
+  const parts = raw.split(" · ").map((part) => part.trim());
+  const destination = parts.find((part) => part.startsWith(destinationPrefix))?.slice(destinationPrefix.length).trim() ?? "";
+  const workDescription = parts.find((part) => part.startsWith(workPrefix))?.slice(workPrefix.length).trim() ?? "";
+
+  return {
+    destination: destination || "-",
+    workDescription: workDescription || (!destination ? raw : "-"),
+  };
+}
+
+function pickupInfoFromBody(body: Record<string, unknown>, firstMov?: Record<string, unknown> | null) {
+  const explicitDestination = String(body.pickup_destination ?? "").trim();
+  const explicitWorkDescription = String(body.work_description ?? "").trim();
+  if (explicitDestination || explicitWorkDescription) {
+    return {
+      destination: explicitDestination || "-",
+      workDescription: explicitWorkDescription || "-",
+    };
+  }
+  return parsePickupNote(body.open_note ?? firstMov?.open_note ?? "");
+}
+
 export async function POST(request: Request) {
   try {
     const supabase = await createClient();
@@ -64,6 +92,8 @@ export async function POST(request: Request) {
 
     if (isMulti) {
       subject = `Rettifica prelievo multiplo · ${movements.length} articoli`;
+      const firstMov = movements[0] as Record<string, unknown>;
+      const pickupInfo = pickupInfoFromBody(body as Record<string, unknown>, firstMov);
       const rowsHtml = movements.map((m: Record<string, unknown>, idx: number) => {
         const code = m.code ?? "-";
         const name = m.name ?? code;
@@ -72,7 +102,6 @@ export async function POST(request: Request) {
         const out_qty = m.out_qty ?? "-";
         const returned_qty = m.returned_qty ?? 0;
         const net_qty = m.net_qty ?? "-";
-        const open_note = m.open_note ?? "-";
         const return_note = m.return_note ?? "-";
         return `
           <tr>
@@ -84,7 +113,6 @@ export async function POST(request: Request) {
             <td style="padding: 6px; border: 1px solid #ddd;">${out_qty}</td>
             <td style="padding: 6px; border: 1px solid #ddd;">${returned_qty}</td>
             <td style="padding: 6px; border: 1px solid #ddd;">${net_qty}</td>
-            <td style="padding: 6px; border: 1px solid #ddd;">${open_note}</td>
             <td style="padding: 6px; border: 1px solid #ddd;">${return_note}</td>
           </tr>`;
       }).join("");
@@ -105,7 +133,6 @@ export async function POST(request: Request) {
               <th style="padding: 6px; border: 1px solid #ddd;"><b>Uscita</b></th>
               <th style="padding: 6px; border: 1px solid #ddd;"><b>Rientro</b></th>
               <th style="padding: 6px; border: 1px solid #ddd;"><b>Netto</b></th>
-              <th style="padding: 6px; border: 1px solid #ddd;"><b>Nota apertura</b></th>
               <th style="padding: 6px; border: 1px solid #ddd;"><b>Nota rettifica</b></th>
             </tr>
           </thead>
@@ -115,6 +142,8 @@ export async function POST(request: Request) {
         </table>
 
         <table style="border-collapse: collapse; width: 100%; max-width: 720px; margin-top: 16px; background: #f8fafc;">
+          <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Destinazione</b></td><td style="padding: 6px; border: 1px solid #ddd;">${pickupInfo.destination}</td></tr>
+          <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Descrizione lavori</b></td><td style="padding: 6px; border: 1px solid #ddd;">${pickupInfo.workDescription}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Referenti</b></td><td style="padding: 6px; border: 1px solid #ddd;">${referentDisplay}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Chiuso da</b></td><td style="padding: 6px; border: 1px solid #ddd;">${closed_by ?? "-"}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Data chiusura</b></td><td style="padding: 6px; border: 1px solid #ddd;">${closed_at ?? "-"}</td></tr>
@@ -138,9 +167,9 @@ export async function POST(request: Request) {
       const out_qty_val = body?.out_qty ?? firstMov?.out_qty ?? "-";
       const returned_qty_val = body?.returned_qty ?? firstMov?.returned_qty ?? 0;
       const net_qty_val = body?.net_qty ?? firstMov?.net_qty ?? "-";
-      const open_note_val = body?.open_note ?? firstMov?.open_note ?? "-";
       const return_note_val = body?.return_note ?? firstMov?.return_note ?? "-";
       const type_val = body?.type ?? firstMov?.type ?? "-";
+      const pickupInfo = pickupInfoFromBody(body as Record<string, unknown>, firstMov);
 
       subject = `Rettifica movimento materiale ${code_val}`;
 
@@ -159,7 +188,8 @@ export async function POST(request: Request) {
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Quantità uscita</b></td><td style="padding: 6px; border: 1px solid #ddd;">${out_qty_val}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Quantità rientrata</b></td><td style="padding: 6px; border: 1px solid #ddd;">${returned_qty_val}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Quantità netta</b></td><td style="padding: 6px; border: 1px solid #ddd;">${net_qty_val}</td></tr>
-          <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Nota apertura</b></td><td style="padding: 6px; border: 1px solid #ddd;">${open_note_val}</td></tr>
+          <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Destinazione</b></td><td style="padding: 6px; border: 1px solid #ddd;">${pickupInfo.destination}</td></tr>
+          <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Descrizione lavori</b></td><td style="padding: 6px; border: 1px solid #ddd;">${pickupInfo.workDescription}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Nota rientro</b></td><td style="padding: 6px; border: 1px solid #ddd;">${return_note_val}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Referenti</b></td><td style="padding: 6px; border: 1px solid #ddd;">${referentDisplay}</td></tr>
           <tr><td style="padding: 6px; border: 1px solid #ddd;"><b>Chiuso da</b></td><td style="padding: 6px; border: 1px solid #ddd;">${closed_by ?? "-"}</td></tr>

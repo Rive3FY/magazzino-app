@@ -116,6 +116,46 @@ function pillStyle(kind: "IN" | "OUT" | "OPEN" | "CLOSED" | "PRM" | "REALE") {
   };
 }
 
+const compactMovementCellStyle: React.CSSProperties = {
+  padding: "6px 10px",
+  verticalAlign: "middle",
+};
+
+const compactMovementTextStyle: React.CSSProperties = {
+  display: "block",
+  maxWidth: "100%",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const compactDetailCellStyle: React.CSSProperties = {
+  padding: "5px 8px",
+  verticalAlign: "middle",
+};
+
+function composePickupNote(destination: string, workDescription: string) {
+  const dest = destination.trim();
+  const desc = workDescription.trim();
+  return [
+    dest ? `Destinazione: ${dest}` : "",
+    desc ? `Descrizione lavori: ${desc}` : "",
+  ].filter(Boolean).join(" · ");
+}
+
+function parsePickupNote(note: string) {
+  const destinationPrefix = "Destinazione:";
+  const workPrefix = "Descrizione lavori:";
+  const parts = note.split(" · ").map((part) => part.trim());
+  const destination = parts.find((part) => part.startsWith(destinationPrefix))?.slice(destinationPrefix.length).trim() ?? "";
+  const workDescription = parts.find((part) => part.startsWith(workPrefix))?.slice(workPrefix.length).trim() ?? "";
+
+  return {
+    destination,
+    workDescription: workDescription || (!destination ? note.trim() : ""),
+  };
+}
+
 function PencilIcon({ muted }: { muted?: boolean }) {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style={{ opacity: muted ? 0.45 : 1 }}>
@@ -148,6 +188,20 @@ function NfcIcon() {
       <path d="M9 11h6" />
       <path d="M9 15h4" />
       <path d="M12 6v12" />
+    </svg>
+  );
+}
+
+function QrIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="6" height="6" rx="1" />
+      <rect x="15" y="3" width="6" height="6" rx="1" />
+      <rect x="3" y="15" width="6" height="6" rx="1" />
+      <path d="M15 15h2v2h-2z" />
+      <path d="M19 15h2v6h-6v-2" />
+      <path d="M13 13h2" />
+      <path d="M13 19h2" />
     </svg>
   );
 }
@@ -282,7 +336,8 @@ export default function MovimentiPage() {
   const [type, setType] = useState<"IN" | "OUT">("OUT");
   const [warehouse, setWarehouse] = useState<"PRM" | "REALE" | "MISTO">("PRM");
   const [qty, setQty] = useState("");
-  const [note, setNote] = useState("");
+  const [pickupDestination, setPickupDestination] = useState("");
+  const [workDescription, setWorkDescription] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
@@ -366,6 +421,14 @@ export default function MovimentiPage() {
   /** Wizard prelievo materiali in popup */
   const [wizardMatOpen, setWizardMatOpen] = useState(false);
   const [confirmCancelPickupOpen, setConfirmCancelPickupOpen] = useState(false);
+  const pickupNote = useMemo(
+    () => composePickupNote(pickupDestination, workDescription),
+    [pickupDestination, workDescription]
+  );
+  const pickupDetailsComplete = useMemo(() => {
+    if (!pickupDestination.trim() || !workDescription.trim()) return false;
+    return referents.some((r) => selReferentIds.has(r.id) && String(r.email ?? "").trim().length > 0);
+  }, [pickupDestination, workDescription, selReferentIds, referents]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -377,6 +440,8 @@ export default function MovimentiPage() {
         warehouse?: "PRM" | "REALE" | "MISTO";
         qty?: string;
         note?: string;
+        pickupDestination?: string;
+        workDescription?: string;
         search?: string;
         picked?: DbItem | null;
         scanMode?: "NORMAL" | "CART";
@@ -388,7 +453,14 @@ export default function MovimentiPage() {
       setType("OUT");
       if (draft.warehouse === "PRM" || draft.warehouse === "REALE" || draft.warehouse === "MISTO") setWarehouse(draft.warehouse);
       if (typeof draft.qty === "string") setQty(draft.qty);
-      if (typeof draft.note === "string") setNote(draft.note);
+      if (typeof draft.pickupDestination === "string" || typeof draft.workDescription === "string") {
+        setPickupDestination(draft.pickupDestination ?? "");
+        setWorkDescription(draft.workDescription ?? "");
+      } else if (typeof draft.note === "string") {
+        const parsedNote = parsePickupNote(draft.note);
+        setPickupDestination(parsedNote.destination);
+        setWorkDescription(parsedNote.workDescription);
+      }
       if (typeof draft.search === "string") setSearch(draft.search);
       if (
         draft.picked &&
@@ -465,7 +537,8 @@ export default function MovimentiPage() {
     warehouse === "MISTO" ||
     search.trim().length > 0 ||
     qty.trim().length > 0 ||
-    note.trim().length > 0;
+    pickupDestination.trim().length > 0 ||
+    workDescription.trim().length > 0;
 
   useEffect(() => {
     if (typeof window === "undefined" || !movementDraftRestoredRef.current) return;
@@ -480,7 +553,9 @@ export default function MovimentiPage() {
           type,
           warehouse,
           qty,
-          note,
+          note: pickupNote,
+          pickupDestination,
+          workDescription,
           search,
           picked: picked ? { code: picked.code, name: picked.name, um: picked.um ?? null } : null,
           scanMode,
@@ -490,7 +565,7 @@ export default function MovimentiPage() {
         })
       );
     } catch {}
-  }, [type, warehouse, qty, note, search, picked, scanMode, outboundStepMat, wizardMatOpen, cartOpen, hasMaterialPersistentDraft, cart.length]);
+  }, [type, warehouse, qty, pickupNote, pickupDestination, workDescription, search, picked, scanMode, outboundStepMat, wizardMatOpen, cartOpen, hasMaterialPersistentDraft, cart.length]);
 
   function canEditRow(m: MovementRow) {
     const st = (m.status ?? (m.type === "OUT" ? "OPEN" : "CLOSED")) as "OPEN" | "CLOSED";
@@ -534,10 +609,12 @@ export default function MovimentiPage() {
     if (error) {
       console.error("loadReferents error:", error);
       setReferents([]);
-      return;
+      return [];
     }
 
-    setReferents((data ?? []) as ReferentRow[]);
+    const rows = (data ?? []) as ReferentRow[];
+    setReferents(rows);
+    return rows;
   }
 
   function toggleReferentSelection(id: string) {
@@ -547,6 +624,38 @@ export default function MovimentiPage() {
       else next.add(id);
       return next;
     });
+  }
+
+  function getSelectedReferents() {
+    return referents.filter((r) => selReferentIds.has(r.id) && String(r.email ?? "").trim().length > 0);
+  }
+
+  function referentEmailList(refs: ReferentRow[]) {
+    return [...new Set(refs.map((r) => String(r.email ?? "").trim().toLowerCase()).filter(Boolean))];
+  }
+
+  function referentNameLabel(refs: ReferentRow[]) {
+    return refs.map((r) => r.name).filter(Boolean).join(", ");
+  }
+
+  function storedReferentIdsFromMovements(movements: MovementRow[], availableReferents = referents) {
+    const ids = new Set<string>();
+    const emails = new Set<string>();
+
+    for (const mov of movements) {
+      if (mov.referent_id) ids.add(mov.referent_id);
+      String(mov.referee_email ?? "")
+        .split(/[;,]/)
+        .map((email) => email.trim().toLowerCase())
+        .filter(Boolean)
+        .forEach((email) => emails.add(email));
+    }
+
+    for (const ref of availableReferents) {
+      if (emails.has(String(ref.email ?? "").trim().toLowerCase())) ids.add(ref.id);
+    }
+
+    return ids;
   }
 
 //NFC 
@@ -1638,7 +1747,9 @@ function switchPickupMode(mode: "NORMAL" | "CART") {
   setScanMode(mode);
   setQty("");
   setMixedSplit({ code: null, fromPrm: 0, fromReale: 0, manual: false });
-  setNote("");
+  setPickupDestination("");
+  setWorkDescription("");
+  setSelReferentIds(new Set());
   setSearch("");
   setSuggestions([]);
   setPicked(null);
@@ -1674,11 +1785,29 @@ async function confirmCartPickup() {
     return;
   }
 
-  const noteParsed = movementNoteSchema.safeParse({ note: note.trim() });
-  if (!noteParsed.success) {
-    setMsg(noteParsed.error.flatten().formErrors[0] ?? "Le note sono obbligatorie.");
+  if (!pickupDestination.trim()) {
+    setMsg("La destinazione è obbligatoria.");
     return;
   }
+  if (!workDescription.trim()) {
+    setMsg("La descrizione lavori è obbligatoria.");
+    return;
+  }
+
+  const noteParsed = movementNoteSchema.safeParse({ note: pickupNote });
+  if (!noteParsed.success) {
+    setMsg(noteParsed.error.flatten().formErrors[0] ?? "Destinazione e descrizione lavori sono obbligatorie.");
+    return;
+  }
+  const selectedRefs = getSelectedReferents();
+  if (selectedRefs.length === 0) {
+    setMsg("Seleziona almeno un referente con email valida.");
+    return;
+  }
+  const ref = selectedRefs[0];
+  const referentEmails = referentEmailList(selectedRefs);
+  const referentEmailLabel = referentEmails.join(", ");
+  const referentNamesLabel = referentNameLabel(selectedRefs);
 
   setCartBusy(true);
   setMsg(null);
@@ -1700,7 +1829,7 @@ async function confirmCartPickup() {
         type: "OUT",
         code: row.code,
         qty: row.qtyPick,
-        note: note.trim(),
+        note: pickupNote,
         created_by: userId,
         created_by_name: fullName,
         warehouse: row.warehouse,
@@ -1709,8 +1838,9 @@ async function confirmCartPickup() {
         return_note: null,
         closed_at: null,
         closed_by: null,
-        referent_id: null,
-        referee_email: null,
+        referent_id: ref?.id ?? null,
+        referee_email: referentEmailLabel || null,
+        referee_name: referentNamesLabel || null,
         movement_group_id: movementGroupId,
       };
 
@@ -1727,8 +1857,13 @@ async function confirmCartPickup() {
         details_json: {
           type: "OUT",
           qty: row.qtyPick,
-          note: note.trim(),
+          note: pickupNote,
           mode: "cart",
+          referent_id: ref?.id ?? null,
+          referent_name: ref?.name ?? null,
+          referent_names: referentNamesLabel,
+          referent_email: ref?.email ?? null,
+          referent_emails: referentEmails,
         },
       });
     }
@@ -1853,7 +1988,9 @@ function cancelMaterialPickupDraft() {
   setWarehouse("PRM");
   setQty("");
   setMixedSplit({ code: null, fromPrm: 0, fromReale: 0, manual: false });
-  setNote("");
+  setPickupDestination("");
+  setWorkDescription("");
+  setSelReferentIds(new Set());
   setSearch("");
   setSuggestions([]);
   setPicked(null);
@@ -1893,7 +2030,9 @@ function finalizeMaterialPickupSuccess() {
   setWarehouse("PRM");
   setQty("");
   setMixedSplit({ code: null, fromPrm: 0, fromReale: 0, manual: false });
-  setNote("");
+  setPickupDestination("");
+  setWorkDescription("");
+  setSelReferentIds(new Set());
   setSearch("");
   setSuggestions([]);
   setPicked(null);
@@ -2010,8 +2149,17 @@ function finalizeMaterialPickupSuccess() {
     if (type === "IN") {
       return setMsg("Le entrate merci si registrano da Magazzino · Inventario. Per le uscite usa Avvia prelievo.");
     }
-    const noteParsed = movementNoteSchema.safeParse({ note: note.trim() });
-    if (!noteParsed.success) return setMsg(noteParsed.error.flatten().formErrors[0] ?? "Le note sono obbligatorie.");
+    if (!pickupDestination.trim()) return setMsg("La destinazione è obbligatoria.");
+    if (!workDescription.trim()) return setMsg("La descrizione lavori è obbligatoria.");
+
+    const noteParsed = movementNoteSchema.safeParse({ note: pickupNote });
+    if (!noteParsed.success) return setMsg(noteParsed.error.flatten().formErrors[0] ?? "Destinazione e descrizione lavori sono obbligatorie.");
+    const selectedRefs = getSelectedReferents();
+    if (selectedRefs.length === 0) return setMsg("Seleziona almeno un referente con email valida.");
+    const ref = selectedRefs[0];
+    const referentEmails = referentEmailList(selectedRefs);
+    const referentEmailLabel = referentEmails.join(", ");
+    const referentNamesLabel = referentNameLabel(selectedRefs);
 
     const qn = toNumber(qty);
     if (!Number.isFinite(qn) || qn <= 0) {
@@ -2051,7 +2199,7 @@ function finalizeMaterialPickupSuccess() {
             type: "OUT",
             code: picked.code,
             qty: fromPRM,
-            note: note.trim(),
+            note: pickupNote,
             created_by: userId,
             created_by_name: fullName,
             warehouse: "PRM",
@@ -2060,12 +2208,13 @@ function finalizeMaterialPickupSuccess() {
             return_note: null,
             closed_at: null,
             closed_by: null,
-            referent_id: null,
-            referee_email: null,
+            referent_id: ref?.id ?? null,
+            referee_email: referentEmailLabel || null,
+            referee_name: referentNamesLabel || null,
           };
           const { error: e1 } = await supabase.from("movements").insert(payloadPRM as any);
           if (e1) return setMsg("Errore salvataggio movimento PRM: " + e1.message);
-          await writeAuditLog({ action: "MOVEMENT_CREATED", entity_type: "movement", code: picked.code, warehouse: "PRM", details_json: { type: "OUT", qty: fromPRM, note: note.trim(), status: "OPEN" } });
+          await writeAuditLog({ action: "MOVEMENT_CREATED", entity_type: "movement", code: picked.code, warehouse: "PRM", details_json: { type: "OUT", qty: fromPRM, note: pickupNote, status: "OPEN", referent_id: ref?.id ?? null, referent_name: ref?.name ?? null, referent_names: referentNamesLabel, referent_email: ref?.email ?? null, referent_emails: referentEmails } });
           await applyDeltaToExcelLive(picked.code, "PRM", -fromPRM);
         }
         if (fromREALE > 0) {
@@ -2073,7 +2222,7 @@ function finalizeMaterialPickupSuccess() {
             type: "OUT",
             code: picked.code,
             qty: fromREALE,
-            note: note.trim(),
+            note: pickupNote,
             created_by: userId,
             created_by_name: fullName,
             warehouse: "REALE",
@@ -2082,12 +2231,13 @@ function finalizeMaterialPickupSuccess() {
             return_note: null,
             closed_at: null,
             closed_by: null,
-            referent_id: null,
-            referee_email: null,
+            referent_id: ref?.id ?? null,
+            referee_email: referentEmailLabel || null,
+            referee_name: referentNamesLabel || null,
           };
           const { error: e2 } = await supabase.from("movements").insert(payloadREALE as any);
           if (e2) return setMsg("Errore salvataggio movimento REALE: " + e2.message);
-          await writeAuditLog({ action: "MOVEMENT_CREATED", entity_type: "movement", code: picked.code, warehouse: "REALE", details_json: { type: "OUT", qty: fromREALE, note: note.trim(), status: "OPEN" } });
+          await writeAuditLog({ action: "MOVEMENT_CREATED", entity_type: "movement", code: picked.code, warehouse: "REALE", details_json: { type: "OUT", qty: fromREALE, note: pickupNote, status: "OPEN", referent_id: ref?.id ?? null, referent_name: ref?.name ?? null, referent_names: referentNamesLabel, referent_email: ref?.email ?? null, referent_emails: referentEmails } });
           await applyDeltaToExcelLive(picked.code, "REALE", -fromREALE);
         }
 
@@ -2139,7 +2289,7 @@ function finalizeMaterialPickupSuccess() {
       type,
       code: picked.code,
       qty: qn,
-      note: note.trim(),
+      note: pickupNote,
       created_by: userId,
       created_by_name: fullName,
       warehouse: wh,
@@ -2148,8 +2298,9 @@ function finalizeMaterialPickupSuccess() {
       return_note: null,
       closed_at: type === "OUT" ? null : new Date().toISOString(),
       closed_by: type === "OUT" ? null : userId,
-      referent_id: null,
-      referee_email: null,
+      referent_id: ref?.id ?? null,
+      referee_email: referentEmailLabel || null,
+      referee_name: referentNamesLabel || null,
     };
 
     const { error } = await supabase.from("movements").insert(payload as any);
@@ -2163,8 +2314,13 @@ function finalizeMaterialPickupSuccess() {
       details_json: {
         type,
         qty: qn,
-        note: note.trim(),
+        note: pickupNote,
         status: type === "OUT" ? "OPEN" : "CLOSED",
+        referent_id: ref?.id ?? null,
+        referent_name: ref?.name ?? null,
+        referent_names: referentNamesLabel,
+        referent_email: ref?.email ?? null,
+        referent_emails: referentEmails,
       },
     });
 
@@ -2182,7 +2338,8 @@ function finalizeMaterialPickupSuccess() {
       finalizeMaterialPickupSuccess();
     } else {
       setQty("");
-      setNote("");
+      setPickupDestination("");
+      setWorkDescription("");
     }
     setMsg(
       excelLiveOk
@@ -2190,17 +2347,6 @@ function finalizeMaterialPickupSuccess() {
         : "Movimento salvato ✅\n\n⚠️ Inventario (excel_live) non aggiornato: materiale non presente. Importa l'Excel o verifica il codice."
     );
     toast.success("Movimento salvato");
-
-    if (type === "OUT") {
-      const { data: shelfRow } = await supabase.from("material_shelves").select("warehouse,shelf,place").eq("code", picked.code).eq("warehouse", wh).maybeSingle();
-      if (shelfRow?.shelf) {
-        setShelfInfoPopup({
-          code: picked.code,
-          name: picked.name ?? "",
-          items: [{ warehouse: wh, shelf: (shelfRow as any).shelf, place: (shelfRow as any).place }],
-        });
-      }
-    }
 
     await loadHistory();
     setTimeout(() => qtyRef.current?.focus(), 80);
@@ -2425,6 +2571,7 @@ function finalizeMaterialPickupSuccess() {
         .order("created_at", { ascending: true });
       if (groupData?.length) group = groupData as MovementRow[];
     }
+    const activeReferents = referents.length > 0 ? referents : await loadReferents();
 
     setClosing(m);
     setClosingGroup(group);
@@ -2450,7 +2597,7 @@ function finalizeMaterialPickupSuccess() {
     setReturnToPrm(wh === "PRM" ? String(r) : "0");
     setReturnToReale(wh === "REALE" ? String(r) : "0");
     setReturnNote(m.return_note ?? "");
-    setSelReferentIds(m.referent_id ? new Set([m.referent_id]) : new Set());
+    setSelReferentIds(storedReferentIdsFromMovements(group, activeReferents));
     setEditRectify(false);
 
     const meta = await loadItemMetaWithFallback(m.code, (m.warehouse ?? null) as any);
@@ -2467,7 +2614,7 @@ function finalizeMaterialPickupSuccess() {
     setReturnToPrm(wh === "PRM" ? String(r) : "0");
     setReturnToReale(wh === "REALE" ? String(r) : "0");
     setReturnNote(mov.return_note ?? "");
-    setSelReferentIds(mov.referent_id ? new Set([mov.referent_id]) : new Set());
+    setSelReferentIds(storedReferentIdsFromMovements([mov]));
     setEditRectify(true);
     setClosing(mov);
     loadItemMetaWithFallback(mov.code, (mov.warehouse ?? null) as any).then(setClosingMeta);
@@ -2736,14 +2883,15 @@ function finalizeMaterialPickupSuccess() {
       return;
     }
 
-    const selectedRefs = referents.filter((r) => selReferentIds.has(r.id) && String(r.email ?? "").trim().length > 0);
+    const selectedRefs = getSelectedReferents();
     if (selectedRefs.length === 0) {
       setMsg("Seleziona almeno un referente con email valida prima di confermare la chiusura.");
       return;
     }
     const ref = selectedRefs[0];
-    const referentEmails = [...new Set(selectedRefs.map((r) => String(r.email).trim().toLowerCase()))];
-    const referentNamesLabel = selectedRefs.map((r) => r.name).join(", ");
+    const referentEmails = referentEmailList(selectedRefs);
+    const referentEmailLabel = referentEmails.join(", ");
+    const referentNamesLabel = referentNameLabel(selectedRefs);
 
     const closedAtIso = new Date().toISOString();
 
@@ -2765,8 +2913,8 @@ function finalizeMaterialPickupSuccess() {
             closed_at: closedAtIso,
             closed_by: userId ?? null,
             referent_id: ref?.id ?? null,
-            referee_email: ref?.email ?? null,
-            referee_name: ref?.name ?? null,
+            referee_email: referentEmailLabel || null,
+            referee_name: referentNamesLabel || null,
           } as any)
           .eq("id", mov.id);
 
@@ -2964,8 +3112,8 @@ function finalizeMaterialPickupSuccess() {
         closed_at: closedAtIso,
         closed_by: userId ?? null,
         referent_id: ref?.id ?? null,
-        referee_email: ref?.email ?? null,
-        referee_name: ref?.name ?? null,
+        referee_email: referentEmailLabel || null,
+        referee_name: referentNamesLabel || null,
       } as any)
       .eq("id", closing.id);
 
@@ -2984,8 +3132,8 @@ function finalizeMaterialPickupSuccess() {
               closed_at: closedAtIso,
               closed_by: userId ?? null,
               referent_id: ref?.id ?? null,
-              referee_email: ref?.email ?? null,
-              referee_name: ref?.name ?? null,
+              referee_email: referentEmailLabel || null,
+              referee_name: referentNamesLabel || null,
             }
           : row
       )
@@ -3272,17 +3420,6 @@ function finalizeMaterialPickupSuccess() {
     return 1;
   }
 
-  function startDashboardBarcodePickup() {
-    setType("OUT");
-    setScanMode("NORMAL");
-    setWizardMatOpen(true);
-    setOutboundStepMat(1);
-    setMsg(null);
-    window.setTimeout(() => {
-      void startScan();
-    }, 0);
-  }
-
   const active = useMemo(() => suggestions[activeIndex], [suggestions, activeIndex]);
 
   const displayHistory = useMemo(() => {
@@ -3440,30 +3577,19 @@ function finalizeMaterialPickupSuccess() {
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
         <div className="mobileFlexCol" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           {!wizardMatOpen && (
-            <>
-              <button
-                type="button"
-                className="btn btnPrimary"
-                onClick={() => {
-                  setType("OUT");
-                  setWizardMatOpen(true);
-                  setOutboundStepMat(getResumeOutboundStepMat());
-                  setMsg(null);
-                }}
-                style={{ padding: "10px 20px", fontWeight: 800 }}
-              >
-                {hasMaterialWizardDraft ? "Continua prelievo" : "Avvia prelievo"}
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={startDashboardBarcodePickup}
-                style={{ padding: "10px 20px", fontWeight: 800, display: "inline-flex", alignItems: "center", gap: 6 }}
-              >
-                <BarcodeIcon />
-                Barcode / QR
-              </button>
-            </>
+            <button
+              type="button"
+              className="btn btnPrimary"
+              onClick={() => {
+                setType("OUT");
+                setWizardMatOpen(true);
+                setOutboundStepMat(getResumeOutboundStepMat());
+                setMsg(null);
+              }}
+              style={{ padding: "10px 20px", fontWeight: 800 }}
+            >
+              {hasMaterialWizardDraft ? "Continua prelievo" : "Avvia prelievo"}
+            </button>
           )}
 
           {msg && <div style={{ marginTop: 10, fontWeight: 800, whiteSpace: "pre-wrap", width: "100%" }}>{msg}</div>}
@@ -3573,15 +3699,10 @@ function finalizeMaterialPickupSuccess() {
 
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
                   <button className="btn" type="button" onClick={() => (scanning ? stopScan() : startScan())} disabled={cartNfcScanning || remoteMaterialScanOpen} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <BarcodeIcon />
-                    Barcode / QR
-                  </button>
-                  <button className="btn" type="button" onClick={startNfcScan} disabled={scanning || cartNfcScanning || remoteMaterialScanOpen} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    {cartNfcScanning ? <SpinnerIcon /> : <NfcIcon />}
-                    NFC
+                    <QrIcon />
+                    QR code
                   </button>
                   <button className="btn" type="button" onClick={openRemoteMaterialScan} disabled={scanning || cartNfcScanning} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <BarcodeIcon />
                     Telefono
                   </button>
                   <button className="btn" type="button" onClick={resetSearch}>
@@ -3830,15 +3951,15 @@ function finalizeMaterialPickupSuccess() {
                       Ogni riga mostra magazzino, disponibilità e quantità da prelevare.
                     </div>
                     <div className="tableWrap" style={{ overflowX: "auto" }}>
-                      <table className="table">
+                      <table className="table" style={{ fontSize: 13, tableLayout: "fixed", minWidth: 780 }}>
                         <thead>
                           <tr>
-                            <th>Codice</th>
-                            <th>Descrizione</th>
-                            <th>Mag.</th>
-                            <th>Disponibile</th>
-                            <th>Da prelevare</th>
-                            <th>Azioni</th>
+                            <th style={{ width: 130 }}>Codice</th>
+                            <th style={{ width: 260 }}>Descrizione</th>
+                            <th style={{ width: 70 }}>Mag.</th>
+                            <th style={{ width: 100 }}>Disponibile</th>
+                            <th style={{ width: 110 }}>Da prelevare</th>
+                            <th style={{ width: 210 }}>Azioni</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -3851,13 +3972,17 @@ function finalizeMaterialPickupSuccess() {
                           ) : (
                             cart.map((row) => (
                               <tr key={`${row.code}-${row.warehouse}`}>
-                                <td style={{ fontWeight: 900 }}>{row.code}</td>
-                                <td>{row.name}</td>
-                                <td>{row.warehouse}</td>
-                                <td>{row.qtyAvailable}</td>
-                                <td style={{ fontWeight: 900 }}>{row.qtyPick}</td>
-                                <td>
-                                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                <td style={{ ...compactMovementCellStyle, fontWeight: 900 }}>
+                                  <span style={compactMovementTextStyle} title={row.code}>{row.code}</span>
+                                </td>
+                                <td style={compactMovementCellStyle}>
+                                  <span style={compactMovementTextStyle} title={row.name}>{row.name}</span>
+                                </td>
+                                <td style={compactMovementCellStyle}>{row.warehouse}</td>
+                                <td style={compactMovementCellStyle}>{row.qtyAvailable}</td>
+                                <td style={{ ...compactMovementCellStyle, fontWeight: 900 }}>{row.qtyPick}</td>
+                                <td style={compactMovementCellStyle}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "nowrap" }}>
                                     <button type="button" className="btn" style={{ padding: "6px 10px", minWidth: 32 }} onClick={() => updateCartRowQty(row.code, row.warehouse, row.qtyPick - 1)}>
                                       -
                                     </button>
@@ -3907,32 +4032,94 @@ function finalizeMaterialPickupSuccess() {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "1fr auto",
+                    gridTemplateColumns: "1fr 1fr auto",
                     gap: 10,
                     alignItems: "end",
                     marginBottom: 12,
                   }}
                 >
                   <div>
-                    <label className="label" htmlFor="noteMoveWiz">Note *</label>
+                    <label className="label" htmlFor="destinationMoveWiz">Destinazione *</label>
                     <input
-                      id="noteMoveWiz"
+                      id="destinationMoveWiz"
                       className="input"
-                      value={note}
-                      onChange={(e) => setNote(e.target.value)}
-                      placeholder="DDT / commessa / cliente"
+                      value={pickupDestination}
+                      onChange={(e) => setPickupDestination(e.target.value)}
+                      placeholder=""
+                      required
+                      aria-required="true"
                     />
                   </div>
                   <div>
+                    <label className="label" htmlFor="workDescriptionMoveWiz">Descrizione lavori *</label>
+                    <input
+                      id="workDescriptionMoveWiz"
+                      className="input"
+                      value={workDescription}
+                      onChange={(e) => setWorkDescription(e.target.value)}
+                      placeholder=""
+                      required
+                      aria-required="true"
+                    />
+                  </div>
+                  <div style={{ gridColumn: "1 / -1" }}>
+                    <div className="label" id="pickupRefSelLabel">
+                      Referente *
+                    </div>
+                    <div
+                      role="group"
+                      aria-labelledby="pickupRefSelLabel"
+                      style={{
+                        marginTop: 8,
+                        maxHeight: 170,
+                        overflow: "auto",
+                        border: "1px solid rgba(15,23,42,0.12)",
+                        borderRadius: 10,
+                        padding: 10,
+                        background: "#fff",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8,
+                      }}
+                    >
+                      {referents.length === 0 ? (
+                        <span style={{ fontSize: 13, color: "#64748b" }}>Nessun referente attivo. Configurali in Materiali → Admin → Referenti.</span>
+                      ) : (
+                        referents.map((r) => (
+                          <label
+                            key={r.id}
+                            style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", fontSize: 14 }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selReferentIds.has(r.id)}
+                              onChange={() => toggleReferentSelection(r.id)}
+                              style={{ marginTop: 3 }}
+                            />
+                            <span>
+                              <b>{r.name}</b>
+                              <span style={{ display: "block", fontSize: 12, color: "#64748b" }}>{r.email}</span>
+                            </span>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                    <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
+                      {selReferentIds.size > 0
+                        ? `${selReferentIds.size} referente/i selezionato/i.`
+                        : "Seleziona almeno un referente con email valida."}
+                    </div>
+                  </div>
+                  <div>
                     {scanMode === "NORMAL" ? (
-                      <button className="btn btnPrimary" onClick={saveMovement}>
+                      <button className="btn btnPrimary" onClick={saveMovement} disabled={!pickupDetailsComplete}>
                         Salva
                       </button>
                     ) : (
                       <button
                         className="btn btnPrimary"
                         onClick={confirmCartPickup}
-                        disabled={cart.length === 0 || cartBusy}
+                        disabled={cart.length === 0 || cartBusy || !pickupDetailsComplete}
                       >
                         {cartBusy ? "Salvataggio..." : "Conferma prelievo multiplo"}
                       </button>
@@ -4379,7 +4566,7 @@ function finalizeMaterialPickupSuccess() {
         </div>
 
         <div className="tableWrap" style={{ marginTop: 10 }}>
-          <table className="table">
+          <table className="table" style={{ fontSize: 13, tableLayout: "fixed", minWidth: 1180 }}>
             <thead>
               <tr>
                 {isAdmin && (
@@ -4393,17 +4580,17 @@ function finalizeMaterialPickupSuccess() {
                     />
                   </th>
                 )}
-                <th>Data</th>
-                <th>Stato</th>
-                <th>Tipo</th>
-                <th>Codice</th>
-                <th>Descrizione</th>
-                <th>Mag.</th>
-                <th>Q.tà</th>
-                <th>Rientro</th>
-                <th>Netta</th>
-                <th>Note</th>
-                <th>Inserito da</th>
+                <th style={{ width: 140 }}>Data</th>
+                <th style={{ width: 92 }}>Stato</th>
+                <th style={{ width: 92 }}>Tipo</th>
+                <th style={{ width: 190 }}>Codice</th>
+                <th style={{ width: 240 }}>Descrizione</th>
+                <th style={{ width: 90 }}>Mag.</th>
+                <th style={{ width: 74 }}>Q.tà</th>
+                <th style={{ width: 74 }}>Rientro</th>
+                <th style={{ width: 74 }}>Netta</th>
+                <th style={{ width: 220 }}>Note</th>
+                <th style={{ width: 150 }}>Inserito da</th>
               </tr>
             </thead>
 
@@ -4454,7 +4641,7 @@ function finalizeMaterialPickupSuccess() {
                       title={canEditRow(m) ? "Clicca per chiudere / rettificare" : "Clicca per vedere il dettaglio"}
                     >
                       {isAdmin && (
-                        <td onClick={(e) => e.stopPropagation()}>
+                        <td style={compactMovementCellStyle} onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={allSelected}
@@ -4464,9 +4651,9 @@ function finalizeMaterialPickupSuccess() {
                           />
                         </td>
                       )}
-                      <td>{fmtDate(m.created_at)}</td>
+                      <td style={compactMovementCellStyle}>{fmtDate(m.created_at)}</td>
 
-                      <td>
+                      <td style={compactMovementCellStyle}>
                         <span
                           className={st === "OPEN" ? "openStripe" : ""}
                           style={st === "OPEN" ? (() => { const s = pillStyle(st); const { background, ...rest } = s; return rest; })() : pillStyle(st)}
@@ -4475,30 +4662,47 @@ function finalizeMaterialPickupSuccess() {
                         </span>
                       </td>
 
-                      <td>
+                      <td style={compactMovementCellStyle}>
                         <span style={pillStyle(m.type)}>{m.type === "IN" ? "ENTRATA" : "USCITA"}</span>
                       </td>
 
-                      <td style={{ fontWeight: 900 }}>
-                        {isGroup ? `Prelievo multiplo (${groupCount} articoli)` : m.code}
+                      <td style={{ ...compactMovementCellStyle, fontWeight: 900 }}>
+                        <span style={compactMovementTextStyle} title={isGroup ? `Prelievo multiplo (${groupCount} articoli)` : m.code}>
+                          {isGroup ? `Prelievo multiplo (${groupCount} articoli)` : m.code}
+                        </span>
                       </td>
-                      <td>{isGroup ? `${nameMap[m.code] ?? m.code} (+${groupCount - 1} altri)` : (nameMap[m.code] ?? "-")}</td>
+                      <td style={compactMovementCellStyle}>
+                        <span
+                          style={compactMovementTextStyle}
+                          title={isGroup ? `${nameMap[m.code] ?? m.code} (+${groupCount - 1} altri)` : (nameMap[m.code] ?? "-")}
+                        >
+                          {isGroup ? `${nameMap[m.code] ?? m.code} (+${groupCount - 1} altri)` : (nameMap[m.code] ?? "-")}
+                        </span>
+                      </td>
 
-                      <td>
+                      <td style={compactMovementCellStyle}>
                         {isGroup
                           ? (groupWarehouses.length > 0 ? groupWarehouses.join(" + ") : "-")
                           : (m.warehouse ? <span style={pillStyle(m.warehouse)}>{m.warehouse}</span> : "-")}
                       </td>
 
-                      <td style={{ fontWeight: 900 }}>
+                      <td style={{ ...compactMovementCellStyle, fontWeight: 900 }}>
                         {`${m.type === "IN" ? "+" : "-"}${outAbs}`}
                       </td>
 
-                      <td>{m.type === "OUT" ? returnedQty : "-"}</td>
-                      <td style={{ fontWeight: 900 }}>{m.type === "OUT" ? net : "-"}</td>
+                      <td style={compactMovementCellStyle}>{m.type === "OUT" ? returnedQty : "-"}</td>
+                      <td style={{ ...compactMovementCellStyle, fontWeight: 900 }}>{m.type === "OUT" ? net : "-"}</td>
 
-                      <td>{groupNote}</td>
-                      <td>{m.created_by_name ?? "-"}</td>
+                      <td style={compactMovementCellStyle}>
+                        <span style={compactMovementTextStyle} title={groupNote}>
+                          {groupNote}
+                        </span>
+                      </td>
+                      <td style={compactMovementCellStyle}>
+                        <span style={compactMovementTextStyle} title={m.created_by_name ?? "-"}>
+                          {m.created_by_name ?? "-"}
+                        </span>
+                      </td>
                     </tr>
                   );
                 })
@@ -4576,16 +4780,16 @@ function finalizeMaterialPickupSuccess() {
               <div style={{ marginBottom: 16, padding: 12, background: "#f8fafc", borderRadius: 10, border: "1px solid #e2e8f0" }}>
                 <div style={{ fontWeight: 900, marginBottom: 10 }}>Prelievo multiplo · {closingGroup.length} articoli</div>
                 <div className="tableWrap">
-                  <table className="table" style={{ fontSize: 13 }}>
+                  <table className="table" style={{ fontSize: 12.5, tableLayout: "fixed", minWidth: 860 }}>
                     <thead>
                       <tr>
-                        <th>Codice</th>
-                        <th>Descrizione</th>
-                        <th>Mag.</th>
-                        <th>Q.tà uscita</th>
-                        <th>Q.tà rientro</th>
-                        <th>Nota (opz.)</th>
-                        <th>Stato</th>
+                        <th style={{ width: 120 }}>Codice</th>
+                        <th style={{ width: 240 }}>Descrizione</th>
+                        <th style={{ width: 78 }}>Mag.</th>
+                        <th style={{ width: 130 }}>Q.tà uscita</th>
+                        <th style={{ width: 110 }}>Q.tà rientro</th>
+                        <th style={{ width: 180 }}>Nota (opz.)</th>
+                        <th style={{ width: 95 }}>Stato</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -4604,10 +4808,16 @@ function finalizeMaterialPickupSuccess() {
                             }}
                             onClick={isClosed ? () => setSelectedClosedRowId((prev) => (prev === mov.id ? null : mov.id)) : undefined}
                           >
-                            <td style={{ fontWeight: 900 }}>{mov.code}</td>
-                            <td>{nameMap[mov.code] ?? "-"}</td>
-                            <td>{mov.warehouse ? <span style={pillStyle(mov.warehouse)}>{mov.warehouse}</span> : "-"}</td>
-                            <td onClick={(e) => !isClosed && e.stopPropagation()}>
+                            <td style={{ ...compactDetailCellStyle, fontWeight: 900 }}>
+                              <span style={compactMovementTextStyle} title={mov.code}>{mov.code}</span>
+                            </td>
+                            <td style={compactDetailCellStyle}>
+                              <span style={compactMovementTextStyle} title={nameMap[mov.code] ?? "-"}>
+                                {nameMap[mov.code] ?? "-"}
+                              </span>
+                            </td>
+                            <td style={compactDetailCellStyle}>{mov.warehouse ? <span style={pillStyle(mov.warehouse)}>{mov.warehouse}</span> : "-"}</td>
+                            <td style={compactDetailCellStyle} onClick={(e) => !isClosed && e.stopPropagation()}>
                               {isClosed || !canEditRow(mov) ? (
                                 outQty
                               ) : (
@@ -4638,7 +4848,7 @@ function finalizeMaterialPickupSuccess() {
                                 </div>
                               )}
                             </td>
-                            <td onClick={(e) => !isClosed && e.stopPropagation()}>
+                            <td style={compactDetailCellStyle} onClick={(e) => !isClosed && e.stopPropagation()}>
                               {isClosed ? (
                                 n(mov.returned_qty)
                               ) : (
@@ -4658,9 +4868,11 @@ function finalizeMaterialPickupSuccess() {
                                 />
                               )}
                             </td>
-                            <td onClick={(e) => !isClosed && e.stopPropagation()}>
+                            <td style={compactDetailCellStyle} onClick={(e) => !isClosed && e.stopPropagation()}>
                               {isClosed ? (
-                                mov.return_note ?? "—"
+                                <span style={compactMovementTextStyle} title={mov.return_note ?? "—"}>
+                                  {mov.return_note ?? "—"}
+                                </span>
                               ) : (
                                 <input
                                   type="text"
@@ -4677,7 +4889,7 @@ function finalizeMaterialPickupSuccess() {
                                 />
                               )}
                             </td>
-                            <td>
+                            <td style={compactDetailCellStyle}>
                               <span style={pillStyle(st)}>{st === "OPEN" ? "APERTO" : "CHIUSO"}</span>
                             </td>
                           </tr>
@@ -4712,7 +4924,7 @@ function finalizeMaterialPickupSuccess() {
                   return (
                     <div style={{ marginTop: 12, padding: 12, background: "#f0f9ff", borderRadius: 10, border: "1px solid #bae6fd" }}>
                       <div style={{ fontWeight: 900, marginBottom: 10 }}>Dettaglio rettifica · {mov.code}</div>
-                      <table className="table" style={{ fontSize: 13, width: "100%" }}>
+                      <table className="table" style={{ fontSize: 12.5, width: "100%", minWidth: 0 }}>
                         <tbody>
                           {detailRows.map((row, i) => (
                             <tr
@@ -4722,8 +4934,10 @@ function finalizeMaterialPickupSuccess() {
                                 background: row.highlight ? "rgba(59,130,246,0.08)" : undefined,
                               }}
                             >
-                              <td style={{ width: 200, padding: "6px 10px", fontWeight: 600, color: "#475569" }}>{row.label}</td>
-                              <td style={{ padding: "6px 10px" }}>{row.value}</td>
+                              <td style={{ width: 190, padding: "5px 8px", fontWeight: 600, color: "#475569", verticalAlign: "middle" }}>{row.label}</td>
+                              <td style={{ padding: "5px 8px", verticalAlign: "middle" }}>
+                                <span style={compactMovementTextStyle} title={row.value}>{row.value}</span>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -4826,7 +5040,7 @@ function finalizeMaterialPickupSuccess() {
                 }}
               >
                 <div style={{ fontWeight: 900, marginBottom: 10 }}>Dettaglio rettifica / chiusura</div>
-                <table className="table" style={{ fontSize: 13, width: "100%" }}>
+                <table className="table" style={{ fontSize: 12.5, width: "100%", minWidth: 0 }}>
                   <tbody>
                     {[
                       { label: "Codice", value: closing.code },
@@ -4851,8 +5065,10 @@ function finalizeMaterialPickupSuccess() {
                           background: row.highlight ? "rgba(59,130,246,0.12)" : undefined,
                         }}
                       >
-                        <td style={{ width: 220, padding: "8px 12px", fontWeight: 600, color: "#475569" }}>{row.label}</td>
-                        <td style={{ padding: "8px 12px", background: "#f8fafc", borderRadius: 4 }}>{row.value}</td>
+                        <td style={{ width: 210, padding: "5px 8px", fontWeight: 600, color: "#475569", verticalAlign: "middle" }}>{row.label}</td>
+                        <td style={{ padding: "5px 8px", background: "#f8fafc", borderRadius: 4, verticalAlign: "middle" }}>
+                          <span style={compactMovementTextStyle} title={row.value}>{row.value}</span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -5295,10 +5511,10 @@ function finalizeMaterialPickupSuccess() {
     >
       {scanning ? (
         <>
-          <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner Barcode / QR</div>
+          <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner QR code</div>
           <div style={{ padding: 12, background: "#0f172a", borderRadius: 12, marginBottom: 12 }}>
             <video ref={videoRef} style={{ width: "100%", maxWidth: 360, borderRadius: 8 }} muted playsInline />
-            <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il barcode o il QR code</div>
+            <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il QR code</div>
           </div>
           <button type="button" className="btn" onClick={() => { stopScan(); setScanInfo(null); if (cart.length > 0) setCartOpen(true); }}>
             Fine
@@ -5437,28 +5653,8 @@ function finalizeMaterialPickupSuccess() {
 
       <div style={{ marginTop: 10, marginBottom: 12, padding: 12, background: "#f8fafc", borderRadius: 10, border: "1px solid #e2e8f0" }}>
         <div style={{ fontWeight: 800, marginBottom: 4, fontSize: 13 }}>Aggiungi materiali</div>
-        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>Puoi aggiungere più materiali usando Barcode / QR, NFC o inserimento manuale.</div>
+        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>Puoi aggiungere più materiali usando il telefono lettore oppure inserimento manuale.</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => startScan()}
-            disabled={cartBusy}
-            style={{ display: "flex", alignItems: "center", gap: 6 }}
-          >
-            <BarcodeIcon />
-            Barcode / QR
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={startNfcScan}
-            disabled={cartBusy || cartNfcScanning}
-            style={{ display: "flex", alignItems: "center", gap: 6 }}
-          >
-            {cartNfcScanning ? <SpinnerIcon /> : <NfcIcon />}
-            {cartNfcScanning ? "NFC..." : "NFC"}
-          </button>
           <div ref={cartManualRef} style={{ display: "flex", gap: 6, alignItems: "flex-start", flex: 1, minWidth: 200, position: "relative" }}>
             <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
               <input
@@ -5593,18 +5789,83 @@ function finalizeMaterialPickupSuccess() {
         </table>
       </div>
 
-      <div style={{ marginTop: 12 }}>
-        <label className="label" htmlFor="cartNote">
-          Note *
-        </label>
-        <input
-          id="cartNote"
-          className="input"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="DDT / commessa / cliente (obbligatorio)"
-          style={{ maxWidth: 400 }}
-        />
+      <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, maxWidth: 760 }}>
+        <div>
+          <label className="label" htmlFor="cartDestination">
+            Destinazione *
+          </label>
+          <input
+            id="cartDestination"
+            className="input"
+            value={pickupDestination}
+            onChange={(e) => setPickupDestination(e.target.value)}
+            placeholder=""
+            required
+            aria-required="true"
+          />
+        </div>
+        <div>
+          <label className="label" htmlFor="cartWorkDescription">
+            Descrizione lavori *
+          </label>
+          <input
+            id="cartWorkDescription"
+            className="input"
+            value={workDescription}
+            onChange={(e) => setWorkDescription(e.target.value)}
+            placeholder=""
+            required
+            aria-required="true"
+          />
+        </div>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <div className="label" id="cartRefSelLabel">
+            Referente *
+          </div>
+          <div
+            role="group"
+            aria-labelledby="cartRefSelLabel"
+            style={{
+              marginTop: 8,
+              maxHeight: 160,
+              overflow: "auto",
+              border: "1px solid rgba(15,23,42,0.12)",
+              borderRadius: 10,
+              padding: 10,
+              background: "#fff",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            {referents.length === 0 ? (
+              <span style={{ fontSize: 13, color: "#64748b" }}>Nessun referente attivo. Configurali in Materiali → Admin → Referenti.</span>
+            ) : (
+              referents.map((r) => (
+                <label
+                  key={r.id}
+                  style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", fontSize: 14 }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selReferentIds.has(r.id)}
+                    onChange={() => toggleReferentSelection(r.id)}
+                    style={{ marginTop: 3 }}
+                  />
+                  <span>
+                    <b>{r.name}</b>
+                    <span style={{ display: "block", fontSize: 12, color: "#64748b" }}>{r.email}</span>
+                  </span>
+                </label>
+              ))
+            )}
+          </div>
+          <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
+            {selReferentIds.size > 0
+              ? `${selReferentIds.size} referente/i selezionato/i.`
+              : "Seleziona almeno un referente con email valida."}
+          </div>
+        </div>
       </div>
 
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
@@ -5612,7 +5873,7 @@ function finalizeMaterialPickupSuccess() {
           Righe: {cart.length}
         </div>
 
-        <button className="btn btnPrimary" onClick={confirmCartPickup} disabled={cartBusy || cart.length === 0} aria-label="Conferma prelievo carrello" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <button className="btn btnPrimary" onClick={confirmCartPickup} disabled={cartBusy || cart.length === 0 || !pickupDetailsComplete} aria-label="Conferma prelievo carrello" style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {cartBusy ? <SpinnerIcon /> : <CheckIcon />}
           {cartBusy ? "Salvataggio..." : "Conferma prelievo"}
         </button>

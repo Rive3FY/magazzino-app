@@ -3,8 +3,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
-import AppScanStatusModal from "../_components/AppScanStatusModal";
-import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../_lib/fastBarcodeScanner";
 
 type Movement = {
   id: string;
@@ -39,6 +37,7 @@ type DbItem = {
   code: string;
   name: string;
   um: string | null;
+  matchInfo?: string | null;
 };
 
 type ShelfInfo = {
@@ -71,44 +70,13 @@ function n(v: any) {
 
 type StockBoth = { PRM: number; REALE: number };
 
+const MAX_MATERIAL_SUGGESTIONS = 250;
+
 function SearchIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="11" cy="11" r="8" />
       <path d="m21 21-4.35-4.35" />
-    </svg>
-  );
-}
-
-function BarcodeIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <rect x="2" y="6" width="2" height="12" />
-      <rect x="6" y="6" width="1" height="12" />
-      <rect x="9" y="6" width="2" height="12" />
-      <rect x="13" y="6" width="1" height="12" />
-      <rect x="16" y="6" width="2" height="12" />
-      <rect x="20" y="6" width="2" height="12" />
-    </svg>
-  );
-}
-
-function NfcIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="5" y="2" width="14" height="20" rx="2" />
-      <path d="M9 7h6" />
-      <path d="M9 11h6" />
-      <path d="M9 15h4" />
-      <path d="M12 6v12" />
-    </svg>
-  );
-}
-
-function SpinnerIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 1s linear infinite", transformOrigin: "center" }}>
-      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
     </svg>
   );
 }
@@ -122,6 +90,18 @@ function whereLabel(st: StockBoth) {
   return "Nessuno";
 }
 
+function appendUnique(list: string[], value: string) {
+  if (value && !list.includes(value)) list.push(value);
+}
+
+function shelfMatchLabel(row: any) {
+  const wh = String(row?.warehouse ?? "").trim();
+  const shelf = String(row?.shelf ?? "").trim();
+  const place = String(row?.place ?? "").trim();
+  const position = [shelf && shelf !== "—" ? `Scaffale ${shelf}` : "", place ? `Luogo ${place}` : ""].filter(Boolean).join(" · ");
+  return [wh, position].filter(Boolean).join(": ");
+}
+
 export default function Home() {
   const supabase = createClient();
 
@@ -131,11 +111,11 @@ export default function Home() {
   const [nameMap, setNameMap] = useState<Record<string, string>>({});
   const [selectedMovementEntry, setSelectedMovementEntry] = useState<DashboardMovementEntry | null>(null);
 
-  const [warehouseFilter, setWarehouseFilter] = useState<"ALL" | "PRM" | "REALE">("ALL");
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<DbItem[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [suggestionsBox, setSuggestionsBox] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null);
 
   const [picked, setPicked] = useState<DbItem | null>(null);
   const [stock, setStock] = useState<StockBoth | null>(null);
@@ -144,33 +124,106 @@ export default function Home() {
 
   const boxRef = useRef<HTMLDivElement | null>(null);
 
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const readerRef = useRef<FastBarcodeReader | null>(null);
-  const [scanning, setScanning] = useState(false);
-  const [nfcScanning, setNfcScanning] = useState(false);
-  const [isNfcSupported, setIsNfcSupported] = useState(false);
+  const updateSuggestionsBox = useCallback(() => {
+    if (!boxRef.current || typeof window === "undefined") return;
+    const rect = boxRef.current.getBoundingClientRect();
+    const top = rect.bottom + 6;
+    const maxHeight = Math.max(160, Math.min(420, window.innerHeight - top - 12));
+    setSuggestionsBox({
+      left: rect.left,
+      top,
+      width: rect.width,
+      maxHeight,
+    });
+  }, []);
 
-  async function loadSuggestions(text: string) {
+  async function loadSuggestions(text: string): Promise<DbItem[]> {
     const s = text.trim();
     if (!s) {
       setSuggestions([]);
-      return;
+      return [];
     }
 
-    const { data, error } = await supabase
-      .from("items")
-      .select("code,name,um")
-      .or(`code.ilike.%${s}%,name.ilike.%${s}%`)
-      .order("code", { ascending: true })
-      .limit(12);
+    const maxSuggestions = MAX_MATERIAL_SUGGESTIONS;
+    const itemByCode = new Map<string, DbItem>();
+    const shelfLabelsByCode = new Map<string, string[]>();
+    const shelfFields = ["shelf", "place", "barcode", "nfc_tag_id"] as const;
 
-    if (error) {
-      console.error(error);
-      setSuggestions([]);
-      return;
+    const itemQueries = await Promise.all([
+      supabase.from("items").select("code,name,um").ilike("code", `%${s}%`).order("code", { ascending: true }).limit(maxSuggestions),
+      supabase.from("items").select("code,name,um").ilike("name", `%${s}%`).order("code", { ascending: true }).limit(maxSuggestions),
+    ]);
+
+    for (const result of itemQueries) {
+      if (result.error) {
+        console.error(result.error);
+        continue;
+      }
+      for (const item of result.data ?? []) {
+        const it = item as DbItem;
+        if (it.code && !itemByCode.has(it.code)) itemByCode.set(it.code, it);
+      }
     }
 
-    setSuggestions((data ?? []) as DbItem[]);
+    const shelfQueries = await Promise.all(
+      shelfFields.map((field) => {
+        const query = supabase
+          .from("material_shelves")
+          .select("code,warehouse,shelf,place,barcode,nfc_tag_id")
+          .ilike(field, `%${s}%`);
+
+        return query.order("code", { ascending: true }).limit(maxSuggestions);
+      })
+    );
+
+    for (const result of shelfQueries) {
+      if (result.error) {
+        console.error(result.error);
+        continue;
+      }
+
+      for (const row of result.data ?? []) {
+        const code = String((row as any).code ?? "").trim();
+        if (!code) continue;
+        const labels = shelfLabelsByCode.get(code) ?? [];
+        appendUnique(labels, shelfMatchLabel(row));
+        shelfLabelsByCode.set(code, labels);
+      }
+    }
+
+    const shelfCodes = Array.from(shelfLabelsByCode.keys());
+    const missingCodes = shelfCodes.filter((code) => !itemByCode.has(code));
+    if (missingCodes.length > 0) {
+      const { data, error } = await supabase
+        .from("items")
+        .select("code,name,um")
+        .in("code", missingCodes)
+        .order("code", { ascending: true });
+
+      if (error) {
+        console.error(error);
+      } else {
+        for (const item of data ?? []) {
+          const it = item as DbItem;
+          if (it.code && !itemByCode.has(it.code)) itemByCode.set(it.code, it);
+        }
+      }
+    }
+
+    for (const code of missingCodes) {
+      if (!itemByCode.has(code)) itemByCode.set(code, { code, name: code, um: null });
+    }
+
+    for (const [code, labels] of shelfLabelsByCode) {
+      const item = itemByCode.get(code);
+      if (item) item.matchInfo = labels.filter(Boolean).slice(0, 2).join(" · ");
+    }
+
+    const next = Array.from(itemByCode.values())
+      .sort((a, b) => a.code.localeCompare(b.code))
+      .slice(0, maxSuggestions);
+    setSuggestions(next);
+    return next;
   }
 
   async function computeStockBoth(code: string) {
@@ -224,106 +277,7 @@ export default function Home() {
     await computeStockBoth(it.code);
   }
 
-  async function pickItemByCode(codeRaw: string) {
-    const code = codeRaw.trim();
-    if (!code) return;
-
-    const { data: item, error } = await supabase
-      .from("items")
-      .select("code,name,um")
-      .eq("code", code)
-      .maybeSingle();
-
-    if (error) {
-      console.error(error);
-      setMsg("Errore ricerca articolo: " + error.message);
-      setPicked(null);
-      setStock(null);
-      return;
-    }
-
-    if (!item) {
-      const { data: shelfByBarcode, error: barcodeError } = await supabase
-        .from("material_shelves")
-        .select("code")
-        .eq("barcode", code)
-        .maybeSingle();
-
-      if (barcodeError) {
-        console.error(barcodeError);
-        setMsg("Errore ricerca barcode: " + barcodeError.message);
-        setPicked(null);
-        setStock(null);
-        return;
-      }
-
-      if (shelfByBarcode && (shelfByBarcode as any).code !== code) {
-        await pickItemByCode((shelfByBarcode as any).code);
-        return;
-      }
-
-      setMsg(`Codice "${code}" non trovato in anagrafica.`);
-      setPicked(null);
-      setStock(null);
-      setOpen(true);
-      await loadSuggestions(code);
-      return;
-    }
-
-    await pickItem(item as DbItem);
-  }
-
-  function stopScan() {
-    stopFastBarcodeScan(videoRef.current, readerRef.current);
-    readerRef.current = null;
-    setScanning(false);
-  }
-
-  async function startScan() {
-    setMsg(null);
-    setOpen(false);
-
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setMsg(
-        "La fotocamera richiede HTTPS. Da mobile, se accedi via IP (es. 192.168.x.x) non funziona con http://. " +
-        "Usa npm run dev:https sul PC, poi accedi da https://TUO_IP:3000 (accetta il certificato)."
-      );
-      return;
-    }
-
-    stopScan();
-    setScanning(true);
-    await new Promise((r) => setTimeout(r, 100));
-
-    let videoEl = videoRef.current;
-    for (let i = 0; i < 30 && !videoEl; i++) {
-      await new Promise((r) => setTimeout(r, 50));
-      videoEl = videoRef.current;
-    }
-    if (!videoEl) {
-      setScanning(false);
-      setMsg("Video non disponibile. Riprova.");
-      return;
-    }
-
-    try {
-      const text = await scanFastBarcode(videoEl, {
-        onReader: (reader) => {
-          readerRef.current = reader;
-        },
-      });
-      stopScan();
-      if (text) await pickItemByCode(text);
-    } catch (e: any) {
-      console.error(e);
-      setMsg("Errore camera/scansione: " + (e?.message ?? "sconosciuto"));
-      stopScan();
-    }
-  }
-
   function resetSearch() {
-    stopScan();
-    stopNfcScan();
     setSearch("");
     setSuggestions([]);
     setPicked(null);
@@ -375,7 +329,6 @@ export default function Home() {
 
   useEffect(() => {
     void loadData();
-    return () => stopScan();
   }, [loadData]);
 
   useEffect(() => {
@@ -387,54 +340,6 @@ export default function Home() {
       supabase.removeChannel(channel);
     };
   }, [loadData]);
-
-  useEffect(() => {
-    setIsNfcSupported(typeof (window as any).NDEFReader !== "undefined");
-  }, []);
-
-  async function startNfcScan() {
-    if (!isNfcSupported) {
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-      setMsg(
-        isIOS
-          ? "NFC non disponibile su iPhone/iPad. Usa Barcode / QR o ricerca manuale."
-          : "NFC richiede Chrome su Android con HTTPS. Da mobile via IP usa npm run dev:https, poi accedi da https://TUO_IP:3000"
-      );
-      return;
-    }
-    setNfcScanning(true);
-    setMsg(null);
-    try {
-      const ndef = new (window as any).NDEFReader();
-      await ndef.scan();
-      const serialNumber = await new Promise<string>((resolve, reject) => {
-        const handler = (event: any) => {
-          ndef.removeEventListener("reading", handler);
-          resolve(event.serialNumber ?? "unknown");
-        };
-        ndef.addEventListener("reading", handler);
-        setTimeout(() => reject(new Error("Timeout: avvicina il telefono al tag entro 30 secondi")), 30000);
-      });
-      if (!serialNumber || serialNumber === "unknown") {
-        setMsg("Impossibile leggere l'ID del tag. Riprova.");
-        return;
-      }
-      const { data: shelf } = await supabase.from("material_shelves").select("code,warehouse").eq("nfc_tag_id", serialNumber).maybeSingle();
-      if (!shelf) {
-        setMsg("Tag NFC non associato a nessun materiale.");
-        return;
-      }
-      await pickItemByCode((shelf as any).code);
-    } catch (e: any) {
-      setMsg(e?.message ?? "Errore NFC");
-    } finally {
-      setNfcScanning(false);
-    }
-  }
-
-  function stopNfcScan() {
-    setNfcScanning(false);
-  }
 
   useEffect(() => {
     function onDocMouseDown(e: MouseEvent) {
@@ -457,10 +362,22 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, open]);
 
-  const filteredSuggestions = useMemo(() => {
-    if (warehouseFilter === "ALL") return suggestions;
-    return suggestions;
-  }, [suggestions, warehouseFilter]);
+  useEffect(() => {
+    if (!open || !search.trim()) {
+      setSuggestionsBox(null);
+      return;
+    }
+
+    updateSuggestionsBox();
+    window.addEventListener("resize", updateSuggestionsBox);
+    window.addEventListener("scroll", updateSuggestionsBox, true);
+    return () => {
+      window.removeEventListener("resize", updateSuggestionsBox);
+      window.removeEventListener("scroll", updateSuggestionsBox, true);
+    };
+  }, [open, search, suggestions.length, updateSuggestionsBox]);
+
+  const filteredSuggestions = suggestions;
 
   const active = useMemo(() => filteredSuggestions[activeIndex], [filteredSuggestions, activeIndex]);
 
@@ -528,14 +445,6 @@ export default function Home() {
     return parts.length > 0 ? parts.join(" · ") : "-";
   }, []);
 
-  const filterHint = useMemo(() => {
-    if (!picked || !stock) return null;
-
-    if (warehouseFilter === "PRM" && stock.PRM <= 0) return "In PRM non c’è inventario.";
-    if (warehouseFilter === "REALE" && stock.REALE <= 0) return "In REALE non c’è inventario.";
-    return null;
-  }, [picked, stock, warehouseFilter]);
-
   return (
     <main className="panel" style={{ overflowX: "hidden" }}>
       <div className="pageBar">
@@ -550,42 +459,11 @@ export default function Home() {
             <div>
               <div style={{ fontWeight: 900, fontSize: 16 }}> Controllo veloce materiale</div>
               <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
-                Cerca per codice/descrizione o scansiona Barcode / QR. Vedi inventario PRM/REALE, dove si trova e lo scaffale.
+                Cerca per codice, descrizione o posizione. Vedi inventario PRM/REALE, dove si trova e lo scaffale.
               </div>
             </div>
 
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-              <select
-                className="input mobileInputFull"
-                value={warehouseFilter}
-                onChange={(e) => setWarehouseFilter(e.target.value as any)}
-                style={{ width: 170 }}
-                aria-label="Filtro magazzino"
-              >
-                <option value="ALL">Tutti i magazzini</option>
-                <option value="PRM">Solo PRM</option>
-                <option value="REALE">Solo REALE</option>
-              </select>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => (scanning ? stopScan() : startScan())}
-                disabled={nfcScanning}
-                style={{ display: "flex", alignItems: "center", gap: 6 }}
-              >
-                <BarcodeIcon />
-                {scanning ? "Chiudi camera" : "Barcode / QR"}
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={startNfcScan}
-                disabled={scanning || nfcScanning}
-                style={{ display: "flex", alignItems: "center", gap: 6 }}
-              >
-                {nfcScanning ? <SpinnerIcon /> : <NfcIcon />}
-                {nfcScanning ? "NFC..." : "NFC"}
-              </button>
               <button type="button" className="btn" onClick={resetSearch} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <SearchIcon />
                 Pulisci
@@ -624,76 +502,84 @@ export default function Home() {
                   setActiveIndex((i) => Math.max(i - 1, 0));
                 } else if (e.key === "Enter") {
                   e.preventDefault();
-                  if (active) pickItem(active);
+                  if (active) {
+                    pickItem(active);
+                  } else {
+                    setOpen(true);
+                    void loadSuggestions(search);
+                  }
                 } else if (e.key === "Escape") {
                   setOpen(false);
                 }
               }}
-              placeholder="Es. 12345 oppure bullone..."
+              placeholder=""
               style={{ width: "100%" }}
             />
 
-            {open && search.trim() && (
+            {open && search.trim() && suggestionsBox && (
               <div
                 style={{
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  top: "100%",
-                  marginTop: 6,
+                  position: "fixed",
+                  left: suggestionsBox?.left ?? 0,
+                  top: suggestionsBox?.top ?? 0,
+                  width: suggestionsBox?.width ?? "100%",
                   background: "rgba(255,255,255,0.98)",
                   border: "1px solid rgba(15,23,42,0.12)",
                   borderRadius: 14,
                   boxShadow: "0 16px 40px rgba(0,0,0,0.20)",
-                  overflow: "hidden",
-                  zIndex: 50,
+                  overflowY: "auto",
+                  overscrollBehavior: "contain",
+                  maxHeight: suggestionsBox?.maxHeight ?? "55vh",
+                  zIndex: 10060,
                 }}
               >
                 {filteredSuggestions.length === 0 ? (
                   <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
                 ) : (
-                  filteredSuggestions.map((it, idx) => (
-                    <div
-                      key={it.code}
-                      onMouseEnter={() => setActiveIndex(idx)}
-                      onMouseDown={(ev) => {
-                        ev.preventDefault();
-                        pickItem(it);
-                      }}
-                      style={{
-                        padding: "10px 12px",
-                        cursor: "pointer",
-                        background: idx === activeIndex ? "#eef2ff" : "white",
-                        borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: 10,
-                      }}
-                    >
-                      <div>
-                        <div style={{ fontWeight: 900, color: "#0f172a" }}>{it.code}</div>
-                        <div style={{ fontSize: 12, color: "#334155" }}>{it.name}</div>
+                  <>
+                    {filteredSuggestions.map((it, idx) => (
+                      <div
+                        key={it.code}
+                        onMouseEnter={() => setActiveIndex(idx)}
+                        onMouseDown={(ev) => {
+                          ev.preventDefault();
+                          pickItem(it);
+                        }}
+                        style={{
+                          padding: "10px 12px",
+                          cursor: "pointer",
+                          background: idx === activeIndex ? "#eef2ff" : "white",
+                          borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 10,
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 900, color: "#0f172a" }}>{it.code}</div>
+                          <div style={{ fontSize: 12, color: "#334155" }}>{it.name}</div>
+                          {it.matchInfo && (
+                            <div style={{ fontSize: 12, color: "#0284c7", fontWeight: 700, marginTop: 3 }}>
+                              {it.matchInfo}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 12, opacity: 0.8, color: "#0f172a" }}>
+                          ↵ seleziona
+                        </div>
                       </div>
-                      <div style={{ fontSize: 12, opacity: 0.8, color: "#0f172a" }}>
-                        ↵ seleziona
+                    ))}
+                    {filteredSuggestions.length >= MAX_MATERIAL_SUGGESTIONS && (
+                      <div style={{ padding: "10px 12px", fontSize: 12, color: "#475569", background: "#f8fafc", borderTop: "1px solid #e2e8f0" }}>
+                        Ci sono molti risultati: scrivi qualche carattere in più per affinare la ricerca.
                       </div>
-                    </div>
-                  ))
+                    )}
+                  </>
                 )}
               </div>
             )}
           </div>
-
-          <AppScanStatusModal
-            open={scanning || nfcScanning}
-            mode={scanning ? "barcode" : "nfc"}
-            videoRef={videoRef}
-            icon={<SpinnerIcon />}
-            onClose={scanning ? stopScan : stopNfcScan}
-            barcodeTitle="Scanner Barcode / QR"
-            barcodeHint="Inquadra il barcode o il QR code"
-          />
 
           {msg && <div style={{ marginTop: 10, fontWeight: 800 }}>{msg}</div>}
 
@@ -766,9 +652,6 @@ export default function Home() {
                 </div>
               )}
 
-              {filterHint && (
-                <div style={{ marginTop: 10, fontWeight: 800 }}>{filterHint}</div>
-              )}
             </div>
           )}
         </div>

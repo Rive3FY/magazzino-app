@@ -20,6 +20,9 @@ const PAGE_LIMIT = 300;
 /** Filtri storico movimenti: nascosti per ora. Impostare a true per mostrare di nuovo. */
 const SHOW_HISTORY_FILTERS = false;
 
+/** Inserimento manuale materiali nel carrello: nascosto per ora, riattivabile in futuro. */
+const SHOW_CART_MANUAL_ADD = false;
+
 type RemoteScanEvent = {
   type?: string;
   code?: string;
@@ -5651,101 +5654,103 @@ function finalizeMaterialPickupSuccess() {
         </button>
       </div>
 
-      <div style={{ marginTop: 10, marginBottom: 12, padding: 12, background: "#f8fafc", borderRadius: 10, border: "1px solid #e2e8f0" }}>
-        <div style={{ fontWeight: 800, marginBottom: 4, fontSize: 13 }}>Aggiungi materiali</div>
-        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>Puoi aggiungere più materiali usando il telefono lettore oppure inserimento manuale.</div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-          <div ref={cartManualRef} style={{ display: "flex", gap: 6, alignItems: "flex-start", flex: 1, minWidth: 200, position: "relative" }}>
-            <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-              <input
-                type="text"
-                className="input"
-                placeholder="Cerca codice o descrizione (min. 2 caratteri)"
-                value={cartManualCode}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setCartManualCode(v);
-                  setCartManualOpen(true);
-                  loadCartSuggestions(v);
-                }}
-                onFocus={() => {
-                  setCartManualOpen(true);
-                  if (cartManualCode.trim().length >= 2) loadCartSuggestions(cartManualCode);
-                }}
-                onKeyDown={(e) => {
-                  if (!cartManualOpen || cartSuggestions.length === 0) {
-                    if (e.key === "Enter") addCartManual();
-                    return;
-                  }
-                  if (e.key === "ArrowDown") {
-                    e.preventDefault();
-                    setCartManualActiveIndex((i) => Math.min(i + 1, cartSuggestions.length - 1));
-                  } else if (e.key === "ArrowUp") {
-                    e.preventDefault();
-                    setCartManualActiveIndex((i) => Math.max(i - 1, 0));
-                  } else if (e.key === "Enter") {
-                    e.preventDefault();
-                    const sel = cartSuggestions[cartManualActiveIndex];
-                    if (sel) addCartManualByCode(sel.code);
-                  } else if (e.key === "Escape") {
-                    setCartManualOpen(false);
-                  }
-                }}
-                style={{ width: "100%" }}
-              />
-              {cartManualOpen && cartManualCode.trim().length >= 2 && (
-                <div
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    right: 0,
-                    top: "100%",
-                    marginTop: 4,
-                    background: "#fff",
-                    border: "1px solid rgba(15,23,42,0.12)",
-                    borderRadius: 10,
-                    boxShadow: "0 12px 32px rgba(0,0,0,0.12)",
-                    overflow: "hidden",
-                    zIndex: 100,
-                    maxHeight: 240,
-                    overflowY: "auto",
+      {SHOW_CART_MANUAL_ADD && (
+        <div style={{ marginTop: 10, marginBottom: 12, padding: 12, background: "#f8fafc", borderRadius: 10, border: "1px solid #e2e8f0" }}>
+          <div style={{ fontWeight: 800, marginBottom: 4, fontSize: 13 }}>Aggiungi materiali</div>
+          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>Puoi aggiungere più materiali usando il telefono lettore oppure inserimento manuale.</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+            <div ref={cartManualRef} style={{ display: "flex", gap: 6, alignItems: "flex-start", flex: 1, minWidth: 200, position: "relative" }}>
+              <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="Cerca codice o descrizione (min. 2 caratteri)"
+                  value={cartManualCode}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setCartManualCode(v);
+                    setCartManualOpen(true);
+                    loadCartSuggestions(v);
                   }}
-                >
-                  {cartSuggestions.length === 0 ? (
-                    <div style={{ padding: 12, fontSize: 13, color: "#64748b" }}>
-                      {cartManualCode.trim().length >= 2 ? "Nessun materiale disponibile o già nel carrello" : "Nessun materiale con giacenza"}
-                    </div>
-                  ) : (
-                    cartSuggestions.map((it, idx) => (
-                      <div
-                        key={it.code}
-                        onMouseEnter={() => setCartManualActiveIndex(idx)}
-                        onMouseDown={(ev) => {
-                          ev.preventDefault();
-                          addCartManualByCode(it.code);
-                        }}
-                        style={{
-                          padding: "10px 12px",
-                          cursor: "pointer",
-                          background: idx === cartManualActiveIndex ? "#eef2ff" : "white",
-                          borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
-                        }}
-                      >
-                        <div style={{ fontWeight: 900, color: "#0f172a" }}>{it.code}</div>
-                        <div style={{ fontSize: 12, color: "#334155" }}>{it.name}</div>
+                  onFocus={() => {
+                    setCartManualOpen(true);
+                    if (cartManualCode.trim().length >= 2) loadCartSuggestions(cartManualCode);
+                  }}
+                  onKeyDown={(e) => {
+                    if (!cartManualOpen || cartSuggestions.length === 0) {
+                      if (e.key === "Enter") addCartManual();
+                      return;
+                    }
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      setCartManualActiveIndex((i) => Math.min(i + 1, cartSuggestions.length - 1));
+                    } else if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      setCartManualActiveIndex((i) => Math.max(i - 1, 0));
+                    } else if (e.key === "Enter") {
+                      e.preventDefault();
+                      const sel = cartSuggestions[cartManualActiveIndex];
+                      if (sel) addCartManualByCode(sel.code);
+                    } else if (e.key === "Escape") {
+                      setCartManualOpen(false);
+                    }
+                  }}
+                  style={{ width: "100%" }}
+                />
+                {cartManualOpen && cartManualCode.trim().length >= 2 && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      top: "100%",
+                      marginTop: 4,
+                      background: "#fff",
+                      border: "1px solid rgba(15,23,42,0.12)",
+                      borderRadius: 10,
+                      boxShadow: "0 12px 32px rgba(0,0,0,0.12)",
+                      overflow: "hidden",
+                      zIndex: 100,
+                      maxHeight: 240,
+                      overflowY: "auto",
+                    }}
+                  >
+                    {cartSuggestions.length === 0 ? (
+                      <div style={{ padding: 12, fontSize: 13, color: "#64748b" }}>
+                        {cartManualCode.trim().length >= 2 ? "Nessun materiale disponibile o già nel carrello" : "Nessun materiale con giacenza"}
                       </div>
-                    ))
-                  )}
-                </div>
-              )}
+                    ) : (
+                      cartSuggestions.map((it, idx) => (
+                        <div
+                          key={it.code}
+                          onMouseEnter={() => setCartManualActiveIndex(idx)}
+                          onMouseDown={(ev) => {
+                            ev.preventDefault();
+                            addCartManualByCode(it.code);
+                          }}
+                          style={{
+                            padding: "10px 12px",
+                            cursor: "pointer",
+                            background: idx === cartManualActiveIndex ? "#eef2ff" : "white",
+                            borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
+                          }}
+                        >
+                          <div style={{ fontWeight: 900, color: "#0f172a" }}>{it.code}</div>
+                          <div style={{ fontSize: 12, color: "#334155" }}>{it.name}</div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+              <button type="button" className="btn btnPrimary" onClick={addCartManual} disabled={cartBusy} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <AddIcon />
+                Aggiungi
+              </button>
             </div>
-            <button type="button" className="btn btnPrimary" onClick={addCartManual} disabled={cartBusy} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <AddIcon />
-              Aggiungi
-            </button>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="tableWrap" style={{ marginTop: 12 }}>
         <table className="table">

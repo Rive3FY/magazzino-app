@@ -19,6 +19,8 @@
 
 # production
 /build
+/dist-electron
+/dist
 
 # misc
 .DS_Store
@@ -39,3 +41,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# capacitor / android signing
+*.jks
+*.keystore
+android/keystore.properties
+android/upload-keystore.jks

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Magazzino App2</string>
+    <string name="title_activity_main">Magazzino App2</string>
+    <string name="package_name">com.magazzino.app2</string>
+    <string name="custom_url_scheme">com.magazzino.app2</string>
+</resources>

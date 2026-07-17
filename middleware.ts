@@ -31,6 +31,7 @@ export async function middleware(request: NextRequest) {
   // Pagine pubbliche (accessibili senza login)
   const isPublic =
     path === "/login" ||
+    path === "/privacy" ||
     path === "/logout" ||
     path.startsWith("/auth/") ||
     path.startsWith("/_next") ||

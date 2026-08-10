@@ -1,10 +1,21 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createClient } from "../_lib/supabase/client";
+import { useAuth } from "../_lib/hooks/useAuth";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
+import {
+  buildDefinitivaDefaults,
+  buildDefinitivaLabelHtml,
+  DEFINITIVA_FIELD_LABELS,
+  definitivaPrintStyles,
+  loadDefinitivaOverrides,
+  mergeDefinitivaFields,
+  saveDefinitivaOverrides,
+  type DefinitivaFields,
+} from "./_lib/definitivaLabel";
 
 type ItemRow = { code: string; name: string; um: string | null };
 type ShelfRow = { code: string; warehouse: "PRM" | "REALE"; shelf: string; place?: string | null; barcode?: string | null };
@@ -20,6 +31,7 @@ type LabelItem = {
 };
 
 type PrintMode = "qrDescription" | "qrOnly";
+type LabelType = "materiale" | "scaffale" | "definitiva";
 
 const supabase = createClient();
 
@@ -44,21 +56,44 @@ function getLiveItemUm(row: LiveRow) {
   return um || null;
 }
 
+function escHtml(s: string) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function pickLiveRowJson(
+  byWh: Record<string, Record<string, unknown> | null | undefined> | undefined
+): Record<string, unknown> | null {
+  if (!byWh) return null;
+  return byWh.PRM ?? byWh.REALE ?? null;
+}
+
 export default function EtichettePage() {
+  const { user } = useAuth();
   const { canManageMaterials: isAdmin, loading: adminLoading } = useIsAdmin();
 
   const [items, setItems] = useState<ItemRow[]>([]);
   const [shelves, setShelves] = useState<Record<string, Record<string, { shelf: string; place: string; barcode: string }>>>({});
   const [qtyByCodeWh, setQtyByCodeWh] = useState<Record<string, Record<string, number>>>({});
+  const [liveJsonByCode, setLiveJsonByCode] = useState<Record<string, Record<string, Record<string, unknown> | null>>>({});
   const [loading, setLoading] = useState(true);
   const [warehouseFilter, setWarehouseFilter] = useState<"PRM" | "REALE" | "both">("both");
   const [onlyWithShelf, setOnlyWithShelf] = useState(false);
-  const [labelType, setLabelType] = useState<"materiale" | "scaffale">("scaffale");
+  const [labelType, setLabelType] = useState<LabelType>("scaffale");
   const [printMode, setPrintMode] = useState<PrintMode>("qrDescription");
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<Set<string> | null>(new Set());
   const [msg, setMsg] = useState<string | null>(null);
+  const [overrides, setOverrides] = useState<Record<string, Partial<DefinitivaFields>>>({});
+  const [editCode, setEditCode] = useState<string | null>(null);
+  const [defaultResponsabile, setDefaultResponsabile] = useState("");
+  const [ternaLogoSvg, setTernaLogoSvg] = useState<string>("");
   const headerCheckRef = useRef<HTMLInputElement>(null);
+
+  const isDefinitiva = labelType === "definitiva";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -88,6 +123,7 @@ export default function EtichettePage() {
       }
 
       const qtyMap: Record<string, Record<string, number>> = {};
+      const jsonMap: Record<string, Record<string, Record<string, unknown> | null>> = {};
       const itemMap = new Map((itemsData ?? []).map((item) => [item.code, item]));
       const liveItems = new Map<string, ItemRow>();
       for (const r of liveData ?? []) {
@@ -103,11 +139,14 @@ export default function EtichettePage() {
         }
         if (!qtyMap[row.code]) qtyMap[row.code] = {};
         qtyMap[row.code][row.warehouse] = getLiveQty(row);
+        if (!jsonMap[row.code]) jsonMap[row.code] = {};
+        jsonMap[row.code][row.warehouse] = (row.row_json ?? null) as Record<string, unknown> | null;
       }
 
       setItems(Array.from(liveItems.values()).sort((a, b) => a.code.localeCompare(b.code)));
       setShelves(shelfMap);
       setQtyByCodeWh(qtyMap);
+      setLiveJsonByCode(jsonMap);
     } catch (e: unknown) {
       setMsg("Errore caricamento: " + (e instanceof Error ? e.message : String(e)));
     } finally {
@@ -119,6 +158,48 @@ export default function EtichettePage() {
     if (isAdmin) void load();
   }, [isAdmin, load]);
 
+  useEffect(() => {
+    setOverrides(loadDefinitivaOverrides());
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!user?.id) {
+        setDefaultResponsabile("");
+        return;
+      }
+      const { data } = await supabase
+        .from("profiles")
+        .select("first_name,last_name")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (cancelled) return;
+      const first = String((data as { first_name?: string } | null)?.first_name ?? "").trim();
+      const last = String((data as { last_name?: string } | null)?.last_name ?? "").trim();
+      const full = [first, last].filter(Boolean).join(" ");
+      setDefaultResponsabile(full || user.email || "");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, user?.email]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/terna-logo.svg")
+      .then((r) => r.text())
+      .then((svg) => {
+        if (!cancelled) setTernaLogoSvg(svg);
+      })
+      .catch(() => {
+        if (!cancelled) setTernaLogoSvg("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function hasAssignedShelf(entry: { shelf: string; place: string; barcode: string } | undefined) {
     return !!entry && (!!entry.shelf || !!entry.place);
   }
@@ -129,9 +210,19 @@ export default function EtichettePage() {
     return hasQty || hasAssignedShelf(entry);
   }
 
+  function canPrintMaterial(code: string) {
+    return canPrintWarehouseLabel(code, "PRM") || canPrintWarehouseLabel(code, "REALE");
+  }
+
   const filtered = items.filter((it) => {
     const match = !q.trim() || it.code.toLowerCase().includes(q.toLowerCase()) || (it.name ?? "").toLowerCase().includes(q.toLowerCase());
     if (!match) return false;
+    if (isDefinitiva) {
+      if (onlyWithShelf) {
+        return hasAssignedShelf(shelves[it.code]?.PRM) || hasAssignedShelf(shelves[it.code]?.REALE);
+      }
+      return canPrintMaterial(it.code);
+    }
     if (warehouseFilter === "both") {
       const prm = shelves[it.code]?.PRM;
       const reale = shelves[it.code]?.REALE;
@@ -146,54 +237,103 @@ export default function EtichettePage() {
   });
 
   const whs: Array<"PRM" | "REALE"> = warehouseFilter === "both" ? ["PRM", "REALE"] : [warehouseFilter];
-  const selectableCount = filtered.reduce((acc, it) => {
-    let n = 0;
-    for (const wh of whs) {
-      const entry = shelves[it.code]?.[wh] ?? { shelf: "", place: "", barcode: "" };
-      if (!canPrintWarehouseLabel(it.code, wh)) continue;
-      if (onlyWithShelf && !entry.shelf && !entry.place) continue;
-      n++;
-    }
-    return acc + n;
-  }, 0);
 
-  const labels: LabelItem[] = [];
-  for (const it of filtered) {
-    const prm = shelves[it.code]?.PRM ?? { shelf: "", place: "", barcode: "" };
-    const reale = shelves[it.code]?.REALE ?? { shelf: "", place: "", barcode: "" };
-    for (const wh of whs) {
-      const entry = wh === "PRM" ? prm : reale;
-      if (!canPrintWarehouseLabel(it.code, wh)) continue;
-      if (onlyWithShelf && !entry.shelf && !entry.place) continue;
-      if (selected !== null && !selected.has(`${it.code}:${wh}`)) continue;
-      labels.push({
+  const selectableCount = useMemo(() => {
+    if (isDefinitiva) return filtered.length;
+    return filtered.reduce((acc, it) => {
+      let count = 0;
+      for (const wh of whs) {
+        const entry = shelves[it.code]?.[wh] ?? { shelf: "", place: "", barcode: "" };
+        if (!canPrintWarehouseLabel(it.code, wh)) continue;
+        if (onlyWithShelf && !entry.shelf && !entry.place) continue;
+        count++;
+      }
+      return acc + count;
+    }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, isDefinitiva, whs, shelves, onlyWithShelf, qtyByCodeWh]);
+
+  const allSelectableKeys = useMemo(() => {
+    const keys = new Set<string>();
+    if (isDefinitiva) {
+      for (const it of filtered) keys.add(it.code);
+      return keys;
+    }
+    for (const it of filtered) {
+      for (const w of whs) {
+        const entry = shelves[it.code]?.[w] ?? { shelf: "", place: "", barcode: "" };
+        if (!canPrintWarehouseLabel(it.code, w)) continue;
+        if (onlyWithShelf && !entry.shelf && !entry.place) continue;
+        keys.add(`${it.code}:${w}`);
+      }
+    }
+    return keys;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, isDefinitiva, whs, shelves, onlyWithShelf, qtyByCodeWh]);
+
+  useEffect(() => {
+    setSelected(new Set());
+    setEditCode(null);
+  }, [labelType]);
+
+  function qrValueForCode(code: string) {
+    const prm = shelves[code]?.PRM;
+    const reale = shelves[code]?.REALE;
+    return prm?.barcode || reale?.barcode || code;
+  }
+
+  const definitivaLabels = useMemo(() => {
+    if (!isDefinitiva) return [] as Array<{ code: string; fields: DefinitivaFields; qrValue: string }>;
+    const out: Array<{ code: string; fields: DefinitivaFields; qrValue: string }> = [];
+    for (const it of filtered) {
+      if (selected !== null && !selected.has(it.code)) continue;
+      const defaults = buildDefinitivaDefaults({
         code: it.code,
         name: it.name ?? it.code,
-        warehouse: wh,
-        shelf: entry.shelf || "—",
-        place: entry.place || "",
-        barcodeValue: entry.barcode || it.code,
+        rowJson: pickLiveRowJson(liveJsonByCode[it.code]),
+        responsabile: defaultResponsabile,
       });
+      out.push({
+        code: it.code,
+        fields: mergeDefinitivaFields(defaults, overrides[it.code]),
+        qrValue: qrValueForCode(it.code),
+      });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDefinitiva, filtered, selected, liveJsonByCode, overrides, defaultResponsabile, shelves]);
+
+  const labels: LabelItem[] = [];
+  if (!isDefinitiva) {
+    for (const it of filtered) {
+      const prm = shelves[it.code]?.PRM ?? { shelf: "", place: "", barcode: "" };
+      const reale = shelves[it.code]?.REALE ?? { shelf: "", place: "", barcode: "" };
+      for (const wh of whs) {
+        const entry = wh === "PRM" ? prm : reale;
+        if (!canPrintWarehouseLabel(it.code, wh)) continue;
+        if (onlyWithShelf && !entry.shelf && !entry.place) continue;
+        if (selected !== null && !selected.has(`${it.code}:${wh}`)) continue;
+        labels.push({
+          code: it.code,
+          name: it.name ?? it.code,
+          warehouse: wh,
+          shelf: entry.shelf || "—",
+          place: entry.place || "",
+          barcodeValue: entry.barcode || it.code,
+        });
+      }
     }
   }
 
-  const toggleSelect = (code: string, wh: "PRM" | "REALE") => {
-    const key = `${code}:${wh}`;
+  const printCount = isDefinitiva ? definitivaLabels.length : labels.length;
+
+  const toggleSelect = (key: string) => {
     setSelected((prev) => {
-      const allKeys = new Set<string>();
-      for (const it of filtered) {
-        for (const w of whs) {
-          const entry = shelves[it.code]?.[w] ?? { shelf: "", place: "", barcode: "" };
-          if (!canPrintWarehouseLabel(it.code, w)) continue;
-          if (onlyWithShelf && !entry.shelf && !entry.place) continue;
-          allKeys.add(`${it.code}:${w}`);
-        }
-      }
-      const current = prev === null ? allKeys : prev;
+      const current = prev === null ? new Set(allSelectableKeys) : prev;
       const next = new Set(current);
       if (next.has(key)) next.delete(key);
       else next.add(key);
-      return next.size === 0 ? new Set() : next.size === allKeys.size ? null : next;
+      return next.size === 0 ? new Set() : next.size === allSelectableKeys.size ? null : next;
     });
   };
 
@@ -204,22 +344,89 @@ export default function EtichettePage() {
     el.indeterminate = selSize > 0 && selSize < selectableCount;
   }, [selected, selectableCount]);
 
+  useEffect(() => {
+    if (!isDefinitiva) return;
+    if (editCode && definitivaLabels.some((l) => l.code === editCode)) return;
+    setEditCode(definitivaLabels[0]?.code ?? null);
+  }, [isDefinitiva, definitivaLabels, editCode]);
+
   const selectAll = () => setSelected(null);
   const deselectAll = () => setSelected(new Set());
 
+  function updateOverride(code: string, patch: Partial<DefinitivaFields>) {
+    setOverrides((prev) => {
+      const defaults = buildDefinitivaDefaults({
+        code,
+        name: items.find((i) => i.code === code)?.name ?? code,
+        rowJson: pickLiveRowJson(liveJsonByCode[code]),
+        responsabile: defaultResponsabile,
+      });
+      const merged = { ...(prev[code] ?? {}), ...patch };
+      const cleaned: Partial<DefinitivaFields> = {};
+      (Object.keys(merged) as Array<keyof DefinitivaFields>).forEach((key) => {
+        const value = merged[key];
+        if (value === undefined) return;
+        if (value === defaults[key]) return;
+        cleaned[key] = value;
+      });
+      const next = { ...prev };
+      if (Object.keys(cleaned).length === 0) delete next[code];
+      else next[code] = cleaned;
+      saveDefinitivaOverrides(next);
+      return next;
+    });
+  }
+
+  function resetOverride(code: string) {
+    setOverrides((prev) => {
+      const next = { ...prev };
+      delete next[code];
+      saveDefinitivaOverrides(next);
+      return next;
+    });
+  }
+
+  function logoHtmlForPrint() {
+    if (ternaLogoSvg) {
+      return ternaLogoSvg
+        .replace(/<svg\b/, '<svg class="definitiva-logo"')
+        .replace(/\s(width|height)="[^"]*"/g, "");
+    }
+    return `<img class="definitiva-logo" src="${escHtml(`${window.location.origin}/terna-logo.svg`)}" alt="Terna" />`;
+  }
+
   function buildLabelsHtml(): string {
-    const esc = (s: string) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-    const labelHtml = labels.map((l) => {
-      const qrHtml = renderToStaticMarkup(
-        <QRCodeSVG value={l.barcodeValue} size={112} level="M" marginSize={2} />
-      );
-      if (printMode === "qrOnly") {
-        return `<div class="etichetta-label etichetta-qr-only"><div class="etichetta-qr-only-inner">${qrHtml}</div></div>`;
-      }
-      const shelfLine = labelType === "scaffale" ? `<div class="etichetta-shelf"><b>${esc(l.warehouse)}</b> · ${esc(l.shelf)}${l.place ? ` · ${esc(l.place)}` : ""}</div>` : "";
-      const descriptionHtml = `<div class="etichetta-text"><div class="etichetta-code">${esc(l.code)}</div><div class="etichetta-name">${esc(l.name)}</div>${shelfLine}</div>`;
-      return `<div class="etichetta-label"><div class="etichetta-content etichetta-content-with-qr"><div class="etichetta-left">${descriptionHtml}</div><div class="etichetta-qr">${qrHtml}</div></div></div>`;
-    }).join("");
+    if (isDefinitiva) {
+      const logoHtml = logoHtmlForPrint();
+      const stack = definitivaLabels
+        .map((l) => {
+          const qrHtml = renderToStaticMarkup(
+            <QRCodeSVG value={l.qrValue || l.fields.codiceSap || l.code} size={120} level="M" marginSize={1} />
+          );
+          return buildDefinitivaLabelHtml(l.fields, { logoHtml, qrHtml, esc: escHtml });
+        })
+        .join("");
+      return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etichette definitive</title>
+<style>${definitivaPrintStyles()}</style>
+</head><body><div class="definitiva-print-stack">${stack}</div></body></html>`;
+    }
+
+    const labelHtml = labels
+      .map((l) => {
+        const qrHtml = renderToStaticMarkup(
+          <QRCodeSVG value={l.barcodeValue} size={112} level="M" marginSize={2} />
+        );
+        if (printMode === "qrOnly") {
+          return `<div class="etichetta-label etichetta-qr-only"><div class="etichetta-qr-only-inner">${qrHtml}</div></div>`;
+        }
+        const shelfLine =
+          labelType === "scaffale"
+            ? `<div class="etichetta-shelf"><b>${escHtml(l.warehouse)}</b> · ${escHtml(l.shelf)}${l.place ? ` · ${escHtml(l.place)}` : ""}</div>`
+            : "";
+        const descriptionHtml = `<div class="etichetta-text"><div class="etichetta-code">${escHtml(l.code)}</div><div class="etichetta-name">${escHtml(l.name)}</div>${shelfLine}</div>`;
+        return `<div class="etichetta-label"><div class="etichetta-content etichetta-content-with-qr"><div class="etichetta-left">${descriptionHtml}</div><div class="etichetta-qr">${qrHtml}</div></div></div>`;
+      })
+      .join("");
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etichette</title>
 <style>
 @page{size:A4;margin:8mm}
@@ -244,19 +451,19 @@ body{margin:0;padding:0;background:#fff}
   }
 
   const handleDownload = () => {
-    if (labels.length === 0) return;
+    if (printCount === 0) return;
     const html = buildLabelsHtml();
     const blob = new Blob([html], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `etichette-${new Date().toISOString().slice(0, 10)}.html`;
+    a.download = `etichette-${isDefinitiva ? "definitive-" : ""}${new Date().toISOString().slice(0, 10)}.html`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
   const handlePrint = () => {
-    if (labels.length === 0) return;
+    if (printCount === 0) return;
     const html = buildLabelsHtml();
     const iframe = document.createElement("iframe");
     iframe.style.cssText = "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none";
@@ -288,6 +495,18 @@ body{margin:0;padding:0;background:#fff}
     setTimeout(cleanup, 60000);
   };
 
+  const editingFields = useMemo(() => {
+    if (!editCode) return null;
+    const it = items.find((i) => i.code === editCode);
+    const defaults = buildDefinitivaDefaults({
+      code: editCode,
+      name: it?.name ?? editCode,
+      rowJson: pickLiveRowJson(liveJsonByCode[editCode]),
+      responsabile: defaultResponsabile,
+    });
+    return mergeDefinitivaFields(defaults, overrides[editCode]);
+  }, [editCode, items, liveJsonByCode, overrides, defaultResponsabile]);
+
   if (adminLoading) return <div style={{ padding: 20 }}>Controllo permessi...</div>;
   if (!isAdmin) return <div style={{ padding: 20 }}>Accesso solo Admin</div>;
 
@@ -299,7 +518,7 @@ body{margin:0;padding:0;background:#fff}
 
       <div className="card" style={{ padding: 12, margin: 12 }}>
         <div style={{ fontSize: 13, color: "#64748b", marginBottom: 16 }}>
-          Genera etichette QR code per materiali e scaffali. Puoi anche stampare solo i QR senza descrizione.
+          Genera etichette QR oppure il modulo definitivo a08IO035RE (una etichetta per materiale), con campi auto-compilati e modificabili dall&apos;app.
         </div>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 16 }}>
@@ -314,14 +533,16 @@ body{margin:0;padding:0;background:#fff}
               style={{ width: 200 }}
             />
           </div>
-          <div>
-            <label className="label" style={{ fontSize: 12 }}>Magazzino</label>
-            <select className="input" value={warehouseFilter} onChange={(e) => setWarehouseFilter(e.target.value as "PRM" | "REALE" | "both")} style={{ width: 120 }}>
-              <option value="both">Entrambi</option>
-              <option value="PRM">PRM</option>
-              <option value="REALE">REALE</option>
-            </select>
-          </div>
+          {!isDefinitiva && (
+            <div>
+              <label className="label" style={{ fontSize: 12 }}>Magazzino</label>
+              <select className="input" value={warehouseFilter} onChange={(e) => setWarehouseFilter(e.target.value as "PRM" | "REALE" | "both")} style={{ width: 120 }}>
+                <option value="both">Entrambi</option>
+                <option value="PRM">PRM</option>
+                <option value="REALE">REALE</option>
+              </select>
+            </div>
+          )}
           <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
               <input type="checkbox" checked={onlyWithShelf} onChange={(e) => setOnlyWithShelf(e.target.checked)} />
@@ -330,18 +551,21 @@ body{margin:0;padding:0;background:#fff}
           </div>
           <div>
             <label className="label" style={{ fontSize: 12 }}>Tipo etichetta</label>
-            <select className="input" value={labelType} onChange={(e) => setLabelType(e.target.value as "materiale" | "scaffale")} style={{ width: 140 }}>
+            <select className="input" value={labelType} onChange={(e) => setLabelType(e.target.value as LabelType)} style={{ width: 260 }}>
               <option value="materiale">Materiale (codice + QR)</option>
               <option value="scaffale">Scaffale (codice + scaffale + QR)</option>
+              <option value="definitiva">Definitiva a08IO035RE (modulo ufficiale)</option>
             </select>
           </div>
-          <div>
-            <label className="label" style={{ fontSize: 12 }}>Stampa</label>
-            <select className="input" value={printMode} onChange={(e) => setPrintMode(e.target.value as PrintMode)} style={{ width: 230 }}>
-              <option value="qrDescription">QR + descrizione</option>
-              <option value="qrOnly">Solo QR</option>
-            </select>
-          </div>
+          {!isDefinitiva && (
+            <div>
+              <label className="label" style={{ fontSize: 12 }}>Stampa</label>
+              <select className="input" value={printMode} onChange={(e) => setPrintMode(e.target.value as PrintMode)} style={{ width: 230 }}>
+                <option value="qrDescription">QR + descrizione</option>
+                <option value="qrOnly">Solo QR</option>
+              </select>
+            </div>
+          )}
         </div>
 
         {loading ? (
@@ -357,11 +581,13 @@ body{margin:0;padding:0;background:#fff}
                 Deseleziona
               </button>
               <span style={{ fontSize: 13, color: "#64748b" }}>
-                {labels.length} etichette da stampare
+                {printCount} etichette da stampare{isDefinitiva ? " (1 per materiale)" : ""}
               </span>
             </div>
 
-            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Clicca sulle righe per selezionare/deselezionare. Se nessuna riga è selezionata, verranno stampate tutte.</div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>
+              Clicca sulle righe per selezionare/deselezionare{isDefinitiva ? ". Con etichetta definitiva puoi anche modificare i campi compilati." : ". Se nessuna riga è selezionata, verranno stampate tutte."}
+            </div>
 
             <div className="no-print" style={{ marginBottom: 20, overflow: "auto", border: "1px solid #e2e8f0", borderRadius: 8, maxHeight: 320 }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -377,64 +603,171 @@ body{margin:0;padding:0;background:#fff}
                     </th>
                     <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600 }}>Codice</th>
                     <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600 }}>Nome materiale</th>
-                    <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, width: 80 }}>Magazzino</th>
-                    <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, width: 80 }}>Scaffale</th>
-                    <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600 }}>Luogo</th>
-                    <th style={{ padding: "10px 12px", textAlign: "right", fontWeight: 600, width: 70 }}>Giacenza</th>
+                    {!isDefinitiva && (
+                      <>
+                        <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, width: 80 }}>Magazzino</th>
+                        <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, width: 80 }}>Scaffale</th>
+                        <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600 }}>Luogo</th>
+                        <th style={{ padding: "10px 12px", textAlign: "right", fontWeight: 600, width: 70 }}>Giacenza</th>
+                      </>
+                    )}
+                    {isDefinitiva && (
+                      <>
+                        <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600 }}>Divisione SAP</th>
+                        <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, width: 110 }}>Modifiche</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((it) => {
-                    const whsRow: Array<"PRM" | "REALE"> = warehouseFilter === "both" ? ["PRM", "REALE"] : [warehouseFilter];
-                    return whsRow.map((wh) => {
-                      const entry = shelves[it.code]?.[wh] ?? { shelf: "", place: "", barcode: "" };
-                      if (!canPrintWarehouseLabel(it.code, wh)) return null;
-                      if (onlyWithShelf && !entry.shelf && !entry.place) return null;
-                      const key = `${it.code}:${wh}`;
-                      const sel = selected === null || selected.has(key);
-                      return (
-                        <tr
-                          key={key}
-                          onClick={() => toggleSelect(it.code, wh)}
-                          style={{
-                            cursor: "pointer",
-                            background: sel ? "#e0f2fe" : undefined,
-                            borderBottom: "1px solid #e2e8f0",
-                          }}
-                        >
-                          <td style={{ padding: "8px 12px" }} onClick={(e) => e.stopPropagation()}>
-                            <input type="checkbox" checked={sel} onChange={() => toggleSelect(it.code, wh)} />
-                          </td>
-                          <td style={{ padding: "8px 12px", fontWeight: 600 }}>{it.code}</td>
-                          <td style={{ padding: "8px 12px", color: "#64748b", maxWidth: 200 }} title={it.name ?? ""}>
-                            {(it.name ?? "").slice(0, 40)}{(it.name ?? "").length > 40 ? "…" : ""}
-                          </td>
-                          <td style={{ padding: "8px 12px" }}>
-                            <span style={{ padding: "2px 6px", borderRadius: 4, background: wh === "PRM" ? "#dbeafe" : "#dcfce7", fontSize: 11, fontWeight: 600 }}>
-                              {wh}
-                            </span>
-                          </td>
-                          <td style={{ padding: "8px 12px" }}>{entry.shelf || "—"}</td>
-                          <td style={{ padding: "8px 12px", color: "#64748b" }}>{entry.place || "—"}</td>
-                          <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600 }}>{qtyByCodeWh[it.code]?.[wh] ?? 0}</td>
-                        </tr>
-                      );
-                    });
-                  })}
+                  {isDefinitiva
+                    ? filtered.map((it) => {
+                        const key = it.code;
+                        const sel = selected === null || selected.has(key);
+                        const defaults = buildDefinitivaDefaults({
+                          code: it.code,
+                          name: it.name ?? it.code,
+                          rowJson: pickLiveRowJson(liveJsonByCode[it.code]),
+                          responsabile: defaultResponsabile,
+                        });
+                        const fields = mergeDefinitivaFields(defaults, overrides[it.code]);
+                        const hasCustom = !!overrides[it.code];
+                        return (
+                          <tr
+                            key={key}
+                            onClick={() => {
+                              toggleSelect(key);
+                              setEditCode(it.code);
+                            }}
+                            style={{
+                              cursor: "pointer",
+                              background: editCode === it.code ? "#dbeafe" : sel ? "#e0f2fe" : undefined,
+                              borderBottom: "1px solid #e2e8f0",
+                            }}
+                          >
+                            <td style={{ padding: "8px 12px" }} onClick={(e) => e.stopPropagation()}>
+                              <input type="checkbox" checked={sel} onChange={() => toggleSelect(key)} />
+                            </td>
+                            <td style={{ padding: "8px 12px", fontWeight: 600 }}>{it.code}</td>
+                            <td style={{ padding: "8px 12px", color: "#64748b", maxWidth: 240 }} title={it.name ?? ""}>
+                              {(it.name ?? "").slice(0, 48)}{(it.name ?? "").length > 48 ? "…" : ""}
+                            </td>
+                            <td style={{ padding: "8px 12px", color: "#64748b" }}>{fields.divisione || "—"}</td>
+                            <td style={{ padding: "8px 12px" }}>
+                              {hasCustom ? (
+                                <span style={{ fontSize: 11, fontWeight: 700, color: "#0369a1" }}>Personalizzata</span>
+                              ) : (
+                                <span style={{ fontSize: 11, color: "#94a3b8" }}>Auto</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    : filtered.map((it) => {
+                        const whsRow: Array<"PRM" | "REALE"> = warehouseFilter === "both" ? ["PRM", "REALE"] : [warehouseFilter];
+                        return whsRow.map((wh) => {
+                          const entry = shelves[it.code]?.[wh] ?? { shelf: "", place: "", barcode: "" };
+                          if (!canPrintWarehouseLabel(it.code, wh)) return null;
+                          if (onlyWithShelf && !entry.shelf && !entry.place) return null;
+                          const key = `${it.code}:${wh}`;
+                          const sel = selected === null || selected.has(key);
+                          return (
+                            <tr
+                              key={key}
+                              onClick={() => toggleSelect(key)}
+                              style={{
+                                cursor: "pointer",
+                                background: sel ? "#e0f2fe" : undefined,
+                                borderBottom: "1px solid #e2e8f0",
+                              }}
+                            >
+                              <td style={{ padding: "8px 12px" }} onClick={(e) => e.stopPropagation()}>
+                                <input type="checkbox" checked={sel} onChange={() => toggleSelect(key)} />
+                              </td>
+                              <td style={{ padding: "8px 12px", fontWeight: 600 }}>{it.code}</td>
+                              <td style={{ padding: "8px 12px", color: "#64748b", maxWidth: 200 }} title={it.name ?? ""}>
+                                {(it.name ?? "").slice(0, 40)}{(it.name ?? "").length > 40 ? "…" : ""}
+                              </td>
+                              <td style={{ padding: "8px 12px" }}>
+                                <span style={{ padding: "2px 6px", borderRadius: 4, background: wh === "PRM" ? "#dbeafe" : "#dcfce7", fontSize: 11, fontWeight: 600 }}>
+                                  {wh}
+                                </span>
+                              </td>
+                              <td style={{ padding: "8px 12px" }}>{entry.shelf || "—"}</td>
+                              <td style={{ padding: "8px 12px", color: "#64748b" }}>{entry.place || "—"}</td>
+                              <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600 }}>{qtyByCodeWh[it.code]?.[wh] ?? 0}</td>
+                            </tr>
+                          );
+                        });
+                      })}
                 </tbody>
               </table>
             </div>
 
+            {isDefinitiva && editingFields && editCode && (
+              <div className="no-print" style={{ marginBottom: 20, border: "1px solid #bfdbfe", background: "#f8fbff", borderRadius: 8, padding: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>Modifica etichetta definitiva</div>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>
+                      Materiale <b>{editCode}</b> · i campi SAP si compilano da Excel; puoi correggere tutto prima della stampa. Le modifiche restano salvate su questo browser.
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <select
+                      className="input"
+                      value={editCode}
+                      onChange={(e) => setEditCode(e.target.value)}
+                      style={{ width: 180 }}
+                    >
+                      {definitivaLabels.map((l) => (
+                        <option key={l.code} value={l.code}>{l.code}</option>
+                      ))}
+                    </select>
+                    <button type="button" className="btn" onClick={() => resetOverride(editCode)} disabled={!overrides[editCode]}>
+                      Ripristina auto
+                    </button>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+                  {DEFINITIVA_FIELD_LABELS.map(({ key, label, editableHint }) => (
+                    <div key={key}>
+                      <label className="label" style={{ fontSize: 12 }}>
+                        {label}
+                        {editableHint ? <span style={{ color: "#0284c7", marginLeft: 6 }}>({editableHint})</span> : null}
+                      </label>
+                      {key === "descrizione" || key === "oggettoContabile" ? (
+                        <textarea
+                          className="input"
+                          value={editingFields[key]}
+                          onChange={(e) => updateOverride(editCode, { [key]: e.target.value })}
+                          rows={2}
+                          style={{ width: "100%", resize: "vertical" }}
+                        />
+                      ) : (
+                        <input
+                          className="input"
+                          value={editingFields[key]}
+                          onChange={(e) => updateOverride(editCode, { [key]: e.target.value })}
+                          style={{ width: "100%" }}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button type="button" className="btn btnPrimary no-print" onClick={handleDownload} disabled={labels.length === 0} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button type="button" className="btn btnPrimary no-print" onClick={handleDownload} disabled={printCount === 0} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                   <polyline points="7 10 12 15 17 10" />
                   <line x1="12" y1="15" x2="12" y2="3" />
                 </svg>
-                Scarica anteprima ({labels.length} etichette)
+                Scarica anteprima ({printCount} etichette)
               </button>
-              <button type="button" className="btn no-print" onClick={handlePrint} disabled={labels.length === 0} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button type="button" className="btn no-print" onClick={handlePrint} disabled={printCount === 0} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <polyline points="6 9 6 2 18 2 18 9" />
                   <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
@@ -443,15 +776,23 @@ body{margin:0;padding:0;background:#fff}
               </button>
             </div>
 
-            {labels.length > 0 && (
-              <details className="no-print" style={{ marginTop: 16 }}>
+            {printCount > 0 && (
+              <details className="no-print" style={{ marginTop: 16 }} open={isDefinitiva}>
                 <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 13 }}>Anteprima stampa (stesso layout della stampa)</summary>
                 <div className="etichette-preview-wrap" style={{ marginTop: 8 }}>
-                  <div className="etichette-print-grid etichette-preview">
-                    {labels.map((l, i) => (
-                      <LabelPreview key={i} label={l} labelType={labelType} printMode={printMode} />
-                    ))}
-                  </div>
+                  {isDefinitiva ? (
+                    <div className="definitiva-print-stack etichette-preview definitiva-preview">
+                      {definitivaLabels.map((l) => (
+                        <DefinitivaPreview key={l.code} fields={l.fields} logoSvg={ternaLogoSvg} qrValue={l.qrValue} />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="etichette-print-grid etichette-preview">
+                      {labels.map((l, i) => (
+                        <LabelPreview key={i} label={l} labelType={labelType} printMode={printMode} />
+                      ))}
+                    </div>
+                  )}
                 </div>
               </details>
             )}
@@ -459,14 +800,65 @@ body{margin:0;padding:0;background:#fff}
         )}
       </div>
 
-      {/* Area stampa: usata per anteprima; la stampa genera il contenuto al volo */}
-      <div className="print-area etichette-print-grid">
-        {labels.map((l, i) => (
-          <LabelPreview key={i} label={l} labelType={labelType} printMode={printMode} />
-        ))}
+      <div className={`print-area ${isDefinitiva ? "definitiva-print-stack" : "etichette-print-grid"}`}>
+        {isDefinitiva
+          ? definitivaLabels.map((l) => (
+              <DefinitivaPreview key={l.code} fields={l.fields} logoSvg={ternaLogoSvg} qrValue={l.qrValue} />
+            ))
+          : labels.map((l, i) => <LabelPreview key={i} label={l} labelType={labelType} printMode={printMode} />)}
       </div>
-
     </main>
+  );
+}
+
+function DefinitivaPreview({
+  fields,
+  logoSvg,
+  qrValue,
+}: {
+  fields: DefinitivaFields;
+  logoSvg: string;
+  qrValue: string;
+}) {
+  const rowCount = DEFINITIVA_FIELD_LABELS.length;
+  return (
+    <div className="definitiva-label">
+      <table className="definitiva-grid">
+        <colgroup>
+          <col style={{ width: "38%" }} />
+          <col />
+          <col className="definitiva-qr-col" />
+        </colgroup>
+        <tbody>
+          <tr>
+            <td className="definitiva-brand">
+              <div className="definitiva-brand-inner">
+                {logoSvg ? (
+                  <span
+                    className="definitiva-logo-wrap"
+                    dangerouslySetInnerHTML={{ __html: logoSvg.replace(/<svg\b/, '<svg class="definitiva-logo"') }}
+                  />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img className="definitiva-logo" src="/terna-logo.svg" alt="Terna" />
+                )}
+                <div className="definitiva-doc">a08IO035RE Modulo per etichettatura materiale</div>
+              </div>
+            </td>
+            <td className="definitiva-value-cell definitiva-brand-spacer" />
+            <td className="definitiva-qr-cell" rowSpan={rowCount + 1}>
+              <QRCodeSVG value={qrValue || fields.codiceSap} size={120} level="M" marginSize={1} />
+            </td>
+          </tr>
+          {DEFINITIVA_FIELD_LABELS.map(({ key, label }) => (
+            <tr key={key}>
+              <th className="definitiva-label-cell">{label}</th>
+              <td className="definitiva-value-cell">{fields[key] || ""}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -476,7 +868,7 @@ function LabelPreview({
   printMode,
 }: {
   label: LabelItem;
-  labelType: "materiale" | "scaffale";
+  labelType: Exclude<LabelType, "definitiva"> | LabelType;
   printMode: PrintMode;
 }) {
   if (printMode === "qrOnly") {

@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
+import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../_lib/fastBarcodeScanner";
 
 type Movement = {
   id: string;
@@ -81,6 +82,20 @@ function SearchIcon() {
   );
 }
 
+function QrIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="6" height="6" rx="1" />
+      <rect x="15" y="3" width="6" height="6" rx="1" />
+      <rect x="3" y="15" width="6" height="6" rx="1" />
+      <path d="M15 15h2v2h-2z" />
+      <path d="M19 15h2v6h-6v-2" />
+      <path d="M13 13h2" />
+      <path d="M13 19h2" />
+    </svg>
+  );
+}
+
 function whereLabel(st: StockBoth) {
   const a = st.PRM > 0;
   const b = st.REALE > 0;
@@ -121,8 +136,11 @@ export default function Home() {
   const [stock, setStock] = useState<StockBoth | null>(null);
   const [shelves, setShelves] = useState<ShelfInfo | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
 
   const boxRef = useRef<HTMLDivElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const readerRef = useRef<FastBarcodeReader | null>(null);
 
   const updateSuggestionsBox = useCallback(() => {
     if (!boxRef.current || typeof window === "undefined") return;
@@ -277,7 +295,116 @@ export default function Home() {
     await computeStockBoth(it.code);
   }
 
+  function stopScan() {
+    stopFastBarcodeScan(videoRef.current, readerRef.current);
+    readerRef.current = null;
+    setScanning(false);
+  }
+
+  async function resolveScannedValue(raw: string): Promise<DbItem | null> {
+    const value = raw.trim();
+    if (!value) return null;
+
+    const { data: byBarcode } = await supabase
+      .from("material_shelves")
+      .select("code")
+      .eq("barcode", value)
+      .maybeSingle();
+
+    let code = String((byBarcode as { code?: string } | null)?.code ?? "").trim() || value;
+
+    if (code === value) {
+      const { data: byNfc } = await supabase
+        .from("material_shelves")
+        .select("code")
+        .eq("nfc_tag_id", value)
+        .maybeSingle();
+      const nfcCode = String((byNfc as { code?: string } | null)?.code ?? "").trim();
+      if (nfcCode) code = nfcCode;
+    }
+
+    const { data: item } = await supabase
+      .from("items")
+      .select("code,name,um")
+      .eq("code", code)
+      .maybeSingle();
+
+    if (item?.code) return item as DbItem;
+
+    const { data: live } = await supabase
+      .from("excel_live")
+      .select("code,row_json")
+      .eq("code", code)
+      .limit(1)
+      .maybeSingle();
+
+    if (live?.code) {
+      const name = String((live as { row_json?: Record<string, unknown> }).row_json?.["Descrizione Materiale"] ?? live.code).trim() || live.code;
+      return { code: live.code, name, um: null };
+    }
+
+    return null;
+  }
+
+  async function pickItemByScan(raw: string) {
+    const item = await resolveScannedValue(raw);
+    if (!item) {
+      setMsg(`Nessun materiale trovato per: ${raw}`);
+      setPicked(null);
+      setStock(null);
+      setShelves(null);
+      setSearch(raw);
+      setOpen(true);
+      await loadSuggestions(raw);
+      return;
+    }
+    await pickItem(item);
+  }
+
+  async function startScan() {
+    setMsg(null);
+    setOpen(false);
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMsg(
+        "La fotocamera richiede HTTPS. Da mobile, se accedi via IP (es. 192.168.x.x) non funziona con http://. " +
+          "Usa npm run dev:https sul PC, poi accedi da https://TUO_IP:3000 (accetta il certificato)."
+      );
+      return;
+    }
+
+    stopScan();
+    setScanning(true);
+    await new Promise((r) => setTimeout(r, 100));
+
+    let videoEl = videoRef.current;
+    for (let i = 0; i < 30 && !videoEl; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      videoEl = videoRef.current;
+    }
+    if (!videoEl) {
+      setScanning(false);
+      setMsg("Video non disponibile. Riprova.");
+      return;
+    }
+
+    try {
+      const text = await scanFastBarcode(videoEl, {
+        onReader: (reader) => {
+          readerRef.current = reader;
+        },
+      });
+      stopScan();
+      if (text) await pickItemByScan(text);
+    } catch (e: unknown) {
+      console.error(e);
+      setMsg("Errore camera/scansione: " + (e instanceof Error ? e.message : "sconosciuto"));
+      stopScan();
+    }
+  }
+
   function resetSearch() {
+    stopScan();
     setSearch("");
     setSuggestions([]);
     setPicked(null);
@@ -287,6 +414,12 @@ export default function Home() {
     setMsg(null);
     setActiveIndex(0);
   }
+
+  useEffect(() => {
+    return () => {
+      stopFastBarcodeScan(videoRef.current, readerRef.current);
+    };
+  }, []);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -459,7 +592,7 @@ export default function Home() {
             <div>
               <div style={{ fontWeight: 900, fontSize: 16 }}> Controllo veloce materiale</div>
               <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
-                Cerca per codice, descrizione o posizione. Vedi inventario PRM/REALE, dove si trova e lo scaffale.
+                Cerca per testo oppure scansiona il QR: vedi inventario PRM/REALE, dove si trova e lo scaffale.
               </div>
             </div>
 
@@ -476,45 +609,57 @@ export default function Home() {
               <SearchIcon />
               Ricerca manuale
             </label>
-            <input
-              id="searchMaterial"
-              className="input"
-              value={search}
-              onChange={(e) => {
-                const v = e.target.value;
-                setSearch(v);
-                setOpen(true);
-                setPicked(null);
-                setStock(null);
-                setShelves(null);
-                setMsg(null);
-                if (!v.trim()) setSuggestions([]);
-              }}
-              onFocus={() => setOpen(true)}
-              onKeyDown={(e) => {
-                if (!open) return;
+            <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+              <input
+                id="searchMaterial"
+                className="input"
+                value={search}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setSearch(v);
+                  setOpen(true);
+                  setPicked(null);
+                  setStock(null);
+                  setShelves(null);
+                  setMsg(null);
+                  if (!v.trim()) setSuggestions([]);
+                }}
+                onFocus={() => setOpen(true)}
+                onKeyDown={(e) => {
+                  if (!open) return;
 
-                if (e.key === "ArrowDown") {
-                  e.preventDefault();
-                  setActiveIndex((i) => Math.min(i + 1, filteredSuggestions.length - 1));
-                } else if (e.key === "ArrowUp") {
-                  e.preventDefault();
-                  setActiveIndex((i) => Math.max(i - 1, 0));
-                } else if (e.key === "Enter") {
-                  e.preventDefault();
-                  if (active) {
-                    pickItem(active);
-                  } else {
-                    setOpen(true);
-                    void loadSuggestions(search);
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setActiveIndex((i) => Math.min(i + 1, filteredSuggestions.length - 1));
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setActiveIndex((i) => Math.max(i - 1, 0));
+                  } else if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (active) {
+                      pickItem(active);
+                    } else {
+                      setOpen(true);
+                      void loadSuggestions(search);
+                    }
+                  } else if (e.key === "Escape") {
+                    setOpen(false);
                   }
-                } else if (e.key === "Escape") {
-                  setOpen(false);
-                }
-              }}
-              placeholder=""
-              style={{ width: "100%" }}
-            />
+                }}
+                placeholder="Codice, descrizione o posizione..."
+                style={{ width: "100%", flex: 1 }}
+              />
+              <button
+                type="button"
+                className="btn btnPrimary"
+                onClick={() => void startScan()}
+                title="Scansiona QR materiale"
+                aria-label="Scansiona QR materiale"
+                style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 46, paddingInline: 12 }}
+              >
+                <QrIcon />
+              </button>
+            </div>
 
             {open && search.trim() && suggestionsBox && (
               <div
@@ -944,6 +1089,47 @@ export default function Home() {
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {scanning && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+            zIndex: 10060,
+          }}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: 14,
+              padding: 24,
+              maxWidth: 420,
+              width: "100%",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.3)",
+            }}
+          >
+            <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
+              <QrIcon />
+              Scanner QR materiale
+            </div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 12 }}>
+              Inquadra il QR dell&apos;etichetta per vedere subito le quantità in magazzino.
+            </div>
+            <div style={{ padding: 12, background: "#0f172a", borderRadius: 12, marginBottom: 12 }}>
+              <video ref={videoRef} style={{ width: "100%", maxWidth: 360, borderRadius: 8 }} muted playsInline />
+              <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il QR code</div>
+            </div>
+            <button type="button" className="btn" onClick={stopScan}>
+              Chiudi
+            </button>
           </div>
         </div>
       )}

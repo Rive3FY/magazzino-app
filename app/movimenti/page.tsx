@@ -5,7 +5,6 @@ import { createPortal } from "react-dom";
 import { useSearchParams, useRouter } from "next/navigation";
 import { createClient } from "../_lib/supabase/client";
 import { QRCodeSVG } from "qrcode.react";
-import jsPDF from "jspdf";
 import { fmtDate, n, toNumber, toIsoStartOfDay, toIsoEndOfDay } from "../_lib/utils";
 import { useAuth } from "../_lib/hooks/useAuth";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
@@ -13,8 +12,14 @@ import { useToast } from "../_lib/ToastContext";
 import ConfirmModal from "../_components/ConfirmModal";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../_lib/fastBarcodeScanner";
 import { parseMaterialSearchInput } from "../_lib/materialSearch";
+import { composePickupNote, parsePickupNote } from "../_lib/pickupNote";
+import {
+  buildMaterialUsedRegisterSheets,
+  downloadMaterialUsedRegisterPdf,
+} from "../_lib/material-used-register-pdf";
 import { movementNoteSchema } from "../_lib/validations";
 import type { CartRow, QuickMaterialInfo, DbItem, MovementRow, ReferentRow, ExcelLiveRow } from "../_lib/types";
+import { movementReportLink, notifyMaterialsAdmins } from "../_lib/adminAppNotifications";
 
 const PAGE_LIMIT = 300;
 
@@ -137,28 +142,6 @@ const compactDetailCellStyle: React.CSSProperties = {
   padding: "5px 8px",
   verticalAlign: "middle",
 };
-
-function composePickupNote(destination: string, workDescription: string) {
-  const dest = destination.trim();
-  const desc = workDescription.trim();
-  return [
-    dest ? `Destinazione: ${dest}` : "",
-    desc ? `Descrizione lavori: ${desc}` : "",
-  ].filter(Boolean).join(" · ");
-}
-
-function parsePickupNote(note: string) {
-  const destinationPrefix = "Destinazione:";
-  const workPrefix = "Descrizione lavori:";
-  const parts = note.split(" · ").map((part) => part.trim());
-  const destination = parts.find((part) => part.startsWith(destinationPrefix))?.slice(destinationPrefix.length).trim() ?? "";
-  const workDescription = parts.find((part) => part.startsWith(workPrefix))?.slice(workPrefix.length).trim() ?? "";
-
-  return {
-    destination,
-    workDescription: workDescription || (!destination ? note.trim() : ""),
-  };
-}
 
 function PencilIcon({ muted }: { muted?: boolean }) {
   return (
@@ -379,6 +362,7 @@ export default function MovimentiPage() {
   const [closing, setClosing] = useState<MovementRow | null>(null);
   const [closingGroup, setClosingGroup] = useState<MovementRow[]>([]);
   const [closingMeta, setClosingMeta] = useState<{ name: string; um: string; shelf?: string; place?: string } | null>(null);
+  const [registerBusy, setRegisterBusy] = useState(false);
   const [editingMovementId, setEditingMovementId] = useState<string | null>(null);
   const [selectedClosedRowId, setSelectedClosedRowId] = useState<string | null>(null);
 
@@ -700,201 +684,39 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
     qtyQuality: excelNumberField(stock, "qty_quality"),
   };
 }
-  async function loadImageAsDataUrl(src: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.naturalWidth || img.width;
-        canvas.height = img.naturalHeight || img.height;
-
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          reject(new Error("Canvas context non disponibile"));
-          return;
-        }
-
-        ctx.drawImage(img, 0, 0);
-        resolve(canvas.toDataURL("image/png"));
-      };
-
-      img.onerror = () => reject(new Error("Impossibile caricare l'immagine del banner"));
-      img.src = src;
-    });
-  }
-
   async function downloadRegistroPDF(rows: MovementRow[]) {
-    const closedRows = rows.filter((r) => r.type === "IN" || r.status === "CLOSED");
+    setRegisterBusy(true);
     try {
-      const pdf = new jsPDF("p", "mm", "a4");
+      const codes = Array.from(new Set(rows.filter((r) => r.type === "OUT").map((r) => r.code).filter(Boolean)));
+      const shelvesByCodeWh: Record<string, Partial<Record<"PRM" | "REALE", { shelf: string; place: string }>>> = {};
+      if (codes.length > 0) {
+        const { data: shelfRows } = await supabase
+          .from("material_shelves")
+          .select("code,warehouse,shelf,place")
+          .in("code", codes);
+        for (const row of shelfRows ?? []) {
+          const code = String((row as { code?: string }).code ?? "").trim();
+          const wh = String((row as { warehouse?: string }).warehouse ?? "").trim();
+          if (!code || (wh !== "PRM" && wh !== "REALE")) continue;
+          if (!shelvesByCodeWh[code]) shelvesByCodeWh[code] = {};
+          shelvesByCodeWh[code][wh as "PRM" | "REALE"] = {
+            shelf: String((row as { shelf?: string | null }).shelf ?? "").trim(),
+            place: String((row as { place?: string | null }).place ?? "").trim(),
+          };
+        }
+      }
 
-      const bannerDataUrl = await loadImageAsDataUrl("/terna-logo.svg");
-
-      const img = new Image();
-      img.src = bannerDataUrl;
-
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = () => reject(new Error("Impossibile leggere il banner"));
+      const sheets = buildMaterialUsedRegisterSheets(rows, {
+        nameMap,
+        shelvesByCodeWh,
       });
-
-      const imgWidth = 55;
-      const imgHeight = (img.height * imgWidth) / img.width;
-
-      pdf.addImage(bannerDataUrl, "PNG", 10, 6, imgWidth, imgHeight);
-
-      const headerBottom = 8 + imgHeight;
-      pdf.setTextColor(20, 20, 20);
-      pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(12);
-      pdf.text("Registro Movimenti Magazzino", 10, headerBottom + 10);
-
-      pdf.setFont("helvetica", "normal");
-      pdf.setFontSize(10);
-
-      const periodo =
-        fFrom || fTo
-          ? `Periodo: ${fFrom || "..."} - ${fTo || "..."}`
-          : "Periodo: tutti i movimenti filtrati";
-
-      pdf.text(periodo, 10, headerBottom + 17);
-
-      pdf.setDrawColor(180, 180, 180);
-      pdf.setLineWidth(0.4);
-      pdf.line(10, headerBottom + 22, 200, headerBottom + 22);
-
-      let y = headerBottom + 30;
-
-      const drawTableHeader = () => {
-        pdf.setFillColor(242, 242, 242);
-        pdf.rect(10, y - 5, 190, 8, "F");
-
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(8.5);
-        pdf.setTextColor(30, 30, 30);
-
-        pdf.text("Data", 12, y);
-        pdf.text("Materiale", 42, y);
-        pdf.text("Tipo", 92, y);
-        pdf.text("Qta", 112, y);
-        pdf.text("Mag.", 126, y);
-        pdf.text("Operatore", 142, y);
-        pdf.text("Note", 170, y);
-
-        y += 8;
-      };
-
-      const drawFooter = () => {
-        pdf.setDrawColor(210, 210, 210);
-        pdf.line(10, 286, 200, 286);
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(8);
-        pdf.setTextColor(100, 100, 100);
-        pdf.text(`Generato da: ${userEmail ?? userId ?? "-"}`, 10, 290);
-        pdf.text(`Pagina ${pdf.getNumberOfPages()}`, 180, 290);
-      };
-
-      drawTableHeader();
-
-      pdf.setFont("helvetica", "normal");
-      pdf.setFontSize(8);
-
-      const groupCounts = new Map<string | null, number>();
-      for (const r of closedRows) {
-        const gid = (r.movement_group_id ?? "").trim() || null;
-        groupCounts.set(gid, (groupCounts.get(gid) ?? 0) + 1);
-      }
-
-      let lastGroupId: string | null = "__none__";
-      let rowIndex = 0;
-
-      for (const r of closedRows) {
-        const gid = (r.movement_group_id ?? "").trim() || null;
-        const count = groupCounts.get(gid) ?? 1;
-        const isNewGroup = !!gid && gid !== lastGroupId;
-        const isMultiGroup = !!gid && count > 1;
-
-        if (isNewGroup && isMultiGroup) {
-          if (y > 270) {
-            drawFooter();
-            pdf.addPage();
-            y = 20;
-            drawTableHeader();
-            pdf.setFont("helvetica", "normal");
-            pdf.setFontSize(8);
-          }
-          pdf.setFillColor(235, 240, 248);
-          pdf.rect(10, y - 4, 190, 6, "F");
-          pdf.setFont("helvetica", "bold");
-          pdf.setFontSize(8);
-          pdf.setTextColor(50, 70, 120);
-          pdf.text(`Prelievo multiplo (${count} articoli)`, 12, y);
-          y += 6;
-          lastGroupId = gid;
-        } else if (!gid) {
-          lastGroupId = "__none__";
-        } else if (gid !== lastGroupId) {
-          lastGroupId = gid;
-        }
-
-        const date = fmtDate(r.created_at);
-        const code = String(r.code).slice(0, 24);
-        const tipo = r.type === "IN" ? "Entrata" : "Uscita";
-        const qtyVal = r.type === "IN"
-          ? Math.abs(Number(r.qty ?? 0))
-          : Math.max(0, Math.abs(n(r.qty)) - n(r.returned_qty));
-        const qta = `${r.type === "IN" ? "+" : "-"}${qtyVal}`;
-        const mag = String(r.warehouse ?? "");
-        const operatore = String(r.created_by_name ?? r.created_by ?? "").slice(0, 26);
-        const note = String(r.note ?? "").trim().slice(0, 32);
-
-        if (rowIndex % 2 === 0) {
-          pdf.setFillColor(250, 250, 250);
-          pdf.rect(10, y - 4, 190, 6, "F");
-        }
-
-        pdf.setTextColor(35, 35, 35);
-        pdf.text(date, 12, y);
-
-        pdf.setFont("courier", "normal");
-        pdf.text(code, 42, y);
-
-        pdf.setFont("helvetica", "normal");
-        if (r.type === "IN") {
-          pdf.setTextColor(20, 120, 60);
-        } else {
-          pdf.setTextColor(170, 40, 40);
-        }
-
-        pdf.text(tipo, 92, y);
-        pdf.text(qta, 112, y);
-
-        pdf.setTextColor(35, 35, 35);
-        pdf.text(mag, 126, y);
-        pdf.text(operatore, 142, y);
-        pdf.text(note || "-", 170, y);
-
-        y += 6;
-        rowIndex += 1;
-
-        if (y > 278) {
-          drawFooter();
-          pdf.addPage();
-          y = 20;
-          drawTableHeader();
-          pdf.setFont("helvetica", "normal");
-          pdf.setFontSize(8);
-        }
-      }
-
-      drawFooter();
-      pdf.save("registro_movimenti.pdf");
-      toast.success("PDF scaricato");
-    } catch (e: any) {
+      await downloadMaterialUsedRegisterPdf(sheets);
+      toast.success("Registro scaricato");
+    } catch (e: unknown) {
       console.error("PDF error:", e);
-      setMsg("Errore generazione PDF: " + (e?.message ?? "sconosciuto"));
+      setMsg("Errore generazione PDF: " + (e instanceof Error ? e.message : "sconosciuto"));
+    } finally {
+      setRegisterBusy(false);
     }
   }
 
@@ -1892,6 +1714,8 @@ async function confirmCartPickup() {
       `${String((prof as any)?.first_name ?? "").trim()} ${String((prof as any)?.last_name ?? "").trim()}`.trim() || null;
 
     const movementGroupId = crypto.randomUUID();
+    let firstMovementId: string | null = null;
+    const codes: string[] = [];
 
     for (const row of cart) {
       const payload: Partial<MovementRow> = {
@@ -1913,8 +1737,10 @@ async function confirmCartPickup() {
         movement_group_id: movementGroupId,
       };
 
-      const { error } = await supabase.from("movements").insert(payload as any);
+      const { data: inserted, error } = await supabase.from("movements").insert(payload as any).select("id").single();
       if (error) throw error;
+      if (!firstMovementId && inserted?.id) firstMovementId = String(inserted.id);
+      codes.push(row.code);
 
       await applyDeltaToExcelLive(row.code, row.warehouse, -row.qtyPick);
 
@@ -1934,6 +1760,20 @@ async function confirmCartPickup() {
           referent_email: ref?.email ?? null,
           referent_emails: referentEmails,
         },
+      });
+    }
+
+    if (firstMovementId) {
+      await notifyMaterialsAdmins({
+        type: "MOVEMENT_OPENED",
+        title: "Prelievo aperto",
+        body: `${fullName || "Operatore"} · ${cart.length} articol${cart.length === 1 ? "o" : "i"} · ${codes.slice(0, 3).join(", ")}${codes.length > 3 ? "…" : ""}`,
+        link: movementReportLink(firstMovementId),
+        code: codes[0] ?? null,
+        entity_type: "movement",
+        entity_id: firstMovementId,
+        actor_id: userId,
+        actor_name: fullName,
       });
     }
 
@@ -2281,10 +2121,25 @@ function finalizeMaterialPickupSuccess() {
             referee_email: referentEmailLabel || null,
             referee_name: referentNamesLabel || null,
           };
-          const { error: e1 } = await supabase.from("movements").insert(payloadPRM as any);
+          const { data: insertedPrm, error: e1 } = await supabase.from("movements").insert(payloadPRM as any).select("id").single();
           if (e1) return setMsg("Errore salvataggio movimento PRM: " + e1.message);
+          const prmId = insertedPrm?.id ? String(insertedPrm.id) : null;
           await writeAuditLog({ action: "MOVEMENT_CREATED", entity_type: "movement", code: picked.code, warehouse: "PRM", details_json: { type: "OUT", qty: fromPRM, note: pickupNote, status: "OPEN", referent_id: ref?.id ?? null, referent_name: ref?.name ?? null, referent_names: referentNamesLabel, referent_email: ref?.email ?? null, referent_emails: referentEmails } });
           await applyDeltaToExcelLive(picked.code, "PRM", -fromPRM);
+          if (prmId) {
+            await notifyMaterialsAdmins({
+              type: "MOVEMENT_OPENED",
+              title: "Prelievo aperto",
+              body: `${fullName || "Operatore"} · ${picked.code} · qty ${fromPRM} (PRM)`,
+              link: movementReportLink(prmId),
+              code: picked.code,
+              warehouse: "PRM",
+              entity_type: "movement",
+              entity_id: prmId,
+              actor_id: userId,
+              actor_name: fullName,
+            });
+          }
         }
         if (fromREALE > 0) {
           const payloadREALE: Partial<MovementRow> = {
@@ -2304,10 +2159,25 @@ function finalizeMaterialPickupSuccess() {
             referee_email: referentEmailLabel || null,
             referee_name: referentNamesLabel || null,
           };
-          const { error: e2 } = await supabase.from("movements").insert(payloadREALE as any);
+          const { data: insertedReale, error: e2 } = await supabase.from("movements").insert(payloadREALE as any).select("id").single();
           if (e2) return setMsg("Errore salvataggio movimento REALE: " + e2.message);
+          const realeId = insertedReale?.id ? String(insertedReale.id) : null;
           await writeAuditLog({ action: "MOVEMENT_CREATED", entity_type: "movement", code: picked.code, warehouse: "REALE", details_json: { type: "OUT", qty: fromREALE, note: pickupNote, status: "OPEN", referent_id: ref?.id ?? null, referent_name: ref?.name ?? null, referent_names: referentNamesLabel, referent_email: ref?.email ?? null, referent_emails: referentEmails } });
           await applyDeltaToExcelLive(picked.code, "REALE", -fromREALE);
+          if (realeId) {
+            await notifyMaterialsAdmins({
+              type: "MOVEMENT_OPENED",
+              title: "Prelievo aperto",
+              body: `${fullName || "Operatore"} · ${picked.code} · qty ${fromREALE} (REALE)`,
+              link: movementReportLink(realeId),
+              code: picked.code,
+              warehouse: "REALE",
+              entity_type: "movement",
+              entity_id: realeId,
+              actor_id: userId,
+              actor_name: fullName,
+            });
+          }
         }
 
         finalizeMaterialPickupSuccess();
@@ -2372,8 +2242,9 @@ function finalizeMaterialPickupSuccess() {
       referee_name: referentNamesLabel || null,
     };
 
-    const { error } = await supabase.from("movements").insert(payload as any);
+    const { data: inserted, error } = await supabase.from("movements").insert(payload as any).select("id").single();
     if (error) return setMsg("Errore salvataggio movimento: " + error.message);
+    const movementId = inserted?.id ? String(inserted.id) : null;
 
     await writeAuditLog({
       action: "MOVEMENT_CREATED",
@@ -2401,6 +2272,21 @@ function finalizeMaterialPickupSuccess() {
     } catch (e: any) {
       console.error("excel_live update error:", e);
       excelLiveOk = false;
+    }
+
+    if (type === "OUT" && movementId) {
+      await notifyMaterialsAdmins({
+        type: "MOVEMENT_OPENED",
+        title: "Prelievo aperto",
+        body: `${fullName || "Operatore"} · ${picked.code} · qty ${qn}${wh ? ` (${wh})` : ""}`,
+        link: movementReportLink(movementId),
+        code: picked.code,
+        warehouse: wh,
+        entity_type: "movement",
+        entity_id: movementId,
+        actor_id: userId,
+        actor_name: fullName,
+      });
     }
 
     if (type === "OUT") {
@@ -3023,6 +2909,22 @@ function finalizeMaterialPickupSuccess() {
         });
       }
 
+      const leadId = closingGroup[0]?.id;
+      if (leadId) {
+        const codes = closingGroup.map((m) => m.code);
+        await notifyMaterialsAdmins({
+          type: "MOVEMENT_CLOSED",
+          title: "Prelievo chiuso",
+          body: `${referentNamesLabel || "Referente"} · ${closingGroup.length} articol${closingGroup.length === 1 ? "o" : "i"} · ${codes.slice(0, 3).join(", ")}${codes.length > 3 ? "…" : ""}`,
+          link: movementReportLink(leadId),
+          code: codes[0] ?? null,
+          entity_type: "movement",
+          entity_id: leadId,
+          actor_id: userId,
+          actor_name: userEmail ?? null,
+        });
+      }
+
       try {
         const { data: { user } } = await supabase.auth.getUser();
         const movementsPayload = closingGroup.map((mov) => {
@@ -3229,6 +3131,19 @@ function finalizeMaterialPickupSuccess() {
         referent_names: referentNamesLabel,
         closed_at: closedAtIso,
       },
+    });
+
+    await notifyMaterialsAdmins({
+      type: "MOVEMENT_CLOSED",
+      title: "Prelievo chiuso",
+      body: `${referentNamesLabel || userEmail || "Operatore"} · ${closing.code} · usata ${Math.max(0, outQty - r)} / prelevata ${outQty}`,
+      link: movementReportLink(closing.id),
+      code: closing.code,
+      warehouse: closing.warehouse,
+      entity_type: "movement",
+      entity_id: closing.id,
+      actor_id: userId,
+      actor_name: userEmail,
     });
 
     let emailErr: string | null = null;
@@ -3536,11 +3451,6 @@ function finalizeMaterialPickupSuccess() {
     <main className="panel" style={{ overflowX: "hidden" }}>
       <div className="pageBar">
         <div className="pageBarTitle">Magazzino - Movimenti</div>
-        <div className="pageBarActions">
-          <button className="btn btnPrimary" type="button" onClick={() => void downloadRegistroPDF(history)}>
-            Scarica PDF registro
-          </button>
-        </div>
       </div>
 
       {SHOW_HISTORY_FILTERS && (
@@ -3618,9 +3528,6 @@ function finalizeMaterialPickupSuccess() {
               Reset
             </button>
 
-            <button className="btn" onClick={() => downloadRegistroPDF(history)}>
-              PDF
-            </button>
           </div>
 
           <div
@@ -4844,6 +4751,45 @@ function finalizeMaterialPickupSuccess() {
             >
               Chiudi
             </button>
+
+            {closing.type === "OUT" && (
+              <div
+                style={{
+                  marginBottom: 14,
+                  marginRight: 88,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  flexWrap: "wrap",
+                  padding: "12px 14px",
+                  borderRadius: 12,
+                  border: "1px solid rgba(14, 116, 144, 0.22)",
+                  background: "linear-gradient(120deg, rgba(240,249,255,0.95) 0%, rgba(236,254,255,0.9) 100%)",
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 900, fontSize: 13.5, color: "#0f172a" }}>Registro materiale utilizzato</div>
+                  <div style={{ marginTop: 3, fontSize: 12, color: "#64748b", lineHeight: 1.35 }}>
+                    Modulo PDF di questo prelievo
+                    {closingGroup.length > 1 ? ` · ${closingGroup.length} articoli` : ""}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btnPrimary"
+                  disabled={registerBusy}
+                  onClick={() => void downloadRegistroPDF(closingGroup.length > 0 ? closingGroup : [closing])}
+                  style={{ whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 8 }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M12 3v12m0 0 4-4m-4 4-4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M5 19h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                  {registerBusy ? "Generazione…" : "Scarica registro"}
+                </button>
+              </div>
+            )}
 
             {closingGroup.length > 1 && (
               <div style={{ marginBottom: 16, padding: 12, background: "#f8fafc", borderRadius: 10, border: "1px solid #e2e8f0" }}>

@@ -317,7 +317,8 @@ export default function AdminPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setMsg(data.error ?? "Errore eliminazione utente");
+        const hint = typeof data.hint === "string" ? `\n\n${data.hint}` : "";
+        setMsg((data.error ?? "Errore eliminazione utente") + hint);
         return;
       }
       toast.success("Utente eliminato");

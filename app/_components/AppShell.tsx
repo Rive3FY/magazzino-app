@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useSidebar } from "../_lib/SidebarContext";
 import SideNav from "./SideNav";
 import TopBar from "./TopBar";
+import AdminAppNotificationsListener from "./AdminAppNotificationsListener";
 
 type Props = {
   hasUser: boolean;
@@ -42,6 +43,7 @@ export default function AppShell({ hasUser, displayName, displayBadge, children 
     <div className={appClasses}>
       {hasUser && <TopBar displayName={displayName} displayBadge={displayBadge} showHamburger={showHamburger} />}
       {hasUser && <SideNav hideSidebar={hideSidebar} />}
+      {hasUser && <AdminAppNotificationsListener />}
 
       <div className="main">
         <div className="content">

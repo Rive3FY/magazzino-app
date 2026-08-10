@@ -5,6 +5,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../_lib/fastBarcodeScanner";
 import { parseMaterialSearchInput } from "../_lib/materialSearch";
+import {
+  buildMaterialUsedRegisterSheets,
+  downloadMaterialUsedRegisterPdf,
+} from "../_lib/material-used-register-pdf";
+import type { MovementRow } from "../_lib/types";
 
 type Movement = {
   id: string;
@@ -138,6 +143,7 @@ export default function Home() {
   const [shelves, setShelves] = useState<ShelfInfo | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [registerBusy, setRegisterBusy] = useState(false);
 
   const boxRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -441,6 +447,51 @@ export default function Home() {
     setOpen(false);
     setMsg(null);
     setActiveIndex(0);
+  }
+
+  async function downloadRegistro(rows: MovementRow[]) {
+    setRegisterBusy(true);
+    setMsg(null);
+    try {
+      const outs = rows.filter((r) => r.type === "OUT");
+      if (outs.length === 0) throw new Error("Nessuna uscita da includere nel registro.");
+
+      const codes = Array.from(new Set(outs.map((r) => r.code).filter(Boolean)));
+      const nameMapLocal: Record<string, string> = { ...nameMap };
+      const shelvesByCodeWh: Record<string, Partial<Record<"PRM" | "REALE", { shelf: string; place: string }>>> = {};
+
+      if (codes.length > 0) {
+        const [{ data: itemsData }, { data: shelfRows }] = await Promise.all([
+          supabase.from("items").select("code,name").in("code", codes),
+          supabase.from("material_shelves").select("code,warehouse,shelf,place").in("code", codes),
+        ]);
+        for (const item of itemsData ?? []) {
+          const code = String((item as { code?: string }).code ?? "").trim();
+          if (code) nameMapLocal[code] = String((item as { name?: string }).name ?? "").trim() || code;
+        }
+        for (const row of shelfRows ?? []) {
+          const code = String((row as { code?: string }).code ?? "").trim();
+          const wh = String((row as { warehouse?: string }).warehouse ?? "").trim();
+          if (!code || (wh !== "PRM" && wh !== "REALE")) continue;
+          if (!shelvesByCodeWh[code]) shelvesByCodeWh[code] = {};
+          shelvesByCodeWh[code][wh as "PRM" | "REALE"] = {
+            shelf: String((row as { shelf?: string | null }).shelf ?? "").trim(),
+            place: String((row as { place?: string | null }).place ?? "").trim(),
+          };
+        }
+      }
+
+      const sheets = buildMaterialUsedRegisterSheets(outs, {
+        nameMap: nameMapLocal,
+        shelvesByCodeWh,
+      });
+      await downloadMaterialUsedRegisterPdf(sheets);
+    } catch (e: unknown) {
+      console.error(e);
+      setMsg("Errore scarico registro: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setRegisterBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -979,6 +1030,44 @@ export default function Home() {
                 Chiudi
               </button>
             </div>
+
+            {selectedMovementEntry.lead.type === "OUT" && (
+              <div
+                style={{
+                  marginBottom: 16,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  flexWrap: "wrap",
+                  padding: "12px 14px",
+                  borderRadius: 12,
+                  border: "1px solid rgba(14, 116, 144, 0.22)",
+                  background: "linear-gradient(120deg, rgba(240,249,255,0.95) 0%, rgba(236,254,255,0.9) 100%)",
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 900, fontSize: 13.5, color: "#0f172a" }}>Registro materiale utilizzato</div>
+                  <div style={{ marginTop: 3, fontSize: 12, color: "#64748b", lineHeight: 1.35 }}>
+                    Modulo PDF di questo prelievo
+                    {selectedMovementEntry.isGroup ? ` · ${selectedMovementEntry.rows.length} articoli` : ""}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btnPrimary"
+                  disabled={registerBusy}
+                  onClick={() => void downloadRegistro(selectedMovementEntry.rows as MovementRow[])}
+                  style={{ whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 8 }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M12 3v12m0 0 4-4m-4 4-4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M5 19h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                  {registerBusy ? "Generazione…" : "Scarica registro"}
+                </button>
+              </div>
+            )}
 
             {selectedMovementEntry.isGroup ? (
               <>

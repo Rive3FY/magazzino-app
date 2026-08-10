@@ -14,6 +14,7 @@ import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import { useToast } from "../_lib/ToastContext";
 import AppModalFrame from "../_components/AppModalFrame";
 import type { WarehouseView, SortDir } from "../_lib/types";
+import { materialReportLink, notifyMaterialsAdmins } from "../_lib/adminAppNotifications";
 
 const supabase = createClient();
 
@@ -716,6 +717,18 @@ await writeAuditLog({
     initial_qty: initial,
   },
 });
+        const materialName = String(nextJson["Descrizione Materiale"] ?? "").trim() || code;
+        await notifyMaterialsAdmins({
+          type: "MATERIAL_CREATED",
+          title: "Nuovo materiale",
+          body: `${materialName} (${code}) aggiunto in ${editing.warehouse}`,
+          link: materialReportLink(code, editing.warehouse),
+          code,
+          warehouse: editing.warehouse,
+          entity_type: "material",
+          actor_id: user?.id ?? null,
+          actor_name: user?.email ?? null,
+        });
       } else {
         // update SOLO live
         const { error } = await supabase
@@ -807,6 +820,18 @@ await writeAuditLog({
       initial_qty: editing.initial_qty,
       row_json: editing.row_json ?? null,
     },
+  });
+
+  await notifyMaterialsAdmins({
+    type: "MATERIAL_DELETED",
+    title: "Materiale eliminato",
+    body: `${editing.name || editing.code} (${editing.code}) rimosso da ${editing.warehouse}`,
+    link: materialReportLink(editing.code, editing.warehouse),
+    code: editing.code,
+    warehouse: editing.warehouse,
+    entity_type: "material",
+    actor_id: user?.id ?? null,
+    actor_name: user?.email ?? null,
   });
 
   setMsg("Eliminato ✅");

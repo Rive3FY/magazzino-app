@@ -234,7 +234,8 @@ export default function AdminPanelClient() {
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
-      alert(data.error ?? "Errore eliminazione utente");
+      const hint = typeof data.hint === "string" ? `\n\n${data.hint}` : "";
+      alert((data.error ?? "Errore eliminazione utente") + hint);
       return;
     }
 

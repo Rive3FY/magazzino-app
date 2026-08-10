@@ -12,6 +12,7 @@ import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import { useToast } from "../_lib/ToastContext";
 import ConfirmModal from "../_components/ConfirmModal";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../_lib/fastBarcodeScanner";
+import { parseMaterialSearchInput } from "../_lib/materialSearch";
 import { movementNoteSchema } from "../_lib/validations";
 import type { CartRow, QuickMaterialInfo, DbItem, MovementRow, ReferentRow, ExcelLiveRow } from "../_lib/types";
 
@@ -898,31 +899,54 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
   }
 
   async function loadSuggestions(text: string) {
-    const s = String(text ?? "").trim();
-    if (!s) {
+    const parsed = parseMaterialSearchInput(text);
+    if (parsed.terms.length === 0 && !parsed.exactCode) {
       setSuggestions([]);
       return;
     }
 
     try {
-      const q1 = await supabase.from("items").select("code,name,um").ilike("code", `%${s}%`).order("code", { ascending: true }).limit(12);
+      const queries = [];
+      if (parsed.exactCode) {
+        queries.push(supabase.from("items").select("code,name,um").eq("code", parsed.exactCode).limit(1));
+        queries.push(
+          supabase.from("items").select("code,name,um").ilike("code", `%${parsed.exactCode}%`).order("code", { ascending: true }).limit(12)
+        );
+      }
+      for (const term of parsed.terms) {
+        queries.push(
+          supabase.from("items").select("code,name,um").ilike("code", `%${term}%`).order("code", { ascending: true }).limit(12)
+        );
+        queries.push(
+          supabase.from("items").select("code,name,um").ilike("name", `%${term}%`).order("code", { ascending: true }).limit(12)
+        );
+      }
 
-      const q2 = await supabase.from("items").select("code,name,um").ilike("name", `%${s}%`).order("code", { ascending: true }).limit(12);
-
-      if (q1.error || q2.error) {
-        console.error("loadSuggestions raw:", {
-          q1: { status: (q1 as any).status, error: q1.error, dataLen: q1.data?.length ?? 0 },
-          q2: { status: (q2 as any).status, error: q2.error, dataLen: q2.data?.length ?? 0 },
-        });
+      const results = await Promise.all(queries);
+      if (results.some((r) => r.error)) {
+        console.error("loadSuggestions raw:", results.map((r) => ({ status: (r as any).status, error: r.error, dataLen: r.data?.length ?? 0 })));
         setSuggestions([]);
         return;
       }
 
       const map = new Map<string, DbItem>();
-      for (const it of (q1.data ?? []) as any[]) map.set(it.code, it as DbItem);
-      for (const it of (q2.data ?? []) as any[]) map.set(it.code, it as DbItem);
+      for (const result of results) {
+        for (const it of (result.data ?? []) as DbItem[]) {
+          if (it?.code) map.set(it.code, it);
+        }
+      }
 
-      setSuggestions(Array.from(map.values()).slice(0, 12));
+      const next = Array.from(map.values())
+        .sort((a, b) => {
+          if (parsed.exactCode) {
+            if (a.code === parsed.exactCode && b.code !== parsed.exactCode) return -1;
+            if (b.code === parsed.exactCode && a.code !== parsed.exactCode) return 1;
+          }
+          return a.code.localeCompare(b.code);
+        })
+        .slice(0, 12);
+
+      setSuggestions(next);
     } catch (e: any) {
       console.error("loadSuggestions catch:", e);
       setSuggestions([]);
@@ -930,22 +954,54 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
   }
 
   async function loadCartSuggestions(text: string) {
-    const s = String(text ?? "").trim();
-    if (s.length < 2) {
+    const parsed = parseMaterialSearchInput(text);
+    if (parsed.terms.length === 0 && !parsed.exactCode) {
+      setCartSuggestions([]);
+      return;
+    }
+    // Mantieni soglia minima solo per ricerche generiche senza codice riconosciuto
+    if (!parsed.exactCode && (parsed.terms[0] ?? "").length < 2) {
       setCartSuggestions([]);
       return;
     }
     try {
-      const q1 = await supabase.from("items").select("code,name,um").ilike("code", `%${s}%`).order("code", { ascending: true }).limit(20);
-      const q2 = await supabase.from("items").select("code,name,um").ilike("name", `%${s}%`).order("code", { ascending: true }).limit(20);
-      if (q1.error || q2.error) {
+      const queries = [];
+      if (parsed.exactCode) {
+        queries.push(supabase.from("items").select("code,name,um").eq("code", parsed.exactCode).limit(1));
+        queries.push(
+          supabase.from("items").select("code,name,um").ilike("code", `%${parsed.exactCode}%`).order("code", { ascending: true }).limit(20)
+        );
+      }
+      for (const term of parsed.terms) {
+        queries.push(
+          supabase.from("items").select("code,name,um").ilike("code", `%${term}%`).order("code", { ascending: true }).limit(20)
+        );
+        queries.push(
+          supabase.from("items").select("code,name,um").ilike("name", `%${term}%`).order("code", { ascending: true }).limit(20)
+        );
+      }
+
+      const results = await Promise.all(queries);
+      if (results.some((r) => r.error)) {
         setCartSuggestions([]);
         return;
       }
+
       const map = new Map<string, DbItem>();
-      for (const it of (q1.data ?? []) as any[]) map.set(it.code, it as DbItem);
-      for (const it of (q2.data ?? []) as any[]) map.set(it.code, it as DbItem);
-      const items = Array.from(map.values()).slice(0, 20);
+      for (const result of results) {
+        for (const it of (result.data ?? []) as DbItem[]) {
+          if (it?.code) map.set(it.code, it);
+        }
+      }
+      const items = Array.from(map.values())
+        .sort((a, b) => {
+          if (parsed.exactCode) {
+            if (a.code === parsed.exactCode && b.code !== parsed.exactCode) return -1;
+            if (b.code === parsed.exactCode && a.code !== parsed.exactCode) return 1;
+          }
+          return a.code.localeCompare(b.code);
+        })
+        .slice(0, 20);
 
       const codes = items.map((x) => x.code).filter(Boolean);
       if (codes.length === 0) {
@@ -1004,10 +1060,20 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
     let materialCodes: string[] = [];
 
     if (shouldFilterMaterial) {
+      const parsed = parseMaterialSearchInput(materialSearch);
+      const orParts: string[] = [];
+      if (parsed.exactCode) {
+        orParts.push(`code.eq.${parsed.exactCode}`);
+        orParts.push(`code.ilike.%${parsed.exactCode}%`);
+      }
+      for (const term of parsed.terms) {
+        orParts.push(`code.ilike.%${term}%`);
+        orParts.push(`name.ilike.%${term}%`);
+      }
       const { data: foundItems, error: itemsErr } = await supabase
         .from("items")
         .select("code")
-        .or(`code.ilike.%${materialSearch}%,name.ilike.%${materialSearch}%`)
+        .or(orParts.join(","))
         .limit(300);
 
       if (itemsErr) {

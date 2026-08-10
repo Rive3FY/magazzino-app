@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../_lib/fastBarcodeScanner";
+import { parseMaterialSearchInput } from "../_lib/materialSearch";
 
 type Movement = {
   id: string;
@@ -156,8 +157,8 @@ export default function Home() {
   }, []);
 
   async function loadSuggestions(text: string): Promise<DbItem[]> {
-    const s = text.trim();
-    if (!s) {
+    const parsed = parseMaterialSearchInput(text);
+    if (parsed.terms.length === 0 && !parsed.exactCode) {
       setSuggestions([]);
       return [];
     }
@@ -167,12 +168,26 @@ export default function Home() {
     const shelfLabelsByCode = new Map<string, string[]>();
     const shelfFields = ["shelf", "place", "barcode", "nfc_tag_id"] as const;
 
-    const itemQueries = await Promise.all([
-      supabase.from("items").select("code,name,um").ilike("code", `%${s}%`).order("code", { ascending: true }).limit(maxSuggestions),
-      supabase.from("items").select("code,name,um").ilike("name", `%${s}%`).order("code", { ascending: true }).limit(maxSuggestions),
-    ]);
+    const itemQueries = [];
+    if (parsed.exactCode) {
+      itemQueries.push(
+        supabase.from("items").select("code,name,um").eq("code", parsed.exactCode).limit(1)
+      );
+      itemQueries.push(
+        supabase.from("items").select("code,name,um").ilike("code", `%${parsed.exactCode}%`).order("code", { ascending: true }).limit(maxSuggestions)
+      );
+    }
+    for (const term of parsed.terms) {
+      itemQueries.push(
+        supabase.from("items").select("code,name,um").ilike("code", `%${term}%`).order("code", { ascending: true }).limit(maxSuggestions)
+      );
+      itemQueries.push(
+        supabase.from("items").select("code,name,um").ilike("name", `%${term}%`).order("code", { ascending: true }).limit(maxSuggestions)
+      );
+    }
 
-    for (const result of itemQueries) {
+    const itemResults = await Promise.all(itemQueries);
+    for (const result of itemResults) {
       if (result.error) {
         console.error(result.error);
         continue;
@@ -183,15 +198,21 @@ export default function Home() {
       }
     }
 
-    const shelfQueries = await Promise.all(
-      shelfFields.map((field) => {
-        const query = supabase
-          .from("material_shelves")
-          .select("code,warehouse,shelf,place,barcode,nfc_tag_id")
-          .ilike(field, `%${s}%`);
+    const shelfSearchTerms = parsed.exactCode
+      ? [parsed.exactCode, ...parsed.terms.filter((t) => t !== parsed.exactCode)]
+      : parsed.terms;
 
-        return query.order("code", { ascending: true }).limit(maxSuggestions);
-      })
+    const shelfQueries = await Promise.all(
+      shelfSearchTerms.flatMap((term) =>
+        shelfFields.map((field) =>
+          supabase
+            .from("material_shelves")
+            .select("code,warehouse,shelf,place,barcode,nfc_tag_id")
+            .ilike(field, `%${term}%`)
+            .order("code", { ascending: true })
+            .limit(maxSuggestions)
+        )
+      )
     );
 
     for (const result of shelfQueries) {
@@ -238,7 +259,14 @@ export default function Home() {
     }
 
     const next = Array.from(itemByCode.values())
-      .sort((a, b) => a.code.localeCompare(b.code))
+      .sort((a, b) => {
+        // Priorità al codice esatto se hai incollato "CODICE — descrizione"
+        if (parsed.exactCode) {
+          if (a.code === parsed.exactCode && b.code !== parsed.exactCode) return -1;
+          if (b.code === parsed.exactCode && a.code !== parsed.exactCode) return 1;
+        }
+        return a.code.localeCompare(b.code);
+      })
       .slice(0, maxSuggestions);
     setSuggestions(next);
     return next;

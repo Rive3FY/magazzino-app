@@ -33,6 +33,7 @@ export async function middleware(request: NextRequest) {
     path === "/login" ||
     path === "/privacy" ||
     path === "/logout" ||
+    path === "/preview-restyling" ||
     path.startsWith("/auth/") ||
     path.startsWith("/_next") ||
     path.startsWith("/favicon.ico");

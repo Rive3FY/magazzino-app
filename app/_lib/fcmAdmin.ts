@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
-import admin from "firebase-admin";
-import type { ServiceAccount } from "firebase-admin";
+import { cert, getApps, initializeApp, type ServiceAccount } from "firebase-admin/app";
+import { getMessaging } from "firebase-admin/messaging";
 
 export function getSupabaseServiceClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -15,9 +15,16 @@ function parseServiceAccount(): ServiceAccount | null {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as ServiceAccount & { private_key?: string };
-    if (typeof parsed.private_key === "string") {
-      parsed.private_key = parsed.private_key.replace(/\\n/g, "\n");
+    const parsed = JSON.parse(raw) as ServiceAccount & { privateKey?: string; private_key?: string };
+    const privateKey = parsed.privateKey ?? parsed.private_key;
+    if (typeof privateKey === "string") {
+      const normalized = privateKey.replace(/\\n/g, "\n");
+      return {
+        ...parsed,
+        privateKey: normalized,
+        // firebase-admin accetta anche snake_case da JSON Google
+        private_key: normalized,
+      } as ServiceAccount;
     }
     return parsed;
   } catch (e) {
@@ -30,13 +37,13 @@ export function getFirebaseMessaging() {
   const account = parseServiceAccount();
   if (!account) return null;
 
-  if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.cert(account),
+  if (getApps().length === 0) {
+    initializeApp({
+      credential: cert(account),
     });
   }
 
-  return admin.messaging();
+  return getMessaging();
 }
 
 export type PushPayload = {

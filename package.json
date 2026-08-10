@@ -14,7 +14,8 @@
     "dist": "next build && electron-builder --win",
     "cap:sync": "npx cap sync android",
     "cap:open:android": "npx cap open android",
-    "android:bundle": "cd android && .\\gradlew.bat bundleRelease"
+    "android:bundle": "cd android && .\\gradlew.bat bundleRelease",
+    "android:apk": "npx cap sync android && cd android && .\\gradlew.bat assembleDebug"
   },
   "build": {
     "appId": "com.magazzino.app2",
@@ -73,11 +74,13 @@
     "@capacitor/cli": "^8.4.2",
     "@capacitor/core": "^8.4.2",
     "@capacitor/local-notifications": "^8.2.1",
+    "@capacitor/push-notifications": "^8.1.2",
     "@capacitor/status-bar": "^8.0.3",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.98.0",
     "@xmldom/xmldom": "^0.8.11",
     "@zxing/browser": "^0.1.5",
+    "firebase-admin": "^14.2.0",
     "jsbarcode": "^3.12.3",
     "jspdf": "^4.2.0",
     "jszip": "^3.10.1",

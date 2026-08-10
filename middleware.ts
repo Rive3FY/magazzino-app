@@ -34,6 +34,9 @@ export async function middleware(request: NextRequest) {
     path === "/privacy" ||
     path === "/logout" ||
     path === "/preview-restyling" ||
+    path === "/scarica-app" ||
+    path.startsWith("/downloads/") ||
+    path === "/app-version.json" ||
     path.startsWith("/auth/") ||
     path.startsWith("/_next") ||
     path.startsWith("/favicon.ico");

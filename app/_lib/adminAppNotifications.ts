@@ -1,5 +1,6 @@
 import { Capacitor } from "@capacitor/core";
 import { LocalNotifications } from "@capacitor/local-notifications";
+import { PushNotifications } from "@capacitor/push-notifications";
 import { createClient } from "./supabase/client";
 
 export type AdminAppNotificationType =
@@ -36,7 +37,7 @@ export type NotifyMaterialsAdminsInput = {
   actor_name?: string | null;
 };
 
-/** Scrive una notifica per gli admin materiali (fail-soft se tabella assente). */
+/** Scrive notifica DB + invia push FCM (background). Fail-soft. */
 export async function notifyMaterialsAdmins(input: NotifyMaterialsAdminsInput) {
   try {
     const supabase = createClient();
@@ -52,9 +53,24 @@ export async function notifyMaterialsAdmins(input: NotifyMaterialsAdminsInput) {
       actor_id: input.actor_id ?? null,
       actor_name: input.actor_name ?? null,
     } as never);
-    if (error) console.warn("notifyMaterialsAdmins:", error.message);
+    if (error) console.warn("notifyMaterialsAdmins insert:", error.message);
   } catch (e) {
-    console.warn("notifyMaterialsAdmins:", e);
+    console.warn("notifyMaterialsAdmins insert:", e);
+  }
+
+  try {
+    await fetch("/api/admin/push-notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: input.title,
+        body: input.body,
+        link: input.link,
+        excludeUserId: input.actor_id ?? null,
+      }),
+    });
+  } catch (e) {
+    console.warn("notifyMaterialsAdmins push:", e);
   }
 }
 
@@ -75,16 +91,24 @@ export async function ensureAdminNotificationPermission(): Promise<boolean> {
 
   if (Capacitor.isNativePlatform()) {
     try {
-      const current = await LocalNotifications.checkPermissions();
-      if (current.display === "granted") {
-        permissionsReady = true;
-        return true;
+      const push = await PushNotifications.checkPermissions();
+      if (push.receive !== "granted") {
+        const requested = await PushNotifications.requestPermissions();
+        if (requested.receive !== "granted") {
+          // fallback locale
+          const local = await LocalNotifications.requestPermissions();
+          permissionsReady = local.display === "granted";
+          return permissionsReady;
+        }
       }
-      const requested = await LocalNotifications.requestPermissions();
-      permissionsReady = requested.display === "granted";
-      return permissionsReady;
+      const local = await LocalNotifications.checkPermissions();
+      if (local.display !== "granted") {
+        await LocalNotifications.requestPermissions();
+      }
+      permissionsReady = true;
+      return true;
     } catch (e) {
-      console.warn("LocalNotifications permission:", e);
+      console.warn("Notification permission:", e);
       return false;
     }
   }
@@ -108,7 +132,7 @@ function notificationNumericId(seed: string) {
   return Math.abs(hash) % 2147483647 || 1;
 }
 
-/** Mostra notifica di sistema (Android Capacitor o browser). */
+/** Mostra notifica locale (foreground / web). In background usa FCM. */
 export async function presentAdminSystemNotification(
   row: Pick<AdminAppNotificationRow, "id" | "title" | "body" | "link">,
   onOpenLink?: (link: string) => void
@@ -127,6 +151,7 @@ export async function presentAdminSystemNotification(
             title: row.title,
             body: row.body,
             extra: { link, notificationId: row.id },
+            channelId: "admin_alerts",
           },
         ],
       });
@@ -150,5 +175,46 @@ export async function presentAdminSystemNotification(
     };
   } catch (e) {
     console.warn("Notification:", e);
+  }
+}
+
+const ADMIN_PUSH_CHANNEL = "admin_alerts";
+
+/** Registra il device per push FCM (solo su Capacitor nativo). */
+export async function registerAdminPushDevice(): Promise<string | null> {
+  if (typeof window === "undefined" || !Capacitor.isNativePlatform()) return null;
+
+  const ok = await ensureAdminNotificationPermission();
+  if (!ok) return null;
+
+  try {
+    await PushNotifications.createChannel({
+      id: ADMIN_PUSH_CHANNEL,
+      name: "Avvisi admin magazzino",
+      description: "Prelievi, chiusure e materiali",
+      importance: 5,
+      visibility: 1,
+      sound: "default",
+      vibration: true,
+    });
+  } catch {
+    /* canale già esistente o non supportato */
+  }
+
+  await PushNotifications.register();
+  return null;
+}
+
+export async function saveAdminPushToken(token: string) {
+  const t = token.trim();
+  if (!t) return;
+  try {
+    await fetch("/api/admin/push-token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: t, platform: Capacitor.getPlatform() }),
+    });
+  } catch (e) {
+    console.warn("saveAdminPushToken:", e);
   }
 }

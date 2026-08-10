@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "135289850539",
+    "project_id": "commagazzinoapp2",
+    "storage_bucket": "commagazzinoapp2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:135289850539:android:a3d9e5cd15520155b1c5ee",
+        "android_client_info": {
+          "package_name": "com.magazzino.app2"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAF2kciQi3PNdbiRWCwYS8QYq0mFAtVG88"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

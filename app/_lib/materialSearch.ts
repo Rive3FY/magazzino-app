@@ -20,3 +20,52 @@ export function parseMaterialSearchInput(text: string) {
     exactCode: looksLikeCode && firstToken !== raw ? firstToken : (/^[A-Za-z0-9._/-]+$/.test(raw) ? raw : null),
   };
 }
+
+function normalizeMaterialSearchText(value: string) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("it")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Restituisce prefissi brevi usati solo per recuperare candidati dal database.
+ * Il controllo definitivo viene eseguito da matchesMaterialSearch.
+ */
+export function materialSearchProbeTerms(text: string) {
+  const normalized = normalizeMaterialSearchText(text);
+  return Array.from(
+    new Set(
+      normalized
+        .split(/\s+/)
+        .filter((token) => token.length >= 3)
+        .map((token) => token.slice(0, 3))
+    )
+  );
+}
+
+/**
+ * Cerca per parole intere o abbreviate senza modificare i dati importati.
+ * "morse amarro" trova "mors amar" e viceversa; trattini e spazi sono equivalenti.
+ */
+export function matchesMaterialSearch(text: string, ...values: Array<string | null | undefined>) {
+  const query = normalizeMaterialSearchText(text);
+  if (!query) return true;
+
+  const target = normalizeMaterialSearchText(values.filter(Boolean).join(" "));
+  if (!target) return false;
+  if (target.includes(query)) return true;
+
+  const queryTokens = query.split(/\s+/).filter(Boolean);
+  const targetTokens = target.split(/\s+/).filter(Boolean);
+
+  return queryTokens.every((queryToken) =>
+    targetTokens.some((targetToken) => {
+      if (queryToken === targetToken) return true;
+      if (queryToken.length < 3 || targetToken.length < 3) return false;
+      return queryToken.startsWith(targetToken) || targetToken.startsWith(queryToken);
+    })
+  );
+}

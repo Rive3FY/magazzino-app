@@ -4,11 +4,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../_lib/fastBarcodeScanner";
-import { parseMaterialSearchInput } from "../_lib/materialSearch";
+import {
+  matchesMaterialSearch,
+  materialSearchProbeTerms,
+  parseMaterialSearchInput,
+} from "../_lib/materialSearch";
 import {
   buildMaterialUsedRegisterSheets,
   downloadMaterialUsedRegisterPdf,
 } from "../_lib/material-used-register-pdf";
+import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
+import AdminMaterialsOverviewModal, {
+  type MaterialsDashboardStats,
+} from "./_components/AdminMaterialsOverviewModal";
 import type { MovementRow } from "../_lib/types";
 
 type Movement = {
@@ -115,6 +123,33 @@ function appendUnique(list: string[], value: string) {
   if (value && !list.includes(value)) list.push(value);
 }
 
+function normalizeDashboardStats(value: unknown): MaterialsDashboardStats {
+  const source = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const numberValue = (key: keyof MaterialsDashboardStats) => {
+    const parsed = Number(source[key] ?? 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  return {
+    items_count: numberValue("items_count"),
+    excel_codes_distinct: numberValue("excel_codes_distinct"),
+    excel_rows_total: numberValue("excel_rows_total"),
+    excel_rows_prm: numberValue("excel_rows_prm"),
+    excel_rows_reale: numberValue("excel_rows_reale"),
+    assigned_rows_total: numberValue("assigned_rows_total"),
+    assigned_rows_prm: numberValue("assigned_rows_prm"),
+    assigned_rows_reale: numberValue("assigned_rows_reale"),
+    orphan_shelf_rows: numberValue("orphan_shelf_rows"),
+    excel_codes_without_item: numberValue("excel_codes_without_item"),
+    zero_stock_count: numberValue("zero_stock_count"),
+    zero_stock_prm: numberValue("zero_stock_prm"),
+    zero_stock_reale: numberValue("zero_stock_reale"),
+    negative_stock_count: numberValue("negative_stock_count"),
+    open_out_movements: numberValue("open_out_movements"),
+    pending_excel_requests: numberValue("pending_excel_requests"),
+    movements_today: numberValue("movements_today"),
+  };
+}
+
 function shelfMatchLabel(row: any) {
   const wh = String(row?.warehouse ?? "").trim();
   const shelf = String(row?.shelf ?? "").trim();
@@ -125,6 +160,7 @@ function shelfMatchLabel(row: any) {
 
 export default function Home() {
   const supabase = createClient();
+  const { canManageMaterials, loading: adminAccessLoading } = useIsAdmin();
 
   const [loading, setLoading] = useState(true);
   const [itemsCount, setItemsCount] = useState<number>(0);
@@ -144,6 +180,10 @@ export default function Home() {
   const [msg, setMsg] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [registerBusy, setRegisterBusy] = useState(false);
+  const [adminStats, setAdminStats] = useState<MaterialsDashboardStats | null>(null);
+  const [adminStatsLoading, setAdminStatsLoading] = useState(false);
+  const [adminStatsError, setAdminStatsError] = useState<string | null>(null);
+  const [adminOverviewOpen, setAdminOverviewOpen] = useState(false);
 
   const boxRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -183,7 +223,8 @@ export default function Home() {
         supabase.from("items").select("code,name,um").ilike("code", `%${parsed.exactCode}%`).order("code", { ascending: true }).limit(maxSuggestions)
       );
     }
-    for (const term of parsed.terms) {
+    const candidateTerms = Array.from(new Set([...parsed.terms, ...materialSearchProbeTerms(text)]));
+    for (const term of candidateTerms) {
       itemQueries.push(
         supabase.from("items").select("code,name,um").ilike("code", `%${term}%`).order("code", { ascending: true }).limit(maxSuggestions)
       );
@@ -200,7 +241,9 @@ export default function Home() {
       }
       for (const item of result.data ?? []) {
         const it = item as DbItem;
-        if (it.code && !itemByCode.has(it.code)) itemByCode.set(it.code, it);
+        if (it.code && matchesMaterialSearch(text, it.code, it.name) && !itemByCode.has(it.code)) {
+          itemByCode.set(it.code, it);
+        }
       }
     }
 
@@ -539,19 +582,68 @@ export default function Home() {
     setLoading(false);
   }, []);
 
+  const loadAdminStats = useCallback(async () => {
+    if (!canManageMaterials) return;
+    setAdminStatsLoading(true);
+    setAdminStatsError(null);
+    try {
+      const client = createClient();
+      const { data, error } = await client.rpc("materials_dashboard_stats");
+      if (error) throw error;
+      setAdminStats(normalizeDashboardStats(data));
+    } catch (error) {
+      console.error("materials_dashboard_stats error:", error);
+      setAdminStats(null);
+      setAdminStatsError("Statistiche admin non disponibili. Applica la migration KPI su Supabase.");
+    } finally {
+      setAdminStatsLoading(false);
+    }
+  }, [canManageMaterials]);
+
   useEffect(() => {
     void loadData();
   }, [loadData]);
 
   useEffect(() => {
-    const channel = supabase
+    if (adminAccessLoading) return;
+    if (!canManageMaterials) {
+      setAdminOverviewOpen(false);
+      setAdminStats(null);
+      setAdminStatsError(null);
+      setAdminStatsLoading(false);
+      return;
+    }
+    if (adminOverviewOpen) void loadAdminStats();
+  }, [adminAccessLoading, adminOverviewOpen, canManageMaterials, loadAdminStats]);
+
+  useEffect(() => {
+    const client = createClient();
+    const channel = client
       .channel("materiali-movements")
-      .on("postgres_changes", { event: "*", schema: "public", table: "movements" }, () => void loadData())
+      .on("postgres_changes", { event: "*", schema: "public", table: "movements" }, () => {
+        void loadData();
+        if (canManageMaterials && adminOverviewOpen) void loadAdminStats();
+      })
       .subscribe();
     return () => {
-      supabase.removeChannel(channel);
+      client.removeChannel(channel);
     };
-  }, [loadData]);
+  }, [adminOverviewOpen, canManageMaterials, loadAdminStats, loadData]);
+
+  useEffect(() => {
+    if (!canManageMaterials || !adminOverviewOpen) return;
+    const client = createClient();
+    const refresh = () => void loadAdminStats();
+    const channel = client
+      .channel("materiali-admin-kpi")
+      .on("postgres_changes", { event: "*", schema: "public", table: "excel_live" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "material_shelves" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "excel_live_requests" }, refresh)
+      .subscribe();
+    return () => {
+      client.removeChannel(channel);
+    };
+  }, [adminOverviewOpen, canManageMaterials, loadAdminStats]);
 
   useEffect(() => {
     function onDocMouseDown(e: MouseEvent) {
@@ -921,6 +1013,18 @@ export default function Home() {
           </div>
         </div>
 
+        {canManageMaterials && (
+          <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end" }}>
+            <button
+              className="btn btnPrimary"
+              type="button"
+              onClick={() => setAdminOverviewOpen(true)}
+            >
+              Panoramica admin
+            </button>
+          </div>
+        )}
+
         <div style={{ marginTop: 14 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
             <h2 style={{ margin: 0 }}>Ultimi movimenti</h2>
@@ -1208,6 +1312,17 @@ export default function Home() {
             )}
           </div>
         </div>
+      )}
+
+      {canManageMaterials && (
+        <AdminMaterialsOverviewModal
+          open={adminOverviewOpen}
+          stats={adminStats}
+          loading={adminStatsLoading}
+          error={adminStatsError}
+          onClose={() => setAdminOverviewOpen(false)}
+          onRefresh={() => void loadAdminStats()}
+        />
       )}
 
       {scanning && (

@@ -34,6 +34,8 @@ type DbRow = {
 };
 
 type ColumnViewMode = "filtered" | "full";
+type ShelfAssignmentFilter = "ALL" | "WITH" | "WITHOUT";
+type StockQuantityFilter = "ALL" | "ZERO" | "ZERO_TOTAL";
 type ColumnPreferences = {
   visibleCols: ExcelCol[];
   mode: ColumnViewMode;
@@ -129,7 +131,17 @@ export default function GiacenzePage() {
     }
   }, [user, approved, authLoading]);
 
-  const [view, setView] = useState<WarehouseView>("REALE");
+  const [view, setView] = useState<WarehouseView>(() => {
+    const warehouse = searchParams.get("warehouse");
+    return warehouse === "PRM" || warehouse === "REALE" ? warehouse : "TUTTI";
+  });
+  const [shelfFilter, setShelfFilter] = useState<ShelfAssignmentFilter>("ALL");
+  const [stockFilter, setStockFilter] = useState<StockQuantityFilter>(() => {
+    const stock = searchParams.get("stock");
+    if (stock === "zero-total" || stock === "zero_total") return "ZERO_TOTAL";
+    if (stock === "zero") return "ZERO";
+    return "ALL";
+  });
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
 
@@ -140,6 +152,7 @@ export default function GiacenzePage() {
   const [rows, setRows] = useState<DbRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [columnViewMode, setColumnViewMode] = useState<ColumnViewMode>("full");
   const [configuredVisibleCols, setConfiguredVisibleCols] = useState<ExcelCol[]>(DEFAULT_VISIBLE_EXCEL_COLS);
@@ -426,6 +439,8 @@ async function openHistory(code: string) {
     p_search: search,
     p_sort_key: sortKey,
     p_sort_dir: sortDir,
+    p_shelf_filter: shelfFilter,
+    p_stock_filter: stockFilter,
     p_limit: PAGE_SIZE,
     p_offset: offset,
   });
@@ -529,14 +544,14 @@ async function openHistory(code: string) {
   }, [urlCode, urlWarehouse]);
 
 useEffect(() => {
-  if (page === 1 && view === "REALE" && sortKey === "Materiale" && sortDir === "none") return;
+  if (page === 1 && view === "TUTTI" && shelfFilter === "ALL" && stockFilter === "ALL" && sortKey === "Materiale" && sortDir === "none") return;
   load(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [page, view, sortKey, sortDir]);
+}, [page, view, shelfFilter, stockFilter, sortKey, sortDir]);
 
   useEffect(() => {
     setPage(1);
-  }, [q, view, sortKey, sortDir]);
+  }, [q, view, shelfFilter, stockFilter, sortKey, sortDir]);
 
   useEffect(() => {
   const t = setTimeout(() => {
@@ -841,20 +856,78 @@ await writeAuditLog({
   await load();
 }
 
-  function exportXlsx() {
-    const data = viewRows.map((r) => {
-      const obj: Record<string, any> = {};
-      for (const c of activeTableCols) {
-        obj[c] = getExcelCellValue(r, c);
-      }
-      obj["_warehouse"] = r.warehouse;
-      return obj;
-    });
+  async function exportXlsx() {
+    if (exporting) return;
+    setExporting(true);
+    setMsg(null);
 
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Inventario");
-    XLSX.writeFile(wb, `inventario_${view.toLowerCase()}_pagina_${page}.xlsx`);
+    try {
+      const search = q.trim() || null;
+      const batchSize = 500;
+      const allRows: DbRow[] = [];
+      let offset = 0;
+      let total = Number.POSITIVE_INFINITY;
+
+      while (offset < total) {
+        const { data, error } = await supabase.rpc("giacenze_list", {
+          p_view: view,
+          p_search: search,
+          p_sort_key: sortKey,
+          p_sort_dir: sortDir,
+          p_shelf_filter: shelfFilter,
+          p_stock_filter: stockFilter,
+          p_limit: batchSize,
+          p_offset: offset,
+        });
+
+        if (error) throw error;
+
+        const list = (data ?? []) as DbRow[];
+        if (list.length === 0) break;
+
+        const reportedTotal = Number(list[0]?.total_count ?? 0);
+        total = Number.isFinite(reportedTotal) && reportedTotal > 0 ? reportedTotal : list.length;
+        allRows.push(...list);
+        offset += list.length;
+
+        if (list.length < batchSize) break;
+      }
+
+      if (allRows.length === 0) {
+        setMsg("Nessuna riga da esportare con i filtri attuali.");
+        return;
+      }
+
+      const data = allRows.map((r) => {
+        const obj: Record<string, string | number> = {};
+        for (const c of activeTableCols) {
+          const value = getExcelCellValue(r, c);
+          obj[c] = value == null ? "" : (typeof value === "number" ? value : String(value));
+        }
+        return obj;
+      });
+
+      const ws = XLSX.utils.json_to_sheet(data);
+      const headers = Object.keys(data[0] ?? {});
+      ws["!cols"] = headers.map((header) => {
+        let maxLen = header.length;
+        for (const row of data) {
+          const cell = String(row[header] ?? "");
+          maxLen = Math.max(maxLen, Math.min(cell.length, 80));
+        }
+        return { wch: Math.max(14, Math.min(maxLen + 2, 55)) };
+      });
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Inventario");
+      XLSX.writeFile(wb, `inventario_${view.toLowerCase()}_completo.xlsx`);
+      toast.success(`Excel esportato: ${allRows.length} righe`);
+    } catch (error) {
+      console.error("export inventario error:", error);
+      setMsg("Errore export Excel inventario.");
+    } finally {
+      setExporting(false);
+    }
   }
 
   return (
@@ -870,7 +943,7 @@ await writeAuditLog({
           className="mobileGrid1"
           style={{
             display: "grid",
-            gridTemplateColumns: "180px minmax(240px,1fr) auto auto auto auto",
+            gridTemplateColumns: "180px 190px 170px minmax(240px,1fr) auto auto auto auto",
             gap: 10,
             alignItems: "end",
           }}
@@ -880,9 +953,43 @@ await writeAuditLog({
               Magazzino
             </label>
             <select id="viewSel" name="viewSel" className="input" value={view} onChange={(e) => setView(e.target.value as WarehouseView)}>
-              <option value="REALE">REALE</option>
+              <option value="TUTTI">TUTTO</option>
               <option value="PRM">PRM</option>
-              <option value="TUTTI">TUTTI</option>
+              <option value="REALE">REALE</option>
+            </select>
+          </div>
+
+          <div style={{ minWidth: 0 }}>
+            <label className="label" htmlFor="stockFilterSel">
+              Quantità
+            </label>
+            <select
+              id="stockFilterSel"
+              name="stockFilterSel"
+              className="input"
+              value={stockFilter}
+              onChange={(event) => setStockFilter(event.target.value as StockQuantityFilter)}
+            >
+              <option value="ALL">Tutte</option>
+              <option value="ZERO">Quantità 0 (magazzino)</option>
+              <option value="ZERO_TOTAL">Quantità 0 totale (PRM+REALE)</option>
+            </select>
+          </div>
+
+          <div style={{ minWidth: 0 }}>
+            <label className="label" htmlFor="shelfFilterSel">
+              Assegnazione scaffale
+            </label>
+            <select
+              id="shelfFilterSel"
+              name="shelfFilterSel"
+              className="input"
+              value={shelfFilter}
+              onChange={(event) => setShelfFilter(event.target.value as ShelfAssignmentFilter)}
+            >
+              <option value="ALL">Tutti</option>
+              <option value="WITH">Con scaffale</option>
+              <option value="WITHOUT">Senza scaffale</option>
             </select>
           </div>
 
@@ -911,8 +1018,8 @@ await writeAuditLog({
             Aggiorna
           </button>
 
-          <button className="btn" onClick={exportXlsx}>
-            Export pagina
+          <button className="btn" onClick={() => void exportXlsx()} disabled={exporting}>
+            {exporting ? "Export in corso..." : "Export Excel"}
           </button>
         </div>
 

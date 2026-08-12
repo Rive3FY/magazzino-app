@@ -179,31 +179,6 @@ export default function ProfiloPage() {
       </div>
 
       <div
-        style={{
-          margin: "12px 12px 0",
-          padding: "12px 14px",
-          borderRadius: 12,
-          border: "1px solid rgba(15, 118, 110, 0.25)",
-          background: "rgba(240, 253, 250, 0.9)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <div style={{ fontWeight: 900, fontSize: 14 }}>App Android</div>
-          <div style={{ fontSize: 12, color: "#64748b", marginTop: 3 }}>
-            Scarica l&apos;APK aggiornato (v1.1.0) e installalo sul telefono.
-          </div>
-        </div>
-        <a className="btn btnPrimary" href="/downloads/magazzino.apk" download="MagazzinoApp2.apk">
-          Scarica APK
-        </a>
-      </div>
-
-      <div
         className="filters mobileGrid1"
         style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}
       >

@@ -11,7 +11,11 @@ import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import { useToast } from "../_lib/ToastContext";
 import ConfirmModal from "../_components/ConfirmModal";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../_lib/fastBarcodeScanner";
-import { parseMaterialSearchInput } from "../_lib/materialSearch";
+import {
+  matchesMaterialSearch,
+  materialSearchProbeTerms,
+  parseMaterialSearchInput,
+} from "../_lib/materialSearch";
 import { composePickupNote, parsePickupNote } from "../_lib/pickupNote";
 import {
   buildMaterialUsedRegisterSheets,
@@ -735,12 +739,13 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
           supabase.from("items").select("code,name,um").ilike("code", `%${parsed.exactCode}%`).order("code", { ascending: true }).limit(12)
         );
       }
-      for (const term of parsed.terms) {
+      const candidateTerms = Array.from(new Set([...parsed.terms, ...materialSearchProbeTerms(text)]));
+      for (const term of candidateTerms) {
         queries.push(
-          supabase.from("items").select("code,name,um").ilike("code", `%${term}%`).order("code", { ascending: true }).limit(12)
+          supabase.from("items").select("code,name,um").ilike("code", `%${term}%`).order("code", { ascending: true }).limit(100)
         );
         queries.push(
-          supabase.from("items").select("code,name,um").ilike("name", `%${term}%`).order("code", { ascending: true }).limit(12)
+          supabase.from("items").select("code,name,um").ilike("name", `%${term}%`).order("code", { ascending: true }).limit(100)
         );
       }
 
@@ -754,7 +759,7 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
       const map = new Map<string, DbItem>();
       for (const result of results) {
         for (const it of (result.data ?? []) as DbItem[]) {
-          if (it?.code) map.set(it.code, it);
+          if (it?.code && matchesMaterialSearch(text, it.code, it.name)) map.set(it.code, it);
         }
       }
 
@@ -794,12 +799,13 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
           supabase.from("items").select("code,name,um").ilike("code", `%${parsed.exactCode}%`).order("code", { ascending: true }).limit(20)
         );
       }
-      for (const term of parsed.terms) {
+      const candidateTerms = Array.from(new Set([...parsed.terms, ...materialSearchProbeTerms(text)]));
+      for (const term of candidateTerms) {
         queries.push(
-          supabase.from("items").select("code,name,um").ilike("code", `%${term}%`).order("code", { ascending: true }).limit(20)
+          supabase.from("items").select("code,name,um").ilike("code", `%${term}%`).order("code", { ascending: true }).limit(100)
         );
         queries.push(
-          supabase.from("items").select("code,name,um").ilike("name", `%${term}%`).order("code", { ascending: true }).limit(20)
+          supabase.from("items").select("code,name,um").ilike("name", `%${term}%`).order("code", { ascending: true }).limit(100)
         );
       }
 
@@ -812,7 +818,7 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
       const map = new Map<string, DbItem>();
       for (const result of results) {
         for (const it of (result.data ?? []) as DbItem[]) {
-          if (it?.code) map.set(it.code, it);
+          if (it?.code && matchesMaterialSearch(text, it.code, it.name)) map.set(it.code, it);
         }
       }
       const items = Array.from(map.values())
@@ -888,13 +894,14 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
         orParts.push(`code.eq.${parsed.exactCode}`);
         orParts.push(`code.ilike.%${parsed.exactCode}%`);
       }
-      for (const term of parsed.terms) {
+      const candidateTerms = Array.from(new Set([...parsed.terms, ...materialSearchProbeTerms(materialSearch)]));
+      for (const term of candidateTerms) {
         orParts.push(`code.ilike.%${term}%`);
         orParts.push(`name.ilike.%${term}%`);
       }
       const { data: foundItems, error: itemsErr } = await supabase
         .from("items")
-        .select("code")
+        .select("code,name")
         .or(orParts.join(","))
         .limit(300);
 
@@ -907,7 +914,14 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
         return;
       }
 
-      materialCodes = Array.from(new Set((foundItems ?? []).map((x: any) => x.code).filter(Boolean)));
+      materialCodes = Array.from(
+        new Set(
+          (foundItems ?? [])
+            .filter((item) => matchesMaterialSearch(materialSearch, item.code, item.name))
+            .map((item) => item.code)
+            .filter(Boolean)
+        )
+      );
 
       if (materialCodes.length === 0) {
         setHistory([]);

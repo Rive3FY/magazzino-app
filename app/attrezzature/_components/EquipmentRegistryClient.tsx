@@ -20,6 +20,7 @@ import {
 } from "../../_lib/equipment";
 import { applyEquipmentMaintenanceReintegration } from "../../_lib/equipmentMaintenanceReintegration";
 import { isRelationMissingOrNotExposedError } from "../../_lib/postgrestErrors";
+import { buildEquipmentPickupPdfSheet, downloadEquipmentPickupPdf } from "../../_lib/equipment-pickup-pdf";
 import EquipmentStatusManager from "./EquipmentStatusManager";
 import AppScanStatusModal from "../../_components/AppScanStatusModal";
 import ConfirmModal from "../../_components/ConfirmModal";
@@ -242,6 +243,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   const [isIOS, setIsIOS] = useState(false);
   const [statusChanging, setStatusChanging] = useState(false);
   const [statusModalOpen, setStatusModalOpen] = useState(false);
+  const [pickupPdfBusy, setPickupPdfBusy] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<FastBarcodeReader | null>(null);
   const quickBoxRef = useRef<HTMLDivElement | null>(null);
@@ -545,6 +547,29 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     }
     return counts;
   }, [history]);
+  const historyGroupSummaryMap = useMemo(() => {
+    const summaries = new Map<string, { total: number; closed: number; open: number; latestClosedAt: string | null }>();
+    for (const row of history) {
+      if (!row.movement_group_id) continue;
+      const current = summaries.get(row.movement_group_id) ?? {
+        total: 0,
+        closed: 0,
+        open: 0,
+        latestClosedAt: null,
+      };
+      current.total += 1;
+      if ((row.status ?? "OPEN") === "CLOSED") {
+        current.closed += 1;
+        if (row.closed_at && (!current.latestClosedAt || row.closed_at > current.latestClosedAt)) {
+          current.latestClosedAt = row.closed_at;
+        }
+      } else {
+        current.open += 1;
+      }
+      summaries.set(row.movement_group_id, current);
+    }
+    return summaries;
+  }, [history]);
   const displayHistory = useMemo(() => {
     const fromIso = toIsoStartOfDay(historyFrom);
     const toIso = toIsoEndOfDay(historyTo);
@@ -563,7 +588,6 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   }, [history, historyFrom, historyTo, quickWarehouseFilter, filteredAssetIds]);
 
   const [historyDetail, setHistoryDetail] = useState<EquipmentMovementRow | null>(null);
-  const [historyDetailAssetsExpanded, setHistoryDetailAssetsExpanded] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<EquipmentMovementRow | null>(null);
 
@@ -574,10 +598,98 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
       .filter((row) => row.movement_group_id === historyDetail.movement_group_id)
       .sort((a, b) => a.created_at.localeCompare(b.created_at));
   }, [history, historyDetail]);
+  const historyDetailGroupSummary = useMemo(() => {
+    const closedRows = historyDetailGroup.filter((row) => (row.status ?? "OPEN") === "CLOSED");
+    const latestClosedAt = closedRows
+      .map((row) => row.closed_at)
+      .filter((value): value is string => !!value)
+      .sort()
+      .at(-1) ?? null;
+    return {
+      total: historyDetailGroup.length,
+      closed: closedRows.length,
+      open: historyDetailGroup.length - closedRows.length,
+      latestClosedAt,
+    };
+  }, [historyDetailGroup]);
+  const historyDetailStatus = historyDetailGroupSummary.open > 0 ? "OPEN" : "CLOSED";
 
-  useEffect(() => {
-    setHistoryDetailAssetsExpanded(false);
-  }, [historyDetail]);
+  async function downloadHistoryPickupPdf() {
+    if (!historyDetail || historyDetailGroup.length === 0 || pickupPdfBusy) return;
+    setPickupPdfBusy(true);
+    setMsg(null);
+    try {
+      const sheet = buildEquipmentPickupPdfSheet(historyDetailGroup, rows);
+      await downloadEquipmentPickupPdf(sheet);
+      toast.success("Registro PDF scaricato");
+    } catch (error) {
+      console.error("equipment history PDF error:", error);
+      setMsg("Download registro PDF non riuscito.");
+    } finally {
+      setPickupPdfBusy(false);
+    }
+  }
+
+  function renderHistoryEquipmentCards(movements: EquipmentMovementRow[]) {
+    return movements.map((movement) => {
+      const asset = rows.find((item) => item.id === movement.equipment_id);
+      const fallbackName = String(movement.details_json?.asset_name ?? "").trim();
+      const fallbackCode = String(movement.details_json?.asset_code ?? "").trim();
+      return (
+        <div
+          key={movement.id}
+          style={{
+            padding: 12,
+            borderRadius: 10,
+            border: "1px solid #e2e8f0",
+            background: "#f8fafc",
+          }}
+        >
+          <div style={{ fontWeight: 900 }}>
+            {asset
+              ? `${asset.serial_number || asset.asset_code} - ${asset.name}`
+              : `${fallbackCode || movement.equipment_id}${fallbackName ? ` - ${fallbackName}` : ""}`}
+          </div>
+          <div style={{ marginTop: 6, fontSize: 13, color: "#334155" }}>
+            {[
+              asset?.warehouse || null,
+              asset?.category || null,
+              [asset?.shelf, asset?.place].filter(Boolean).join(" · ") || null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || "Nessun dettaglio aggiuntivo"}
+          </div>
+          <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
+            {[
+              asset?.barcode ? `Barcode ${asset.barcode}` : null,
+              asset?.nfc_tag_id ? `NFC ${asset.nfc_tag_id}` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || "Nessun identificativo"}
+          </div>
+          <div
+            style={{
+              marginTop: 10,
+              paddingTop: 10,
+              borderTop: "1px solid #e2e8f0",
+              display: "grid",
+              gap: 4,
+              fontSize: 12,
+              color: "#334155",
+            }}
+          >
+            <div><b>Stato:</b> {EQUIPMENT_MOVEMENT_STATUS_LABELS[movement.status ?? "OPEN"]}</div>
+            <div>
+              <b>Esito:</b>{" "}
+              {movement.resolution_type ? EQUIPMENT_RESOLUTION_LABELS[movement.resolution_type] : "—"}
+            </div>
+            <div><b>Data rientro:</b> {movement.closed_at ? fmtDateTime(movement.closed_at) : "Ancora fuori"}</div>
+            <div><b>Nota rientro:</b> {movement.close_note || "—"}</div>
+          </div>
+        </div>
+      );
+    });
+  }
 
   function openDeleteConfirm(row: EquipmentMovementRow) {
     if (!isAdmin) return;
@@ -1244,8 +1356,9 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
               ) : (
                 displayHistory.map((row) => {
                   const asset = rows.find((item) => item.id === row.equipment_id);
-                  const status = row.status ?? "OPEN";
                   const groupCount = row.movement_group_id ? (historyGroupCountMap.get(row.movement_group_id) ?? 1) : 1;
+                  const groupSummary = row.movement_group_id ? historyGroupSummaryMap.get(row.movement_group_id) : null;
+                  const status = groupSummary ? (groupSummary.open > 0 ? "OPEN" : "CLOSED") : (row.status ?? "OPEN");
                   const busy = deletingId === row.id;
                   return (
                     <tr
@@ -1277,14 +1390,22 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                       <td><span style={equipmentMovementPillStyle("OUT")}>{EQUIPMENT_MOVEMENT_LABELS.OUT}</span></td>
                       <td style={{ fontWeight: 900 }}>
                         {groupCount > 1
-                          ? `Prelievo multiplo (${groupCount} attrezzature)`
+                          ? `Prelievo multiplo (${groupCount} attrezzature) · ${groupSummary?.closed ?? 0} rientrate · ${groupSummary?.open ?? groupCount} fuori`
                           : asset
                             ? `${asset.serial_number || asset.asset_code} - ${asset.name}`
                             : row.equipment_id}
                       </td>
-                      <td>{row.resolution_type ? EQUIPMENT_RESOLUTION_LABELS[row.resolution_type] : "—"}</td>
+                      <td>
+                        {groupCount > 1
+                          ? groupSummary?.open
+                            ? "Rientro parziale"
+                            : "Rientro completato"
+                          : row.resolution_type
+                            ? EQUIPMENT_RESOLUTION_LABELS[row.resolution_type]
+                            : "—"}
+                      </td>
                       <td>{row.note || "—"}</td>
-                      <td>{row.close_note || "—"}</td>
+                      <td>{groupCount > 1 ? "Vedi dettaglio" : row.close_note || "—"}</td>
                       <td>{row.created_by_name || row.created_by_email || "—"}</td>
                       {isAdmin && (
                         <td onClick={(e) => e.stopPropagation()}>
@@ -1349,9 +1470,19 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                     Area {areaLabel}
                   </div>
                 </div>
-                <button type="button" className="btn" onClick={() => setHistoryDetail(null)}>
-                  Chiudi
-                </button>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <button
+                    type="button"
+                    className="btn btnPrimary"
+                    onClick={downloadHistoryPickupPdf}
+                    disabled={pickupPdfBusy}
+                  >
+                    {pickupPdfBusy ? "Generazione PDF..." : "Scarica registro PDF"}
+                  </button>
+                  <button type="button" className="btn" onClick={() => setHistoryDetail(null)}>
+                    Chiudi
+                  </button>
+                </div>
               </div>
 
               <div
@@ -1368,8 +1499,8 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
               >
                 <div style={{ fontSize: 12, fontWeight: 900, color: "#0f172a" }}>Scheda movimento</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <span style={equipmentMovementPillStyle(historyDetail.status ?? "OPEN")}>
-                    {EQUIPMENT_MOVEMENT_STATUS_LABELS[historyDetail.status ?? "OPEN"]}
+                  <span style={equipmentMovementPillStyle(historyDetailStatus)}>
+                    {EQUIPMENT_MOVEMENT_STATUS_LABELS[historyDetailStatus]}
                   </span>
                   <span style={equipmentMovementPillStyle("OUT")}>{EQUIPMENT_MOVEMENT_LABELS.OUT}</span>
                 </div>
@@ -1422,8 +1553,8 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                   <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
                     <div style={{ fontSize: 12, color: "#64748b" }}>Stato</div>
                     <div style={{ marginTop: 4 }}>
-                      <span style={equipmentMovementPillStyle(historyDetail.status ?? "OPEN")}>
-                        {EQUIPMENT_MOVEMENT_STATUS_LABELS[historyDetail.status ?? "OPEN"]}
+                      <span style={equipmentMovementPillStyle(historyDetailStatus)}>
+                        {EQUIPMENT_MOVEMENT_STATUS_LABELS[historyDetailStatus]}
                       </span>
                     </div>
                   </div>
@@ -1481,7 +1612,13 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                   <div style={{ padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
                     <div style={{ fontSize: 12, color: "#64748b" }}>Esito finale</div>
                     <div style={{ fontWeight: 800 }}>
-                      {historyDetail.resolution_type ? EQUIPMENT_RESOLUTION_LABELS[historyDetail.resolution_type] : "—"}
+                      {historyDetailGroup.length > 1
+                        ? historyDetailGroupSummary.open > 0
+                          ? `${historyDetailGroupSummary.closed}/${historyDetailGroupSummary.total} rientrate`
+                          : `Rientro completato (${historyDetailGroupSummary.total}/${historyDetailGroupSummary.total})`
+                        : historyDetail.resolution_type
+                          ? EQUIPMENT_RESOLUTION_LABELS[historyDetail.resolution_type]
+                          : "—"}
                     </div>
                   </div>
                 </div>
@@ -1509,12 +1646,22 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                   </div>
                   <div style={{ padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff" }}>
                     <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Note chiusura</div>
-                    <div style={{ fontWeight: 700 }}>{historyDetail.close_note || "—"}</div>
+                    <div style={{ fontWeight: 700 }}>
+                      {historyDetailGroup.length > 1 ? "Le note sono riportate per ogni attrezzatura." : historyDetail.close_note || "—"}
+                    </div>
                   </div>
                   <div style={{ padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff" }}>
-                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Data chiusura</div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>
+                      {historyDetailGroup.length > 1 && historyDetailGroupSummary.open > 0 ? "Ultimo rientro" : "Data chiusura"}
+                    </div>
                     <div style={{ fontWeight: 700 }}>
-                      {historyDetail.closed_at ? fmtDateTime(historyDetail.closed_at) : "Movimento ancora aperto"}
+                      {historyDetailGroup.length > 1
+                        ? historyDetailGroupSummary.latestClosedAt
+                          ? `${fmtDateTime(historyDetailGroupSummary.latestClosedAt)} · ${historyDetailGroupSummary.closed}/${historyDetailGroupSummary.total} rientrate`
+                          : "Nessuna attrezzatura ancora rientrata"
+                        : historyDetail.closed_at
+                          ? fmtDateTime(historyDetail.closed_at)
+                          : "Movimento ancora aperto"}
                     </div>
                   </div>
                 </div>
@@ -1535,55 +1682,37 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                 >
                   {historyDetailGroup.length > 1 ? "Attrezzature del gruppo" : "Attrezzatura coinvolta"}
                 </div>
-                <div style={{ padding: 12, display: "grid", gap: 8 }}>
-                  {(historyDetailAssetsExpanded ? historyDetailGroup : historyDetailGroup.slice(0, 4)).map((movement) => {
-                    const asset = rows.find((item) => item.id === movement.equipment_id);
-                    return (
-                      <div
-                        key={movement.id}
-                        style={{
-                          padding: 12,
-                          borderRadius: 10,
-                          border: "1px solid #e2e8f0",
-                          background: "#f8fafc",
-                        }}
-                      >
-                        <div style={{ fontWeight: 900 }}>
-                          {asset ? `${asset.serial_number || asset.asset_code} - ${asset.name}` : movement.equipment_id}
-                        </div>
-                        <div style={{ marginTop: 6, fontSize: 13, color: "#334155" }}>
-                          {[
-                            asset?.warehouse || null,
-                            asset?.category || null,
-                            [asset?.shelf, asset?.place].filter(Boolean).join(" · ") || null,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ") || "Nessun dettaglio aggiuntivo"}
-                        </div>
-                        <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
-                          {[
-                            asset?.barcode ? `Barcode ${asset.barcode}` : null,
-                            asset?.nfc_tag_id ? `NFC ${asset.nfc_tag_id}` : null,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ") || "Nessun identificativo"}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {historyDetailGroup.length > 4 && (
-                    <div style={{ display: "flex", justifyContent: "flex-start", marginTop: 4 }}>
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={() => setHistoryDetailAssetsExpanded((v) => !v)}
-                      >
-                        {historyDetailAssetsExpanded
-                          ? "Mostra meno"
-                          : `Mostra tutte (${historyDetailGroup.length})`}
-                      </button>
+                <div style={{ padding: 12, display: "grid", gap: 10 }}>
+                  <details
+                    open
+                    style={{ border: "1px solid #bfdbfe", borderRadius: 10, overflow: "hidden", background: "#fff" }}
+                  >
+                    <summary style={{ padding: 12, cursor: "pointer", fontWeight: 900, color: "#1d4ed8", background: "#eff6ff" }}>
+                      Ancora fuori ({historyDetailGroupSummary.open})
+                    </summary>
+                    <div style={{ padding: 10, display: "grid", gap: 8 }}>
+                      {historyDetailGroupSummary.open > 0
+                        ? renderHistoryEquipmentCards(
+                            historyDetailGroup.filter((movement) => (movement.status ?? "OPEN") === "OPEN")
+                          )
+                        : <div style={{ color: "#64748b" }}>Nessuna attrezzatura ancora fuori.</div>}
                     </div>
-                  )}
+                  </details>
+
+                  <details
+                    style={{ border: "1px solid #bbf7d0", borderRadius: 10, overflow: "hidden", background: "#fff" }}
+                  >
+                    <summary style={{ padding: 12, cursor: "pointer", fontWeight: 900, color: "#047857", background: "#f0fdf4" }}>
+                      Rientrate ({historyDetailGroupSummary.closed})
+                    </summary>
+                    <div style={{ padding: 10, display: "grid", gap: 8 }}>
+                      {historyDetailGroupSummary.closed > 0
+                        ? renderHistoryEquipmentCards(
+                            historyDetailGroup.filter((movement) => (movement.status ?? "OPEN") === "CLOSED")
+                          )
+                        : <div style={{ color: "#64748b" }}>Nessuna attrezzatura ancora rientrata.</div>}
+                    </div>
+                  </details>
                 </div>
               </section>
             </div>

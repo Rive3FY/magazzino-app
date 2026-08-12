@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createClient } from "../_lib/supabase/client";
 import { useAuth } from "../_lib/hooks/useAuth";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
+import { matchesMaterialSearch } from "../_lib/materialSearch";
 import {
   buildDefinitivaDefaults,
   buildDefinitivaLabelHtml,
@@ -204,7 +205,7 @@ export default function EtichettePage() {
   }
 
   const filtered = items.filter((it) => {
-    const match = !q.trim() || it.code.toLowerCase().includes(q.toLowerCase()) || (it.name ?? "").toLowerCase().includes(q.toLowerCase());
+    const match = matchesMaterialSearch(q, it.code, it.name);
     if (!match) return false;
     if (onlyWithShelf) {
       return hasAssignedShelf(shelves[it.code]?.PRM) || hasAssignedShelf(shelves[it.code]?.REALE);

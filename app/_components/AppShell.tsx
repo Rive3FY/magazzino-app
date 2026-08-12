@@ -5,7 +5,6 @@ import { useSidebar } from "../_lib/SidebarContext";
 import SideNav from "./SideNav";
 import TopBar from "./TopBar";
 import AdminAppNotificationsListener from "./AdminAppNotificationsListener";
-import AppUpdateBanner from "./AppUpdateBanner";
 
 type Props = {
   hasUser: boolean;
@@ -45,7 +44,6 @@ export default function AppShell({ hasUser, displayName, displayBadge, children 
       {hasUser && <TopBar displayName={displayName} displayBadge={displayBadge} showHamburger={showHamburger} />}
       {hasUser && <SideNav hideSidebar={hideSidebar} />}
       {hasUser && <AdminAppNotificationsListener />}
-      {hasUser && <AppUpdateBanner />}
 
       <div className="main">
         <div className="content">

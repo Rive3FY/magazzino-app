@@ -1,9 +1,11 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "../_lib/supabase/client";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../_lib/fastBarcodeScanner";
+import { matchesMaterialSearch } from "../_lib/materialSearch";
 
 function QrIcon() {
   return (
@@ -35,10 +37,14 @@ type ShelfRow = {
 };
 
 type ShelfEntry = { shelf: string; place: string; nfcTagId: string; barcode: string };
-type LiveRow = { code: string; row_json?: Record<string, unknown> | null };
+type LiveRow = { code: string; warehouse: "PRM" | "REALE"; row_json?: Record<string, unknown> | null };
 
 function emptyShelfEntry(): ShelfEntry {
   return { shelf: "", place: "", nfcTagId: "", barcode: "" };
+}
+
+function hasAssignedPosition(entry: ShelfEntry | undefined) {
+  return !!entry && (!!entry.shelf.trim() || !!entry.place.trim());
 }
 
 function getLiveItemName(row: LiveRow) {
@@ -52,10 +58,16 @@ function getLiveItemUm(row: LiveRow) {
 
 export default function ScaffaliPage() {
   const supabase = createClient();
+  const searchParams = useSearchParams();
   const { canManageMaterials: isAdmin, loading: adminLoading } = useIsAdmin();
+  const assignmentFilter = searchParams.get("filter");
+  const warehouseFilter = searchParams.get("warehouse") === "PRM" || searchParams.get("warehouse") === "REALE"
+    ? searchParams.get("warehouse") as "PRM" | "REALE"
+    : null;
 
   const [items, setItems] = useState<ItemRow[]>([]);
   const [shelves, setShelves] = useState<Record<string, { PRM: ShelfEntry; REALE: ShelfEntry }>>({});
+  const [liveWarehouses, setLiveWarehouses] = useState<Record<string, { PRM: boolean; REALE: boolean }>>({});
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -88,7 +100,7 @@ export default function ScaffaliPage() {
 
       const { data: liveData, error: eLive } = await supabase
         .from("excel_live")
-        .select("code,row_json")
+        .select("code,warehouse,row_json")
         .order("code");
       if (eLive) throw eLive;
 
@@ -106,9 +118,13 @@ export default function ScaffaliPage() {
 
       const itemMap = new Map((itemsData ?? []).map((item) => [item.code, item]));
       const liveItems = new Map<string, ItemRow>();
+      const nextLiveWarehouses: Record<string, { PRM: boolean; REALE: boolean }> = {};
       for (const rowRaw of liveData ?? []) {
         const row = rowRaw as LiveRow;
-        if (!row.code || liveItems.has(row.code)) continue;
+        if (!row.code) continue;
+        if (!nextLiveWarehouses[row.code]) nextLiveWarehouses[row.code] = { PRM: false, REALE: false };
+        nextLiveWarehouses[row.code][row.warehouse] = true;
+        if (liveItems.has(row.code)) continue;
         const item = itemMap.get(row.code);
         liveItems.set(row.code, {
           code: row.code,
@@ -116,13 +132,25 @@ export default function ScaffaliPage() {
           um: item?.um ?? getLiveItemUm(row),
         });
       }
+      for (const shelfRaw of shelfData ?? []) {
+        const shelfRow = shelfRaw as ShelfRow;
+        if (!shelfRow.code || liveItems.has(shelfRow.code)) continue;
+        const item = itemMap.get(shelfRow.code);
+        liveItems.set(shelfRow.code, {
+          code: shelfRow.code,
+          name: item?.name ?? shelfRow.code,
+          um: item?.um ?? null,
+        });
+      }
 
       setItems(Array.from(liveItems.values()).sort((a, b) => a.code.localeCompare(b.code)));
       setShelves(shelfMap);
+      setLiveWarehouses(nextLiveWarehouses);
     } catch (e: unknown) {
       setMsg("Errore caricamento: " + (e instanceof Error ? e.message : String(e)));
       setItems([]);
       setShelves({});
+      setLiveWarehouses({});
     } finally {
       setLoading(false);
     }
@@ -282,10 +310,17 @@ export default function ScaffaliPage() {
     const s = shelves[it.code];
     const prm = s?.PRM ?? emptyShelfEntry();
     const reale = s?.REALE ?? emptyShelfEntry();
-    const match =
-      !q.trim() ||
-      it.code.toLowerCase().includes(q.toLowerCase()) ||
-      (it.name ?? "").toLowerCase().includes(q.toLowerCase());
+    const live = liveWarehouses[it.code] ?? { PRM: false, REALE: false };
+    const targetWarehouses: Array<"PRM" | "REALE"> = warehouseFilter ? [warehouseFilter] : ["PRM", "REALE"];
+    const assignmentMatch =
+      assignmentFilter === "missing"
+        ? targetWarehouses.some((warehouse) => live[warehouse] && !hasAssignedPosition(s?.[warehouse]))
+        : assignmentFilter === "assigned"
+          ? targetWarehouses.some((warehouse) => live[warehouse] && hasAssignedPosition(s?.[warehouse]))
+          : assignmentFilter === "orphan"
+            ? targetWarehouses.some((warehouse) => !live[warehouse] && hasAssignedPosition(s?.[warehouse]))
+            : true;
+    const match = matchesMaterialSearch(q, it.code, it.name);
     const shelfMatch =
       !q.trim() ||
       prm.shelf.toLowerCase().includes(q.toLowerCase()) ||
@@ -296,7 +331,7 @@ export default function ScaffaliPage() {
       !q.trim() ||
       prm.barcode.toLowerCase().includes(q.toLowerCase()) ||
       reale.barcode.toLowerCase().includes(q.toLowerCase());
-    return match || shelfMatch || qrMatch;
+    return assignmentMatch && (match || shelfMatch || qrMatch);
   });
 
   if (adminLoading) {
@@ -349,6 +384,37 @@ export default function ScaffaliPage() {
         <div style={{ fontSize: 13, color: "#64748b", marginBottom: 12 }}>
           Assegna scaffale e luogo per ogni materiale e magazzino. Usa la ricerca testo o scansiona il QR per trovare rapidamente un materiale.
         </div>
+        {(assignmentFilter === "missing" || assignmentFilter === "assigned" || assignmentFilter === "orphan") && (
+          <div
+            style={{
+              marginBottom: 12,
+              padding: 12,
+              borderRadius: 10,
+              border: "1px solid #93c5fd",
+              background: "#eff6ff",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 900, color: "#1d4ed8" }}>
+                {assignmentFilter === "missing"
+                  ? "Posizioni senza assegnazione"
+                  : assignmentFilter === "orphan"
+                    ? "Scaffali senza riga Excel"
+                    : "Posizioni assegnate"}
+                {warehouseFilter ? ` · ${warehouseFilter}` : " · Tutti i magazzini"}
+              </div>
+              <div style={{ marginTop: 3, fontSize: 12, color: "#475569" }}>
+                {filtered.length} materiali corrispondenti
+              </div>
+            </div>
+            <a className="btn" href="/scaffali">Rimuovi filtro</a>
+          </div>
+        )}
         {isMobile && (
           <div style={{ fontSize: 12, padding: 10, background: "#e0f2fe", borderRadius: 8, marginBottom: 12, border: "1px solid #0ea5e9" }}>
             Clicca su un materiale per aprire il popup e inserire scaffale e luogo.

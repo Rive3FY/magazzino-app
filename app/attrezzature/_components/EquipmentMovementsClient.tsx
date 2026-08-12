@@ -21,6 +21,7 @@ import {
 } from "../../_lib/equipment";
 import { equipmentMovementSchema } from "../../_lib/validations";
 import { isRelationMissingOrNotExposedError } from "../../_lib/postgrestErrors";
+import { buildEquipmentPickupPdfSheet, downloadEquipmentPickupPdf } from "../../_lib/equipment-pickup-pdf";
 import AppModalFrame from "../../_components/AppModalFrame";
 import AppScanStatusModal from "../../_components/AppScanStatusModal";
 import ConfirmModal from "../../_components/ConfirmModal";
@@ -58,6 +59,7 @@ type GroupEditState = Record<
   {
     resolutionType: EquipmentResolutionType;
     closeNote: string;
+    selectedForClose: boolean;
   }
 >;
 
@@ -328,6 +330,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const [closeResolutionType, setCloseResolutionType] = useState<EquipmentResolutionType>("RETURN");
   const [closeNote, setCloseNote] = useState("");
   const [groupEditState, setGroupEditState] = useState<GroupEditState>({});
+  const [pickupPdfBusy, setPickupPdfBusy] = useState(false);
   /** Flusso guidato uscita: 1 = Magazzino, 2 = Attrezzatura, 3 = Dettagli e conferma */
   const [outboundStep, setOutboundStep] = useState<1 | 2 | 3>(1);
   /** Wizard prelievo in popup: quando true il flusso è dentro un modal */
@@ -852,6 +855,19 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       return true;
     });
   }, [openHistory]);
+
+  const movementGroupProgress = useMemo(() => {
+    const progress = new Map<string, { total: number; closed: number; open: number }>();
+    for (const row of history) {
+      if (!row.movement_group_id) continue;
+      const current = progress.get(row.movement_group_id) ?? { total: 0, closed: 0, open: 0 };
+      current.total += 1;
+      if (getMovementStatus(row) === "CLOSED") current.closed += 1;
+      else current.open += 1;
+      progress.set(row.movement_group_id, current);
+    }
+    return progress;
+  }, [history]);
 
   const openMovements = useMemo(
     () => uniqueOpenRows.filter((row) => getMovementStatus(row) === "OPEN"),
@@ -1693,6 +1709,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       initState[movement.id] = {
         resolutionType: resolutionTypeForClosingForm(movement),
         closeNote: movement.close_note ?? "",
+        selectedForClose: false,
       };
     }
     setGroupEditState(initState);
@@ -1701,9 +1718,19 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
   async function confirmClose() {
     if (!closing) return;
-    const targetRows = closingGroup.length > 1 && closing.movement_group_id ? closingGroup : [closing];
+    const isGroup = closingGroup.length > 1 && !!closing.movement_group_id;
+    const targetRows = isGroup
+      ? closingGroup.filter(
+          (row) => getMovementStatus(row) === "OPEN" && groupEditState[row.id]?.selectedForClose
+        )
+      : [closing];
 
-    if (targetRows.some((row) => getMovementStatus(row) === "OPEN" && !canEditRow(row))) {
+    if (isGroup && targetRows.length === 0) {
+      setMsg("Seleziona almeno un'attrezzatura da far rientrare.");
+      return;
+    }
+
+    if (targetRows.some((row) => !canEditRow(row))) {
       setMsg("Solo il creatore del movimento o l'admin può chiudere questa uscita.");
       return;
     }
@@ -1716,8 +1743,8 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       let closedMaintenance = false;
       for (const row of targetRows) {
         if (getMovementStatus(row) === "CLOSED") continue;
-        const resolutionType = targetRows.length > 1 ? groupEditState[row.id]?.resolutionType : closeResolutionType;
-        const note = targetRows.length > 1 ? groupEditState[row.id]?.closeNote : closeNote;
+        const resolutionType = isGroup ? groupEditState[row.id]?.resolutionType : closeResolutionType;
+        const note = isGroup ? groupEditState[row.id]?.closeNote : closeNote;
 
         if (!resolutionType) {
           setMsg("Seleziona l'esito finale prima di confermare la chiusura.");
@@ -1740,7 +1767,18 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         if (resolutionType === "MAINTENANCE") closedMaintenance = true;
       }
 
-      toast.success(targetRows.length > 1 ? "Gruppo chiuso" : "Movimento chiuso");
+      const remainingOpen = isGroup
+        ? closingGroup.filter(
+            (row) => getMovementStatus(row) === "OPEN" && !targetRows.some((target) => target.id === row.id)
+          ).length
+        : 0;
+      toast.success(
+        isGroup
+          ? remainingOpen > 0
+            ? `${targetRows.length} rientrate · ${remainingOpen} ancora fuori`
+            : "Tutte le attrezzature del gruppo sono rientrate"
+          : "Movimento chiuso"
+      );
       if (closedMaintenance) notifyEquipmentMaintenance(area);
       notifyEquipmentSync(area, "movements-close");
       await loadData();
@@ -1756,6 +1794,114 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function downloadClosingPickupPdf() {
+    if (!closing || pickupPdfBusy) return;
+    const movementRows = closingGroup.length > 0 ? closingGroup : [closing];
+    setPickupPdfBusy(true);
+    setMsg(null);
+    try {
+      const sheet = buildEquipmentPickupPdfSheet(movementRows, assets);
+      await downloadEquipmentPickupPdf(sheet);
+      toast.success("Registro PDF scaricato");
+    } catch (error) {
+      console.error("equipment pickup PDF error:", error);
+      setMsg("Download registro PDF non riuscito: " + describeError(error));
+    } finally {
+      setPickupPdfBusy(false);
+    }
+  }
+
+  function renderClosingGroupRows(groupRows: EquipmentMovementRow[], selectable: boolean) {
+    return groupRows.map((row) => {
+      const asset = assetMap.get(row.equipment_id);
+      const rowOpen = getMovementStatus(row) === "OPEN";
+      const state = groupEditState[row.id] ?? {
+        resolutionType: "RETURN" as EquipmentResolutionType,
+        closeNote: "",
+        selectedForClose: false,
+      };
+
+      return (
+        <tr key={row.id}>
+          {selectable && (
+            <td>
+              <input
+                type="checkbox"
+                aria-label={`Seleziona ${asset?.serial_number || asset?.asset_code || row.equipment_id} per il rientro`}
+                checked={state.selectedForClose}
+                onChange={(event) =>
+                  setGroupEditState((prev) => ({
+                    ...prev,
+                    [row.id]: {
+                      ...state,
+                      selectedForClose: event.target.checked,
+                    },
+                  }))
+                }
+                disabled={!canEditRow(row)}
+                style={{ width: 20, height: 20 }}
+              />
+            </td>
+          )}
+          <td style={{ fontWeight: 900 }}>{asset?.serial_number || asset?.asset_code || row.equipment_id}</td>
+          <td>{asset?.name || String(row.details_json?.asset_name ?? "").trim() || "—"}</td>
+          <td>
+            <div style={{ fontWeight: 700 }}>{rowOpen ? "Ancora fuori" : "Rientrata"}</div>
+            {!rowOpen && row.closed_at && (
+              <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>{fmtDateTime(row.closed_at)}</div>
+            )}
+          </td>
+          <td>
+            {rowOpen ? (
+              <select
+                className="input"
+                value={state.resolutionType}
+                onChange={(event) =>
+                  setGroupEditState((prev) => ({
+                    ...prev,
+                    [row.id]: {
+                      ...state,
+                      resolutionType: event.target.value as EquipmentResolutionType,
+                    },
+                  }))
+                }
+                disabled={!canEditRow(row) || !state.selectedForClose}
+              >
+                {EQUIPMENT_RESOLUTION_TYPE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>{EQUIPMENT_RESOLUTION_LABELS[option]}</option>
+                ))}
+              </select>
+            ) : (
+              <span style={{ fontWeight: 700 }}>
+                {row.resolution_type ? EQUIPMENT_RESOLUTION_LABELS[row.resolution_type] : "—"}
+              </span>
+            )}
+          </td>
+          <td>
+            {rowOpen ? (
+              <ClearableInput
+                value={state.closeNote}
+                onChange={(value) =>
+                  setGroupEditState((prev) => ({
+                    ...prev,
+                    [row.id]: {
+                      ...state,
+                      closeNote: value,
+                    },
+                  }))
+                }
+                placeholder="Nota chiusura"
+                disabled={!canEditRow(row) || !state.selectedForClose}
+              />
+            ) : (
+              row.close_note || "—"
+            )}
+          </td>
+        </tr>
+      );
+    });
   }
 
   const areaLabel = EQUIPMENT_AREA_LABELS[area];
@@ -2823,11 +2969,26 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                       </td>
                       <td><span style={equipmentMovementPillStyle("OUT")}>{EQUIPMENT_MOVEMENT_LABELS.OUT}</span></td>
                       <td style={{ fontWeight: 900 }}>
-                        {row.movement_group_id
-                          ? `Prelievo multiplo (${openHistory.filter((m) => m.movement_group_id === row.movement_group_id).length} attrezzature)`
-                          : asset
-                            ? `${asset.serial_number || asset.asset_code} - ${asset.name}`
-                            : row.equipment_id}
+                        {row.movement_group_id ? (
+                          (() => {
+                            const progress = movementGroupProgress.get(row.movement_group_id);
+                            const total =
+                              progress?.total ??
+                              openHistory.filter((movement) => movement.movement_group_id === row.movement_group_id).length;
+                            return (
+                              <>
+                                Prelievo multiplo ({total} attrezzature)
+                                <div style={{ marginTop: 4, fontSize: 12, fontWeight: 700, color: "#64748b" }}>
+                                  {progress?.closed ?? 0} rientrate · {progress?.open ?? total} ancora fuori
+                                </div>
+                              </>
+                            );
+                          })()
+                        ) : asset ? (
+                          `${asset.serial_number || asset.asset_code} - ${asset.name}`
+                        ) : (
+                          row.equipment_id
+                        )}
                       </td>
                       <td>{asset?.warehouse || "—"}</td>
                       <td>{row.destination || "—"}</td>
@@ -2972,12 +3133,20 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       {closeOpen && closing && (
         <AppModalFrame
           open
-          title={closingGroup.length > 1 ? "Dettaglio gruppo / chiusura" : "Dettaglio movimento / chiusura"}
+          title={closingGroup.length > 1 ? "Dettaglio gruppo / rientro progressivo" : "Dettaglio movimento / chiusura"}
           subtitle={`Area ${areaLabel}`}
           onClose={closeModal}
           width="min(1100px, 100%)"
           headerRight={
             <div style={{ display: "flex", gap: 8 }}>
+              <button
+                className="btn btnPrimary"
+                type="button"
+                disabled={pickupPdfBusy}
+                onClick={downloadClosingPickupPdf}
+              >
+                {pickupPdfBusy ? "Generazione PDF..." : "Scarica registro PDF"}
+              </button>
               {isAdmin && (
                 <button
                   className="btn"
@@ -3112,92 +3281,102 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                     background: "rgba(59,130,246,0.06)",
                   }}
                 >
-                  <div style={{ fontWeight: 900, marginBottom: 10 }}>Dettaglio gruppo</div>
+                  <div style={{ fontWeight: 900, marginBottom: 10 }}>
+                    Dettaglio gruppo · {closingGroup.filter((row) => getMovementStatus(row) === "CLOSED").length} rientrate ·{" "}
+                    {closingGroup.filter((row) => getMovementStatus(row) === "OPEN").length} ancora fuori
+                  </div>
                   <div style={{ fontSize: 13, color: "#475569" }}>
-                    Ogni riga nasce come uscita aperta. Compila l&apos;esito di ogni attrezzatura e poi conferma la chiusura del gruppo.
+                    Seleziona soltanto le attrezzature che rientrano adesso. Le altre resteranno aperte e potranno rientrare nei prossimi giorni.
                   </div>
                 </div>
 
-                <div style={{ marginTop: 14 }}>
+                <details
+                  open
+                  style={{ marginTop: 14, border: "1px solid #bfdbfe", borderRadius: 12, background: "#fff", overflow: "hidden" }}
+                >
+                  <summary
+                    style={{ padding: 14, cursor: "pointer", fontWeight: 900, color: "#1d4ed8", background: "#eff6ff" }}
+                  >
+                    Ancora fuori ({closingGroup.filter((row) => getMovementStatus(row) === "OPEN").length})
+                  </summary>
                   <div className="tableWrap">
                     <table className="table">
                       <thead>
                         <tr>
-                          <th>Seriale</th>
-                          <th>Nome</th>
+                          <th>Rientra ora</th>
+                          <th>Matricola / seriale</th>
+                          <th>Descrizione</th>
+                          <th>Stato</th>
                           <th>Esito finale</th>
                           <th>Nota chiusura</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {closingGroup.map((row) => {
-                          const asset = assetMap.get(row.equipment_id);
-                          const rowOpen = getMovementStatus(row) === "OPEN";
-                          const state = groupEditState[row.id] ?? {
-                            resolutionType: "RETURN" as EquipmentResolutionType,
-                            closeNote: "",
-                          };
-                          return (
-                            <tr key={row.id}>
-                              <td style={{ fontWeight: 900 }}>{asset?.serial_number || asset?.asset_code || row.equipment_id}</td>
-                              <td>{asset?.name || "—"}</td>
-                              <td>
-                                {rowOpen ? (
-                                  <select
-                                    className="input"
-                                    value={state.resolutionType}
-                                    onChange={(e) =>
-                                      setGroupEditState((prev) => ({
-                                        ...prev,
-                                        [row.id]: {
-                                          ...state,
-                                          resolutionType: e.target.value as EquipmentResolutionType,
-                                        },
-                                      }))
-                                    }
-                                    disabled={!canEditRow(row)}
-                                  >
-                                    {EQUIPMENT_RESOLUTION_TYPE_OPTIONS.map((option) => (
-                                      <option key={option} value={option}>{EQUIPMENT_RESOLUTION_LABELS[option]}</option>
-                                    ))}
-                                  </select>
-                                ) : (
-                                  <span style={{ fontWeight: 700 }}>
-                                    {row.resolution_type ? EQUIPMENT_RESOLUTION_LABELS[row.resolution_type] : "—"}
-                                  </span>
-                                )}
-                              </td>
-                              <td>
-                                <ClearableInput
-                                  value={state.closeNote}
-                                  onChange={(value) =>
-                                    setGroupEditState((prev) => ({
-                                      ...prev,
-                                      [row.id]: {
-                                        ...state,
-                                        closeNote: value,
-                                      },
-                                    }))
-                                  }
-                                  placeholder="Nota chiusura"
-                                  disabled={!canEditRow(row)}
-                                />
-                              </td>
-                            </tr>
-                          );
-                        })}
+                        {renderClosingGroupRows(
+                          closingGroup.filter((row) => getMovementStatus(row) === "OPEN"),
+                          true
+                        )}
                       </tbody>
                     </table>
                   </div>
-                </div>
+                </details>
+
+                <details
+                  style={{ marginTop: 12, border: "1px solid #bbf7d0", borderRadius: 12, background: "#fff", overflow: "hidden" }}
+                >
+                  <summary
+                    style={{ padding: 14, cursor: "pointer", fontWeight: 900, color: "#047857", background: "#f0fdf4" }}
+                  >
+                    Rientrate ({closingGroup.filter((row) => getMovementStatus(row) === "CLOSED").length})
+                  </summary>
+                  {closingGroup.some((row) => getMovementStatus(row) === "CLOSED") ? (
+                    <div className="tableWrap">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Matricola / seriale</th>
+                            <th>Descrizione</th>
+                            <th>Stato / data</th>
+                            <th>Esito finale</th>
+                            <th>Nota chiusura</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {renderClosingGroupRows(
+                            closingGroup.filter((row) => getMovementStatus(row) === "CLOSED"),
+                            false
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div style={{ padding: 14, color: "#64748b" }}>Nessuna attrezzatura è ancora rientrata.</div>
+                  )}
+                </details>
 
                 <div style={{ marginTop: 16, padding: 16, border: "1px solid #e2e8f0", borderRadius: 12, background: "#f8fafc" }}>
-                  <div style={{ fontWeight: 900, marginBottom: 10 }}>Chiusura gruppo</div>
+                  <div style={{ fontWeight: 900, marginBottom: 10 }}>Rientro progressivo</div>
                   <div style={{ fontSize: 13, marginBottom: 12, color: "#64748b" }}>
-                    Compila gli esiti nella tabella sopra e conferma la chiusura del gruppo.
+                    Verranno chiuse solo le righe selezionate. Il gruppo resterà aperto finché non saranno rientrate tutte le attrezzature.
                   </div>
-                  <button className="btn btnPrimary" type="button" onClick={confirmClose} disabled={saving}>
-                    {saving ? "Salvataggio..." : "Conferma chiusura gruppo"}
+                  <button
+                    className="btn btnPrimary"
+                    type="button"
+                    onClick={confirmClose}
+                    disabled={
+                      saving ||
+                      !closingGroup.some(
+                        (row) => getMovementStatus(row) === "OPEN" && groupEditState[row.id]?.selectedForClose
+                      )
+                    }
+                  >
+                    {saving
+                      ? "Salvataggio..."
+                      : `Conferma rientro selezionati (${
+                          closingGroup.filter(
+                            (row) => getMovementStatus(row) === "OPEN" && groupEditState[row.id]?.selectedForClose
+                          ).length
+                        })`}
                   </button>
                 </div>
               </>

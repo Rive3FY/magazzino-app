@@ -126,13 +126,6 @@ export default function HubLauncher() {
       </div>
 
       <div className="showOnMobileOnly" style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
-        <a
-          href="/scarica-app"
-          className="btn"
-          style={{ width: "100%", display: "block", textAlign: "center", textDecoration: "none", marginBottom: 10 }}
-        >
-          Scarica / aggiorna app Android
-        </a>
         <form action="/logout" method="POST" style={{ margin: 0 }}>
           <button type="submit" className="btn" style={{ width: "100%" }}>
             Esci

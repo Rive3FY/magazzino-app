@@ -22,8 +22,7 @@ export default function AppShell({ hasUser, displayName, displayBadge, children 
   const { isOpen } = useSidebar();
 
   const isScannerPage = pathname === "/materiali/scan-remoto" || pathname === "/attrezzature/scan-remoto";
-  const isRestylePreview = pathname === "/preview-restyling";
-  if (isScannerPage || isRestylePreview) {
+  if (isScannerPage) {
     return <>{children}</>;
   }
 

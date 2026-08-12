@@ -17,6 +17,7 @@ import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import AdminMaterialsOverviewModal, {
   type MaterialsDashboardStats,
 } from "./_components/AdminMaterialsOverviewModal";
+import MaterialSearchResultsModal from "./_components/MaterialSearchResultsModal";
 import type { MovementRow } from "../_lib/types";
 
 type Movement = {
@@ -173,6 +174,9 @@ export default function Home() {
   const [suggestions, setSuggestions] = useState<DbItem[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [suggestionsBox, setSuggestionsBox] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null);
+  const [searchResultsOpen, setSearchResultsOpen] = useState(false);
+  const [searchResultsQuery, setSearchResultsQuery] = useState("");
+  const [searchResultsLoading, setSearchResultsLoading] = useState(false);
 
   const [picked, setPicked] = useState<DbItem | null>(null);
   const [stock, setStock] = useState<StockBoth | null>(null);
@@ -319,6 +323,22 @@ export default function Home() {
       .slice(0, maxSuggestions);
     setSuggestions(next);
     return next;
+  }
+
+  async function showAllSearchResults() {
+    const query = search.trim();
+    if (!query) return;
+
+    setSearchResultsQuery(query);
+    setSearchResultsOpen(true);
+    setOpen(false);
+    setSearchResultsLoading(true);
+    try {
+      const results = await loadSuggestions(query);
+      setSuggestions(results);
+    } finally {
+      setSearchResultsLoading(false);
+    }
   }
 
   async function computeStockBoth(code: string) {
@@ -683,8 +703,6 @@ export default function Home() {
 
   const filteredSuggestions = suggestions;
 
-  const active = useMemo(() => filteredSuggestions[activeIndex], [filteredSuggestions, activeIndex]);
-
   const movementsToday = useMemo(() => {
     const today = new Date();
     return movements.filter((m) => isSameDay(new Date(m.created_at), today)).length;
@@ -797,6 +815,12 @@ export default function Home() {
                 }}
                 onFocus={() => setOpen(true)}
                 onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void showAllSearchResults();
+                    return;
+                  }
+
                   if (!open) return;
 
                   if (e.key === "ArrowDown") {
@@ -805,14 +829,6 @@ export default function Home() {
                   } else if (e.key === "ArrowUp") {
                     e.preventDefault();
                     setActiveIndex((i) => Math.max(i - 1, 0));
-                  } else if (e.key === "Enter") {
-                    e.preventDefault();
-                    if (active) {
-                      pickItem(active);
-                    } else {
-                      setOpen(true);
-                      void loadSuggestions(search);
-                    }
                   } else if (e.key === "Escape") {
                     setOpen(false);
                   }
@@ -886,6 +902,9 @@ export default function Home() {
                         </div>
                       </div>
                     ))}
+                    <div style={{ padding: "9px 12px", fontSize: 12, color: "#1d4ed8", background: "#eff6ff", borderTop: "1px solid #bfdbfe", fontWeight: 800 }}>
+                      Premi Invio per aprire tutti i risultati
+                    </div>
                     {filteredSuggestions.length >= MAX_MATERIAL_SUGGESTIONS && (
                       <div style={{ padding: "10px 12px", fontSize: 12, color: "#475569", background: "#f8fafc", borderTop: "1px solid #e2e8f0" }}>
                         Ci sono molti risultati: scrivi qualche carattere in più per affinare la ricerca.
@@ -1324,6 +1343,19 @@ export default function Home() {
           onRefresh={() => void loadAdminStats()}
         />
       )}
+
+      <MaterialSearchResultsModal
+        open={searchResultsOpen}
+        query={searchResultsQuery}
+        results={filteredSuggestions}
+        loading={searchResultsLoading}
+        maxResults={MAX_MATERIAL_SUGGESTIONS}
+        onClose={() => setSearchResultsOpen(false)}
+        onSelect={(item) => {
+          setSearchResultsOpen(false);
+          void pickItem(item);
+        }}
+      />
 
       {scanning && (
         <div

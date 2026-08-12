@@ -36,14 +36,18 @@ function normalizeMaterialSearchText(value: string) {
  */
 export function materialSearchProbeTerms(text: string) {
   const normalized = normalizeMaterialSearchText(text);
-  return Array.from(
-    new Set(
-      normalized
-        .split(/\s+/)
-        .filter((token) => token.length >= 3)
-        .map((token) => token.slice(0, 3))
-    )
-  );
+  const probes = normalized
+    .split(/\s+/)
+    .filter((token) => token.length >= 3)
+    .map((token) => token.slice(0, 3));
+
+  // Cerca le misure sia con virgola sia con punto: 22,8 ↔ 22.8.
+  for (const measurement of String(text ?? "").match(/\d+[.,]\d+/g) ?? []) {
+    probes.push(measurement.replace(".", ","));
+    probes.push(measurement.replace(",", "."));
+  }
+
+  return Array.from(new Set(probes));
 }
 
 /**

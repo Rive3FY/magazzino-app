@@ -4556,7 +4556,7 @@ function finalizeMaterialPickupSuccess() {
         </div>
 
         <div className="tableWrap" style={{ marginTop: 10 }}>
-          <table className="table" style={{ fontSize: 13, tableLayout: "fixed", minWidth: 1180 }}>
+          <table className="table" style={{ fontSize: 13, tableLayout: "fixed", minWidth: 760 }}>
             <thead>
               <tr>
                 {isAdmin && (
@@ -4573,27 +4573,22 @@ function finalizeMaterialPickupSuccess() {
                 <th style={{ width: 140 }}>Data</th>
                 <th style={{ width: 92 }}>Stato</th>
                 <th style={{ width: 92 }}>Tipo</th>
-                <th style={{ width: 190 }}>Codice</th>
-                <th style={{ width: 240 }}>Descrizione</th>
+                <th style={{ width: 330 }}>Materiale</th>
                 <th style={{ width: 90 }}>Mag.</th>
-                <th style={{ width: 74 }}>Q.tà</th>
-                <th style={{ width: 74 }}>Rientro</th>
-                <th style={{ width: 74 }}>Netta</th>
-                <th style={{ width: 220 }}>Note</th>
-                <th style={{ width: 150 }}>Inserito da</th>
+                <th style={{ width: 86 }}>Q.tà</th>
               </tr>
             </thead>
 
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={isAdmin ? 12 : 11} style={{ padding: 12, color: "#0f172a" }}>
+                  <td colSpan={isAdmin ? 7 : 6} style={{ padding: 12, color: "#0f172a" }}>
                     Caricamento…
                   </td>
                 </tr>
               ) : history.length === 0 ? (
                 <tr>
-                  <td colSpan={isAdmin ? 12 : 11} style={{ padding: 12, color: "#0f172a" }}>
+                  <td colSpan={isAdmin ? 7 : 6} style={{ padding: 12, color: "#0f172a" }}>
                     Nessun movimento.
                   </td>
                 </tr>
@@ -4607,18 +4602,11 @@ function finalizeMaterialPickupSuccess() {
                   const outAbs = isGroup
                     ? entry.rows.reduce((sum, row) => sum + Math.abs(n(row.qty)), 0)
                     : Math.abs(n(m.qty));
-                  const returnedQty = isGroup
-                    ? entry.rows.reduce((sum, row) => sum + (row.type === "OUT" ? n(row.returned_qty) : 0), 0)
-                    : (m.type === "OUT" ? n(m.returned_qty) : 0);
-                  const net = m.type === "OUT" ? Math.max(0, outAbs - returnedQty) : null;
                   const groupWarehouses = isGroup
                     ? Array.from(new Set(entry.rows.map((row) => row.warehouse).filter(Boolean)))
                     : [];
                   const rowIds = entry.rows.map((row) => row.id);
                   const allSelected = rowIds.length > 0 && rowIds.every((id) => selectedIds.has(id));
-                  const groupNote = isGroup
-                    ? Array.from(new Set(entry.rows.map((row) => (row.note ?? "").trim()).filter(Boolean))).join(" · ")
-                    : (m.note ?? "");
 
                   return (
                     <tr
@@ -4656,18 +4644,18 @@ function finalizeMaterialPickupSuccess() {
                         <span style={pillStyle(m.type)}>{m.type === "IN" ? "ENTRATA" : "USCITA"}</span>
                       </td>
 
-                      <td style={{ ...compactMovementCellStyle, fontWeight: 900 }}>
-                        <span style={compactMovementTextStyle} title={isGroup ? `Prelievo multiplo (${groupCount} articoli)` : m.code}>
-                          {isGroup ? `Prelievo multiplo (${groupCount} articoli)` : m.code}
-                        </span>
-                      </td>
                       <td style={compactMovementCellStyle}>
-                        <span
-                          style={compactMovementTextStyle}
-                          title={isGroup ? `${nameMap[m.code] ?? m.code} (+${groupCount - 1} altri)` : (nameMap[m.code] ?? "-")}
-                        >
-                          {isGroup ? `${nameMap[m.code] ?? m.code} (+${groupCount - 1} altri)` : (nameMap[m.code] ?? "-")}
-                        </span>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ ...compactMovementTextStyle, fontWeight: 900 }}>
+                            {isGroup ? `Prelievo multiplo (${groupCount} articoli)` : m.code}
+                          </div>
+                          <div
+                            style={{ ...compactMovementTextStyle, marginTop: 2, fontSize: 12, opacity: 0.72 }}
+                            title={isGroup ? `${nameMap[m.code] ?? m.code} (+${groupCount - 1} altri)` : (nameMap[m.code] ?? "-")}
+                          >
+                            {isGroup ? `${nameMap[m.code] ?? m.code} (+${groupCount - 1} altri)` : (nameMap[m.code] ?? "-")}
+                          </div>
+                        </div>
                       </td>
 
                       <td style={compactMovementCellStyle}>
@@ -4678,20 +4666,6 @@ function finalizeMaterialPickupSuccess() {
 
                       <td style={{ ...compactMovementCellStyle, fontWeight: 900 }}>
                         {`${m.type === "IN" ? "+" : "-"}${outAbs}`}
-                      </td>
-
-                      <td style={compactMovementCellStyle}>{m.type === "OUT" ? returnedQty : "-"}</td>
-                      <td style={{ ...compactMovementCellStyle, fontWeight: 900 }}>{m.type === "OUT" ? net : "-"}</td>
-
-                      <td style={compactMovementCellStyle}>
-                        <span style={compactMovementTextStyle} title={groupNote}>
-                          {groupNote}
-                        </span>
-                      </td>
-                      <td style={compactMovementCellStyle}>
-                        <span style={compactMovementTextStyle} title={m.created_by_name ?? "-"}>
-                          {m.created_by_name ?? "-"}
-                        </span>
                       </td>
                     </tr>
                   );

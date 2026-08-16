@@ -19,12 +19,13 @@ import {
   equipmentStatusStyle,
 } from "../../_lib/equipment";
 import { applyEquipmentMaintenanceReintegration } from "../../_lib/equipmentMaintenanceReintegration";
-import { isRelationMissingOrNotExposedError } from "../../_lib/postgrestErrors";
 import { buildEquipmentPickupPdfSheet, downloadEquipmentPickupPdf } from "../../_lib/equipment-pickup-pdf";
 import EquipmentStatusManager from "./EquipmentStatusManager";
 import AppScanStatusModal from "../../_components/AppScanStatusModal";
+import AppModalFrame from "../../_components/AppModalFrame";
 import ConfirmModal from "../../_components/ConfirmModal";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../../_lib/fastBarcodeScanner";
+import { matchesMaterialSearch } from "../../_lib/materialSearch";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentMovementRow, EquipmentStatus } from "../../_lib/types";
 
 type Props = {
@@ -39,27 +40,43 @@ type NfcCategoryTagRow = {
 
 const supabase = createClient();
 
-function BarcodeIcon() {
+function SearchIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <rect x="2" y="6" width="2" height="12" />
-      <rect x="6" y="6" width="1" height="12" />
-      <rect x="9" y="6" width="2" height="12" />
-      <rect x="13" y="6" width="1" height="12" />
-      <rect x="16" y="6" width="2" height="12" />
-      <rect x="20" y="6" width="2" height="12" />
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="8" />
+      <path d="m21 21-4.35-4.35" />
     </svg>
   );
 }
 
-function NfcIcon() {
+function QrIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="5" y="2" width="14" height="20" rx="2" />
-      <path d="M9 7h6" />
-      <path d="M9 11h6" />
-      <path d="M9 15h4" />
-      <path d="M12 6v12" />
+      <rect x="3" y="3" width="6" height="6" rx="1" />
+      <rect x="15" y="3" width="6" height="6" rx="1" />
+      <rect x="3" y="15" width="6" height="6" rx="1" />
+      <path d="M15 15h2v2h-2z" />
+      <path d="M19 15h2v6h-6v-2" />
+      <path d="M13 13h2" />
+      <path d="M13 19h2" />
+    </svg>
+  );
+}
+
+function StatusSemaforoIcon({ status }: { status: EquipmentStatus }) {
+  const color = status === "AVAILABLE" ? "#22c55e" : status === "MAINTENANCE" ? "#f59e0b" : "#ef4444";
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+      <circle cx="6" cy="6" r="5" fill={color} />
+    </svg>
+  );
+}
+
+function PlusMinusIcon({ open }: { open: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
+      <path d="M12 5v14" style={{ opacity: open ? 0 : 1, transition: "opacity .15s ease" }} />
+      <path d="M5 12h14" />
     </svg>
   );
 }
@@ -68,42 +85,6 @@ function SpinnerIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 1s linear infinite", transformOrigin: "center" }}>
       <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-    </svg>
-  );
-}
-
-function EquipmentStatusIcon({ status, size = 16 }: { status: EquipmentStatus; size?: number }) {
-  if (status === "AVAILABLE") {
-    return (
-      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <circle cx="8" cy="8" r="6" fill="#10b981" fillOpacity="0.14" stroke="#059669" strokeWidth="1.5" />
-        <path d="M5 8.2 7 10.2 11 6.2" stroke="#047857" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    );
-  }
-  if (status === "ASSIGNED") {
-    return (
-      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <circle cx="8" cy="8" r="6" fill="#3b82f6" fillOpacity="0.14" stroke="#2563eb" strokeWidth="1.5" />
-        <path d="M8 4.5v7" stroke="#1d4ed8" strokeWidth="1.8" strokeLinecap="round" />
-        <path d="M5.5 8h5" stroke="#1d4ed8" strokeWidth="1.8" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (status === "MAINTENANCE") {
-    return (
-      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <circle cx="8" cy="8" r="6" fill="#f59e0b" fillOpacity="0.16" stroke="#d97706" strokeWidth="1.5" />
-        <path d="M6 10.5 10.5 6" stroke="#b45309" strokeWidth="1.8" strokeLinecap="round" />
-        <path d="M9.7 5.9a1.1 1.1 0 1 1 1.55-1.55l.35.35a1.1 1.1 0 0 1-1.55 1.55l-.35-.35Z" fill="#b45309" />
-      </svg>
-    );
-  }
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <circle cx="8" cy="8" r="6" fill="#ef4444" fillOpacity="0.14" stroke="#dc2626" strokeWidth="1.5" />
-      <path d="M5.5 5.5 10.5 10.5" stroke="#b91c1c" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M10.5 5.5 5.5 10.5" stroke="#b91c1c" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
@@ -226,17 +207,16 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   const [loading, setLoading] = useState(true);
   const [quickSearch, setQuickSearch] = useState("");
   const [quickSelectedId, setQuickSelectedId] = useState("");
-  const [quickCategoryFilter, setQuickCategoryFilter] = useState<string>("");
-  const [quickGroupFilter, setQuickGroupFilter] = useState<string>("");
-  const [categoryGroups, setCategoryGroups] = useState<{ group_name: string; category: string }[]>([]);
   const [nfcCategoryTags, setNfcCategoryTags] = useState<NfcCategoryTagRow[]>([]);
   const [quickWarehouseFilter, setQuickWarehouseFilter] = useState<string>("ALL");
   const [quickOpen, setQuickOpen] = useState(false);
-  const [quickPickOpen, setQuickPickOpen] = useState(false);
   const [quickActiveIndex, setQuickActiveIndex] = useState(0);
+  const [categoryResultsName, setCategoryResultsName] = useState<string | null>(null);
+  const [suggestionsBox, setSuggestionsBox] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [historyFrom, setHistoryFrom] = useState("");
   const [historyTo, setHistoryTo] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [cameraScanning, setCameraScanning] = useState(false);
   const [searchByNfcScanning, setSearchByNfcScanning] = useState(false);
   const [isNfcSupported, setIsNfcSupported] = useState(false);
@@ -247,8 +227,19 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<FastBarcodeReader | null>(null);
   const quickBoxRef = useRef<HTMLDivElement | null>(null);
-  const quickPickBoxRef = useRef<HTMLDivElement | null>(null);
-  const categoryGroupsTableMissingRef = useRef(false);
+
+  const updateSuggestionsBox = useCallback(() => {
+    if (!quickBoxRef.current || typeof window === "undefined") return;
+    const rect = quickBoxRef.current.getBoundingClientRect();
+    const top = rect.bottom + 6;
+    const maxHeight = Math.max(160, Math.min(280, window.innerHeight - top - 12));
+    setSuggestionsBox({
+      left: rect.left,
+      top,
+      width: rect.width,
+      maxHeight,
+    });
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;
@@ -266,11 +257,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     setLoading(true);
     setMsg(null);
 
-    const categoryGroupsPromise = categoryGroupsTableMissingRef.current
-      ? Promise.resolve({ data: [], error: { message: "skip" } })
-      : supabase.from("equipment_category_groups").select("group_name,category").eq("equipment_area", area).order("group_name").order("category");
-
-    const [assetsRes, historyRes, categoryGroupsRes, nfcCategoryTagsRes] = await Promise.all([
+    const [assetsRes, historyRes, nfcCategoryTagsRes] = await Promise.all([
       supabase
         .from("equipment_assets")
         .select("*")
@@ -282,7 +269,6 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
         .eq("equipment_area", area)
         .order("created_at", { ascending: false })
         .limit(300),
-      categoryGroupsPromise,
       supabase.from("equipment_nfc_category_tags").select("nfc_tag_id,category").eq("equipment_area", area),
     ]);
 
@@ -300,20 +286,6 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
       setMsg((prev) => prev ?? "Errore caricamento storico movimenti.");
     } else {
       setHistory((historyRes.data ?? []) as EquipmentMovementRow[]);
-    }
-
-    if (categoryGroupsRes.error) {
-      const err = categoryGroupsRes.error;
-      if (String((err as { message?: string }).message) === "skip") {
-        setCategoryGroups([]);
-      } else if (isRelationMissingOrNotExposedError(err)) {
-        categoryGroupsTableMissingRef.current = true;
-        setCategoryGroups([]);
-      } else {
-        console.error("equipment_category_groups:", err);
-      }
-    } else {
-      setCategoryGroups((categoryGroupsRes.data ?? []) as { group_name: string; category: string }[]);
     }
 
     if (nfcCategoryTagsRes.error) {
@@ -434,51 +406,6 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     setIsIOS(/iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
   }, []);
 
-  const quickCategories = useMemo(() => {
-    const set = new Set<string>();
-    for (const row of rows) {
-      const c = (row.category ?? "").trim();
-      if (c) set.add(c);
-    }
-    return Array.from(set).sort();
-  }, [rows]);
-
-  const quickGroupedCategories = useMemo(() => {
-    const map = new Map<string, string[]>();
-    for (const row of categoryGroups) {
-      const grp = (row.group_name ?? "").trim();
-      const cat = (row.category ?? "").trim();
-      if (!grp || !cat) continue;
-      const list = map.get(grp) ?? [];
-      list.push(cat);
-      map.set(grp, list);
-    }
-    for (const [, list] of map) list.sort();
-    return map;
-  }, [categoryGroups]);
-
-  const quickGroupNames = useMemo(() => Array.from(new Set(quickGroupedCategories.keys())).sort(), [quickGroupedCategories]);
-
-  const quickCategoryToGroup = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const row of categoryGroups) {
-      const grp = (row.group_name ?? "").trim();
-      const cat = (row.category ?? "").trim();
-      if (!grp || !cat) continue;
-      map.set(cat, grp);
-    }
-    return map;
-  }, [categoryGroups]);
-
-  const quickUngroupedCategories = useMemo(() => {
-    const inGroup = new Set<string>();
-    for (const row of categoryGroups) {
-      const cat = (row.category ?? "").trim();
-      if (cat) inGroup.add(cat);
-    }
-    return quickCategories.filter((c) => !inGroup.has(c));
-  }, [quickCategories, categoryGroups]);
-
   const quickWarehouses = useMemo(() => {
     const set = new Set<string>();
     for (const row of rows) {
@@ -489,11 +416,9 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
   }, [rows]);
 
   const filteredRows = useMemo(() => {
-    let base = rows;
-    if (quickCategoryFilter) base = base.filter((row) => (row.category ?? "").trim() === quickCategoryFilter);
-    if (quickWarehouseFilter !== "ALL") base = base.filter((row) => (row.warehouse ?? "").trim() === quickWarehouseFilter);
-    return base;
-  }, [rows, quickCategoryFilter, quickWarehouseFilter]);
+    if (quickWarehouseFilter === "ALL") return rows;
+    return rows.filter((row) => (row.warehouse ?? "").trim() === quickWarehouseFilter);
+  }, [rows, quickWarehouseFilter]);
 
   const stats = useMemo(() => {
     return EQUIPMENT_STATUS_OPTIONS.reduce<Record<EquipmentStatus, number>>(
@@ -512,24 +437,47 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
 
   const quickMatches = useMemo(() => {
     const base = filteredRows;
-    const search = quickSearch.trim().toLowerCase();
+    const search = quickSearch.trim();
     if (!search) return base;
-    return base
-      .filter((row) =>
-        [
-          row.serial_number,
-          row.name,
-          row.category,
-          row.barcode,
-          row.nfc_tag_id,
-          row.assigned_to_name,
-          row.assigned_to_badge,
-        ]
-          .filter(Boolean)
-          .some((value) => String(value).toLowerCase().includes(search))
+    return base.filter((row) =>
+      matchesMaterialSearch(
+        search,
+        row.serial_number,
+        row.asset_code,
+        row.name,
+        row.category,
+        row.assigned_to_name,
+        row.assigned_to_badge
       )
-      .slice(0, 12);
+    );
   }, [quickSearch, filteredRows]);
+
+  const categorySuggestions = useMemo(() => {
+    const search = quickSearch.trim();
+    if (!search) return [] as Array<{ category: string; count: number }>;
+    const counts = new Map<string, number>();
+    for (const row of filteredRows) {
+      const category = (row.category ?? "").trim();
+      if (!category || !matchesMaterialSearch(search, category)) continue;
+      counts.set(category, (counts.get(category) ?? 0) + 1);
+    }
+    const query = search.toLowerCase();
+    return Array.from(counts.entries())
+      .sort((a, b) => {
+        const aExact = a[0].toLowerCase() === query ? 0 : 1;
+        const bExact = b[0].toLowerCase() === query ? 0 : 1;
+        if (aExact !== bExact) return aExact - bExact;
+        return a[0].localeCompare(b[0], "it");
+      })
+      .map(([category, count]) => ({ category, count }));
+  }, [quickSearch, filteredRows]);
+
+  const quickSuggestions = useMemo(() => {
+    return [
+      ...categorySuggestions.map((item) => ({ kind: "category" as const, ...item })),
+      ...quickMatches.map((row) => ({ kind: "asset" as const, row })),
+    ];
+  }, [categorySuggestions, quickMatches]);
 
   const quickSelected = useMemo(() => {
     if (!quickSelectedId) return null;
@@ -538,7 +486,11 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
 
   const filteredAssetIds = useMemo(() => new Set(filteredRows.map((r) => r.id)), [filteredRows]);
 
-  const quickActive = useMemo(() => quickMatches[quickActiveIndex] ?? null, [quickMatches, quickActiveIndex]);
+  const quickActive = useMemo(() => quickSuggestions[quickActiveIndex] ?? null, [quickSuggestions, quickActiveIndex]);
+  const categoryResultsRows = useMemo(() => {
+    if (!categoryResultsName) return [];
+    return filteredRows.filter((row) => (row.category ?? "").trim() === categoryResultsName);
+  }, [categoryResultsName, filteredRows]);
   const historyGroupCountMap = useMemo(() => {
     const counts = new Map<string, number>();
     for (const row of history) {
@@ -660,12 +612,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
               .join(" · ") || "Nessun dettaglio aggiuntivo"}
           </div>
           <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
-            {[
-              asset?.barcode ? `Barcode ${asset.barcode}` : null,
-              asset?.nfc_tag_id ? `NFC ${asset.nfc_tag_id}` : null,
-            ]
-              .filter(Boolean)
-              .join(" · ") || "Nessun identificativo"}
+            Seriale: {asset?.serial_number || asset?.asset_code || fallbackCode || "—"}
           </div>
           <div
             style={{
@@ -733,30 +680,18 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     setDeleteConfirm(null);
   }
 
-  function applyQuickCategoryTag(category: string) {
+  function openCategoryResults(category: string) {
     const normalizedCategory = category.trim();
     if (!normalizedCategory) return;
-    const linkedGroup = quickCategoryToGroup.get(normalizedCategory) ?? "";
-    const nextGroup = linkedGroup || (quickUngroupedCategories.includes(normalizedCategory) ? "__OTHER__" : "");
-    const candidates = rows.filter((row) => {
-      if ((row.category ?? "").trim() !== normalizedCategory) return false;
-      if (quickWarehouseFilter !== "ALL" && (row.warehouse ?? "").trim() !== quickWarehouseFilter) return false;
-      return true;
-    });
-    setQuickGroupFilter(nextGroup);
-    setQuickCategoryFilter(normalizedCategory);
-    setQuickSelectedId(candidates.length === 1 ? candidates[0].id : "");
-    setQuickSearch(candidates.length === 1 ? `${candidates[0].serial_number || candidates[0].asset_code} - ${candidates[0].name}` : normalizedCategory);
+    setCategoryResultsName(normalizedCategory);
+    setQuickSearch(normalizedCategory);
+    setQuickSelectedId("");
     setQuickOpen(false);
-    if (candidates.length === 0) {
-      setMsg(`Tag NFC gruppo/sottogruppo rilevato: ${normalizedCategory}. Nessuna attrezzatura trovata con i filtri correnti.`);
-      return;
-    }
-    if (candidates.length === 1) {
-      setMsg(`Tag NFC gruppo/sottogruppo rilevato: ${normalizedCategory}. Attrezzatura selezionata automaticamente.`);
-      return;
-    }
-    setMsg(`Tag NFC gruppo/sottogruppo rilevato: ${normalizedCategory}. ${candidates.length} attrezzature trovate, selezionane una.`);
+    setMsg(null);
+  }
+
+  function applyQuickCategoryTag(category: string) {
+    openCategoryResults(category);
   }
 
   function applyQuickResult(value: string, mode: "barcode" | "nfc") {
@@ -787,14 +722,13 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     }
     setQuickSelectedId("");
     setQuickOpen(false);
-    setMsg(mode === "barcode" ? "Nessuna attrezzatura trovata per questo barcode." : "Nessuna attrezzatura o sottogruppo associato a questo tag NFC.");
+      setMsg(mode === "barcode" ? "Nessuna attrezzatura trovata per questo QR." : "Nessuna attrezzatura o sottogruppo associato a questo tag NFC.");
   }
 
   function pickQuickMatch(row: EquipmentAssetRow) {
     setQuickSelectedId(row.id);
     setQuickSearch(`${row.serial_number || row.asset_code} - ${row.name}`);
     setQuickOpen(false);
-    setQuickPickOpen(false);
     setMsg(null);
   }
 
@@ -880,11 +814,24 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     function onDocMouseDown(e: MouseEvent) {
       const target = e.target as Node;
       if (quickBoxRef.current && !quickBoxRef.current.contains(target)) setQuickOpen(false);
-      if (quickPickBoxRef.current && !quickPickBoxRef.current.contains(target)) setQuickPickOpen(false);
     }
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, []);
+
+  useEffect(() => {
+    if (!quickOpen || !quickSearch.trim()) {
+      setSuggestionsBox(null);
+      return;
+    }
+    updateSuggestionsBox();
+    window.addEventListener("resize", updateSuggestionsBox);
+    window.addEventListener("scroll", updateSuggestionsBox, true);
+    return () => {
+      window.removeEventListener("resize", updateSuggestionsBox);
+      window.removeEventListener("scroll", updateSuggestionsBox, true);
+    };
+  }, [quickOpen, quickSearch, quickSuggestions.length, updateSuggestionsBox]);
 
   const areaLabel = EQUIPMENT_AREA_LABELS[area];
 
@@ -931,62 +878,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
             ))}
           </div>
 
-          <div className="equipmentFilterGrid mobileGrid1">
-            {quickGroupNames.length > 0 || quickUngroupedCategories.length > 0 ? (
-              <>
-                <div style={{ minWidth: 0 }}>
-                  <label className="label" htmlFor={`equipment-quick-group-${area}`}>Gruppo categoria</label>
-                  <ClearableSelect
-                    id={`equipment-quick-group-${area}`}
-                    value={quickGroupFilter}
-                    onChange={(v) => {
-                      setQuickGroupFilter(v);
-                      setQuickCategoryFilter("");
-                    }}
-                    clearValue=""
-                  >
-                    <option value="">Tutte</option>
-                    {quickGroupNames.map((gn) => (
-                      <option key={gn} value={gn}>{gn}</option>
-                    ))}
-                    {quickUngroupedCategories.length > 0 && (
-                      <option value="__OTHER__">Altre</option>
-                    )}
-                  </ClearableSelect>
-                </div>
-                {quickGroupFilter && (
-                  <div style={{ minWidth: 0 }}>
-                    <label className="label" htmlFor={`equipment-quick-category-${area}`}>Categoria</label>
-                    <ClearableSelect
-                      id={`equipment-quick-category-${area}`}
-                      value={quickCategoryFilter}
-                      onChange={setQuickCategoryFilter}
-                      clearValue=""
-                    >
-                      <option value="">Tutte</option>
-                      {(quickGroupFilter === "__OTHER__" ? quickUngroupedCategories : (quickGroupedCategories.get(quickGroupFilter) ?? [])).map((c) => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </ClearableSelect>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div style={{ minWidth: 0 }}>
-                <label className="label" htmlFor={`equipment-quick-category-${area}`}>Categoria</label>
-                <ClearableSelect
-                  id={`equipment-quick-category-${area}`}
-                  value={quickCategoryFilter}
-                  onChange={setQuickCategoryFilter}
-                  clearValue=""
-                >
-                  <option value="">Tutte</option>
-                  {quickCategories.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </ClearableSelect>
-              </div>
-            )}
+          <div className="equipmentFilterGrid mobileGrid1" style={{ gridTemplateColumns: "minmax(140px, 180px) minmax(0, 1fr)" }}>
             <div style={{ minWidth: 0 }}>
               <label className="label" htmlFor={`equipment-quick-warehouse-${area}`}>Magazzino</label>
               <ClearableSelect
@@ -1003,200 +895,127 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
               </ClearableSelect>
             </div>
             <div ref={quickBoxRef} style={{ minWidth: 0, position: "relative" }}>
-              <label className="label" htmlFor={`equipment-quick-search-${area}`}>
-                Controllo veloce
-              </label>
-              <ClearableInput
-                id={`equipment-quick-search-${area}`}
-                value={quickSearch}
-                placeholder={`Cerca per seriale, nome, barcode o NFC`}
-                onChange={(v) => {
-                  setQuickSearch(v);
-                  setQuickSelectedId("");
-                  setQuickOpen(v.length > 0);
-                }}
-                onFocus={() => setQuickOpen(true)}
-                onKeyDown={(e) => {
-                  if (!quickOpen) return;
-                  if (e.key === "ArrowDown") {
-                    e.preventDefault();
-                    setQuickActiveIndex((i) => Math.min(i + 1, quickMatches.length - 1));
-                  } else if (e.key === "ArrowUp") {
-                    e.preventDefault();
-                    setQuickActiveIndex((i) => Math.max(i - 1, 0));
-                  } else if (e.key === "Enter") {
-                    e.preventDefault();
-                    setQuickOpen(false);
-                  } else if (e.key === "Escape") {
-                    setQuickOpen(false);
-                  }
-                }}
-                style={{ width: "100%" }}
-              />
-              {quickOpen && quickSearch.trim() && (
-                <div
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    right: 0,
-                    top: "100%",
-                    marginTop: 6,
-                    background: "#fff",
-                    border: "1px solid rgba(15,23,42,0.12)",
-                    borderRadius: 12,
-                    boxShadow: "0 16px 40px rgba(0,0,0,0.12)",
-                    overflow: "hidden",
-                    zIndex: 50,
-                  }}
-                >
-                  {quickMatches.length === 0 ? (
-                    <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
-                  ) : (
-                    quickMatches.map((row, idx) => (
-                      <div
-                        key={row.id}
-                        onMouseEnter={() => setQuickActiveIndex(idx)}
-                        onMouseDown={(ev) => {
-                          ev.preventDefault();
-                          pickQuickMatch(row);
-                        }}
-                        style={{
-                          padding: "10px 12px",
-                          cursor: "pointer",
-                          background: idx === quickActiveIndex ? "#eef2ff" : "white",
-                          borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
-                        }}
-                      >
-                        <div style={{ fontWeight: 900, color: "#0f172a" }}>{row.serial_number || row.asset_code}</div>
-                        <div style={{ fontSize: 12, color: "#334155" }}>{row.name}</div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
-            <div style={{ minWidth: 0, display: "flex", alignItems: "end", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn" onClick={startCameraScanForQuickSearch} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <BarcodeIcon />
-                Barcode / QR
-              </button>
-              <button className="btn" onClick={searchByNfc} disabled={searchByNfcScanning} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <NfcIcon />
-                {searchByNfcScanning ? "NFC..." : "NFC"}
-              </button>
-            </div>
-            <div ref={quickPickBoxRef} style={{ minWidth: 0, position: "relative" }}>
-              <label className="label" htmlFor={`equipment-quick-pick-${area}`}>
-                Attrezzatura
+              <label className="label" htmlFor={`equipment-quick-search-${area}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <SearchIcon />
+                Ricerca manuale
               </label>
               <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                <ClearableInput
+                  id={`equipment-quick-search-${area}`}
+                  value={quickSearch}
+                  placeholder="Seriale, nome o categoria..."
+                  onChange={(v) => {
+                    setQuickSearch(v);
+                    setQuickSelectedId("");
+                    setQuickOpen(v.length > 0);
+                    setMsg(null);
+                  }}
+                  onFocus={() => setQuickOpen(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      if (quickActive?.kind === "category") openCategoryResults(quickActive.category);
+                      else if (quickActive?.kind === "asset") pickQuickMatch(quickActive.row);
+                      return;
+                    }
+                    if (!quickOpen) return;
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      setQuickActiveIndex((i) => Math.min(i + 1, quickSuggestions.length - 1));
+                    } else if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      setQuickActiveIndex((i) => Math.max(i - 1, 0));
+                    } else if (e.key === "Escape") {
+                      setQuickOpen(false);
+                    }
+                  }}
+                  style={{ width: "100%" }}
+                />
+                </div>
                 <button
-                  id={`equipment-quick-pick-${area}`}
                   type="button"
-                  className="input"
-                  aria-haspopup="listbox"
-                  aria-expanded={quickPickOpen}
-                  onClick={() => setQuickPickOpen((v) => !v)}
-                  style={{
-                    width: "100%",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 10,
-                    textAlign: "left",
-                    cursor: "pointer",
-                  }}
+                  className="btn btnPrimary"
+                  onClick={() => void startCameraScanForQuickSearch()}
+                  title="Scansiona QR attrezzatura"
+                  aria-label="Scansiona QR attrezzatura"
+                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 46, paddingInline: 12 }}
                 >
-                  {quickSelected ? (
-                    <>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
-                        <EquipmentStatusIcon status={quickSelected.status} />
-                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {(quickSelected.serial_number || quickSelected.asset_code) + " - " + quickSelected.name}
-                        </span>
-                      </span>
-                      <span style={{ fontSize: 12, color: "#64748b", whiteSpace: "nowrap" }}>
-                        {EQUIPMENT_STATUS_LABELS[quickSelected.status]}
-                      </span>
-                    </>
-                  ) : (
-                    <span style={{ color: "#64748b" }}>Seleziona risultato</span>
-                  )}
-                  <span style={{ color: "#64748b", flexShrink: 0 }}>{quickPickOpen ? "▲" : "▼"}</span>
+                  <QrIcon />
                 </button>
-                {quickSelectedId ? (
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => {
-                      setQuickSelectedId("");
-                      setQuickPickOpen(false);
-                    }}
-                    aria-label="Cancella attrezzatura selezionata"
-                    style={{ padding: "0 12px", minWidth: 44 }}
-                  >
-                    ×
-                  </button>
-                ) : null}
               </div>
-              {quickPickOpen && (
+              {quickOpen && quickSearch.trim() && suggestionsBox && (
                 <div
-                  role="listbox"
                   style={{
-                    position: "absolute",
-                    left: 0,
-                    right: 0,
-                    top: "100%",
-                    marginTop: 6,
-                    background: "#fff",
+                    position: "fixed",
+                    left: suggestionsBox.left,
+                    top: suggestionsBox.top,
+                    width: suggestionsBox.width,
+                    background: "rgba(255,255,255,0.98)",
                     border: "1px solid rgba(15,23,42,0.12)",
-                    borderRadius: 12,
-                    boxShadow: "0 16px 40px rgba(0,0,0,0.12)",
+                    borderRadius: 14,
+                    boxShadow: "0 16px 40px rgba(0,0,0,0.20)",
                     overflow: "hidden",
-                    zIndex: 50,
+                    zIndex: 10060,
                   }}
                 >
-                  <div style={{ maxHeight: 320, overflowY: "auto" }}>
-                    {quickMatches.length === 0 ? (
-                      <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
-                    ) : (
-                      quickMatches.map((row, idx) => (
-                        <button
-                          key={row.id}
-                          type="button"
-                          onClick={() => pickQuickMatch(row)}
+                  {quickSuggestions.length === 0 ? (
+                    <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
+                  ) : (
+                    <>
+                      <div style={{ maxHeight: suggestionsBox.maxHeight, overflowY: "auto", overscrollBehavior: "contain" }}>
+                      {quickSuggestions.map((item, idx) => (
+                        <div
+                          key={item.kind === "category" ? `cat-${item.category}` : item.row.id}
+                          ref={idx === quickActiveIndex ? (el) => el?.scrollIntoView({ block: "nearest" }) : undefined}
+                          onMouseEnter={() => setQuickActiveIndex(idx)}
+                          onMouseDown={(ev) => {
+                            ev.preventDefault();
+                            if (item.kind === "category") openCategoryResults(item.category);
+                            else pickQuickMatch(item.row);
+                          }}
                           style={{
-                            width: "100%",
-                            border: "none",
-                            background: quickSelectedId === row.id ? "#eef2ff" : "white",
                             padding: "10px 12px",
                             cursor: "pointer",
+                            background: idx === quickActiveIndex ? "#eef2ff" : "white",
                             borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
-                            textAlign: "left",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 10,
                           }}
                         >
-                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <EquipmentStatusIcon status={row.status} />
-                            <div style={{ minWidth: 0, flex: 1 }}>
-                              <div style={{ fontWeight: 800, color: "#0f172a" }}>{row.serial_number || row.asset_code}</div>
-                              <div style={{ fontSize: 12, color: "#334155" }}>{row.name}</div>
-                            </div>
-                            <span
-                              style={{
-                                ...equipmentStatusStyle(row.status),
-                                padding: "4px 8px",
-                                fontSize: 11,
-                                fontWeight: 700,
-                                flexShrink: 0,
-                              }}
-                            >
-                              {EQUIPMENT_STATUS_LABELS[row.status]}
-                            </span>
-                          </div>
-                        </button>
-                      ))
-                    )}
-                  </div>
+                          {item.kind === "category" ? (
+                            <>
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ fontWeight: 900, color: "#1d4ed8" }}>Categoria · {item.category}</div>
+                                <div style={{ fontSize: 12, color: "#334155" }}>{item.count} attrezzature</div>
+                              </div>
+                              <div style={{ fontSize: 12, opacity: 0.8, color: "#1d4ed8", flexShrink: 0 }}>
+                                ↵ apri elenco
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                                <span title={EQUIPMENT_STATUS_LABELS[item.row.status]} style={{ flexShrink: 0, display: "flex", filter: `drop-shadow(0 0 5px ${item.row.status === "AVAILABLE" ? "#22c55e" : item.row.status === "MAINTENANCE" ? "#f59e0b" : "#ef4444"})` }}>
+                                  <StatusSemaforoIcon status={item.row.status} />
+                                </span>
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ fontWeight: 900, color: "#0f172a" }}>{item.row.serial_number || item.row.asset_code}</div>
+                                  <div style={{ fontSize: 12, color: "#334155" }}>{item.row.name}</div>
+                                </div>
+                              </div>
+                              <div style={{ fontSize: 12, opacity: 0.8, color: "#0f172a", flexShrink: 0 }}>
+                                ↵ seleziona
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -1242,12 +1061,9 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                 </div>
               </div>
               <div>
-                <div className="equipmentInfoLabel">Identificativi</div>
+                <div className="equipmentInfoLabel">Identificativo</div>
                 <div className="equipmentInfoValue">
-                  {[
-                    quickSelected.barcode ? `Barcode ${quickSelected.barcode}` : null,
-                    quickSelected.nfc_tag_id ? `NFC ${quickSelected.nfc_tag_id}` : null,
-                  ].filter(Boolean).join(" · ") || "Nessun identificativo"}
+                  {quickSelected.serial_number || quickSelected.asset_code || "—"}
                 </div>
               </div>
             </div>
@@ -1258,11 +1074,13 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
       </div>
 
       <AppScanStatusModal
-        open={cameraScanning || searchByNfcScanning}
-        mode={cameraScanning ? "barcode" : "nfc"}
+        open={cameraScanning}
+        mode="barcode"
         videoRef={videoRef}
         icon={<SpinnerIcon />}
-        onClose={cameraScanning ? stopCameraScan : stopNfcScan}
+        onClose={stopCameraScan}
+        barcodeTitle="Scanner QR"
+        barcodeHint="Inquadra il QR code"
       />
 
       <EquipmentStatusManager
@@ -1273,16 +1091,106 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
         onSubmit={(status, note) => quickSelected ? changeAssetStatus(quickSelected, status, note) : undefined}
       />
 
+      <AppModalFrame
+        open={!!categoryResultsName}
+        title={categoryResultsName ? `Categoria · ${categoryResultsName}` : "Categoria"}
+        subtitle={`${categoryResultsRows.length} attrezzature trovate con questo filtro`}
+        onClose={() => setCategoryResultsName(null)}
+        width="min(760px, calc(100vw - 24px))"
+        headerRight={
+          <button className="btn" type="button" onClick={() => setCategoryResultsName(null)}>
+            Chiudi
+          </button>
+        }
+      >
+        {categoryResultsRows.length === 0 ? (
+          <div style={{ padding: 16, color: "#64748b" }}>Nessuna attrezzatura in questa categoria.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {categoryResultsRows.map((row) => (
+              <button
+                key={row.id}
+                type="button"
+                onClick={() => {
+                  pickQuickMatch(row);
+                  setCategoryResultsName(null);
+                }}
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  border: "1px solid rgba(15,23,42,0.10)",
+                  background: "#fff",
+                  borderRadius: 12,
+                  padding: "12px 14px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                }}
+              >
+                <span title={EQUIPMENT_STATUS_LABELS[row.status]} style={{ flexShrink: 0, display: "flex", filter: `drop-shadow(0 0 5px ${row.status === "AVAILABLE" ? "#22c55e" : row.status === "MAINTENANCE" ? "#f59e0b" : "#ef4444"})` }}>
+                  <StatusSemaforoIcon status={row.status} />
+                </span>
+                <span style={{ minWidth: 0, flex: 1 }}>
+                  <span style={{ display: "block", fontWeight: 900, color: "#0f172a" }}>{row.serial_number || row.asset_code}</span>
+                  <span style={{ display: "block", fontSize: 13, color: "#334155", marginTop: 2 }}>{row.name}</span>
+                  <span style={{ display: "block", fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                    {[row.warehouse, EQUIPMENT_STATUS_LABELS[row.status]].filter(Boolean).join(" · ")}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </AppModalFrame>
+
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
-        <div className="equipmentSectionHeader">
-          <div>
+        <button
+          type="button"
+          onClick={() => setHistoryOpen((open) => !open)}
+          aria-expanded={historyOpen}
+          style={{
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            border: "none",
+            background: "transparent",
+            padding: 0,
+            cursor: "pointer",
+            textAlign: "left",
+            color: "inherit",
+          }}
+        >
+          <div style={{ minWidth: 0, flex: 1 }}>
             <div className="equipmentSectionTitle">Storico movimenti</div>
-            <div className="equipmentSectionHint">
-              Elenco completo dei movimenti dell&apos;area. Le righe aperte restano evidenziate.
+            <div className="equipmentSectionHint" style={{ overflow: "visible", whiteSpace: "normal" }}>
+              {historyOpen
+                ? "Elenco completo dei movimenti dell'area. Le righe aperte restano evidenziate."
+                : "Clicca per aprire lo storico movimenti."}
             </div>
           </div>
-        </div>
+          <span
+            aria-hidden="true"
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 10,
+              border: "1px solid rgba(15,23,42,0.12)",
+              background: historyOpen ? "rgba(15,23,42,0.06)" : "#fff",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <PlusMinusIcon open={historyOpen} />
+          </span>
+        </button>
 
+        {historyOpen && (
+        <>
         <div
           className="mobileGrid1"
           style={{
@@ -1430,6 +1338,8 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
             </tbody>
           </table>
         </div>
+        </>
+        )}
       </div>
 
       {historyDetail && (

@@ -46,7 +46,7 @@ export default function RemoteNfcScanModal({
   onTagReceived,
   onScanEventReceived,
   allowMultiple = false,
-  title = "Usa telefono come lettore NFC",
+  title = "Usa telefono come lettore QR",
   subtitle,
   liveContent,
   sessionEndpoint = "/api/attrezzature/remote-nfc-session",
@@ -153,11 +153,11 @@ export default function RemoteNfcScanModal({
     <AppModalFrame
       open={open}
       title={title}
-      subtitle={
+        subtitle={
         subtitle ??
         (allowMultiple
-          ? "Inquadra il QR, poi scansiona i tag. Ogni scansione apparirà sul PC."
-          : "Inquadra il QR con il telefono, poi avvicina il tag NFC.")
+          ? "Inquadra il QR con il telefono, poi scansiona i QR delle attrezzature. Ogni scansione apparirà sul PC."
+          : "Inquadra il QR con il telefono, poi scansiona il QR dell'attrezzatura.")
       }
       onClose={onClose}
       width={width}

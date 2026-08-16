@@ -5,7 +5,6 @@ import JsBarcode from "jsbarcode";
 import { QRCodeSVG } from "qrcode.react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createClient } from "../../_lib/supabase/client";
-import { useAuth } from "../../_lib/hooks/useAuth";
 import { useIsAdmin } from "../../_lib/hooks/useIsAdmin";
 import { useToast } from "../../_lib/ToastContext";
 import {
@@ -14,13 +13,6 @@ import {
   EQUIPMENT_STATUS_OPTIONS,
 } from "../../_lib/equipment";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentStatus } from "../../_lib/types";
-
-type NfcReassignState = {
-  row: EquipmentAssetRow;
-  serialNumber: string;
-  existingSerial: string;
-  existingArea: EquipmentArea;
-};
 
 type Props = {
   area: EquipmentArea;
@@ -32,8 +24,6 @@ type LabelAsset = EquipmentAssetRow & {
 };
 
 type PrintMode = "complete" | "barcodeQr" | "qrDescription" | "barcodeDescription" | "qrOnly" | "barcodeOnly";
-
-const ROWS_PER_PAGE = 15;
 
 const supabase = createClient();
 
@@ -63,28 +53,7 @@ function getBarcodeValue(row: EquipmentAssetRow) {
   return row.barcode || row.serial_number || row.asset_code;
 }
 
-function NfcIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="5" y="2" width="14" height="20" rx="2" />
-      <path d="M9 7h6" />
-      <path d="M9 11h6" />
-      <path d="M9 15h4" />
-      <path d="M12 6v12" />
-    </svg>
-  );
-}
-
-function SpinnerIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 1s linear infinite", transformOrigin: "center" }}>
-      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-    </svg>
-  );
-}
-
 export default function EquipmentLabelsClient({ area }: Props) {
-  const { user } = useAuth();
   const access = useIsAdmin();
   const toast = useToast();
   const isAdmin = area === "LINEE" ? access.canManageEquipmentLinee : access.canManageEquipmentStazioni;
@@ -95,14 +64,8 @@ export default function EquipmentLabelsClient({ area }: Props) {
   const [msg, setMsg] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | EquipmentStatus>("ALL");
-  const [printMode, setPrintMode] = useState<PrintMode>("complete");
-  const [page, setPage] = useState(1);
-  const [pageInput, setPageInput] = useState("");
+  const [printMode, setPrintMode] = useState<PrintMode>("qrDescription");
   const [selected, setSelected] = useState<Set<string> | null>(new Set());
-  const [nfcAssociatingId, setNfcAssociatingId] = useState<string | null>(null);
-  const [nfcTagReassign, setNfcTagReassign] = useState<NfcReassignState | null>(null);
-  const [isNfcSupported, setIsNfcSupported] = useState(false);
-  const [isIOS, setIsIOS] = useState(false);
   const headerCheckRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -127,144 +90,16 @@ export default function EquipmentLabelsClient({ area }: Props) {
     return () => window.clearTimeout(timer);
   }, [isAdmin, load]);
 
-  useEffect(() => {
-    setIsNfcSupported(typeof NDEFReader !== "undefined");
-    const ua = navigator.userAgent;
-    setIsIOS(/iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
-  }, []);
-
-  async function writeAuditLog(action: string, entityId: string | null, details: Record<string, unknown>) {
-    try {
-      await supabase.from("audit_log").insert({
-        action,
-        entity_type: "equipment_asset",
-        entity_id: entityId,
-        code: details.asset_code ?? null,
-        warehouse: area,
-        user_id: user?.id ?? null,
-        user_email: user?.email ?? null,
-        user_name: null,
-        details_json: details,
-      });
-    } catch (error) {
-      console.error("equipment audit error:", error);
-    }
-  }
-
-  async function saveNfcAssociation(row: EquipmentAssetRow, serialNumber: string) {
-    await supabase.from("equipment_assets").update({ nfc_tag_id: null }).eq("nfc_tag_id", serialNumber);
-    const { error } = await supabase
-      .from("equipment_assets")
-      .update({ nfc_tag_id: serialNumber })
-      .eq("id", row.id)
-      .eq("equipment_area", area);
-
-    if (error) throw error;
-
-    await writeAuditLog("EQUIPMENT_UPDATED", row.id, {
-      asset_code: row.asset_code,
-      serial_number: row.serial_number,
-      equipment_area: row.equipment_area,
-      nfc_tag_id: serialNumber,
-      update_mode: "nfc_association",
-    });
-  }
-
-  async function doAssociateNfc(row: EquipmentAssetRow, forceReassign = false, knownSerialNumber?: string) {
-    if (!isNfcSupported) {
-      setMsg(
-        isIOS
-          ? "NFC non disponibile su iPhone/iPad. Safari non supporta la scansione NFC."
-          : "NFC richiede Chrome su Android con HTTPS. Da mobile via IP usa npm run dev:https, poi accedi da https://TUO_IP:3000"
-      );
-      return;
-    }
-
-    setNfcTagReassign(null);
-    setNfcAssociatingId(row.id);
-    setMsg("Avvicina il dispositivo al tag NFC...");
-
-    try {
-      const serialNumber = knownSerialNumber
-        ? knownSerialNumber
-        : await (async () => {
-            const ndef = new NDEFReader();
-            await ndef.scan();
-            return await new Promise<string>((resolve, reject) => {
-              const handler = (event: NDEFReadingEvent) => {
-                ndef.removeEventListener("reading", handler);
-                resolve(event.serialNumber ?? "");
-              };
-              ndef.addEventListener("reading", handler);
-              setTimeout(() => reject(new Error("Timeout: avvicina il telefono al tag entro 30 secondi")), 30000);
-            });
-          })();
-
-      if (!serialNumber || serialNumber === "unknown") {
-        setMsg("Impossibile leggere l'ID del tag. Riprova.");
-        return;
-      }
-
-      const { data: existing } = await supabase
-        .from("equipment_assets")
-        .select("id,serial_number,asset_code,equipment_area")
-        .eq("nfc_tag_id", serialNumber)
-        .maybeSingle();
-
-      if (existing && existing.id !== row.id && !forceReassign) {
-        setNfcTagReassign({
-          row,
-          serialNumber,
-          existingSerial: existing.serial_number || existing.asset_code,
-          existingArea: existing.equipment_area as EquipmentArea,
-        });
-        setMsg(null);
-        return;
-      }
-
-      await saveNfcAssociation(row, serialNumber);
-      toast.success("NFC associato");
-      setMsg("NFC associato ✅");
-      await load();
-    } catch (error) {
-      console.error(error);
-      setMsg(error instanceof Error ? error.message : "Errore associazione NFC");
-    } finally {
-      setNfcAssociatingId(null);
-    }
-  }
-
   const filtered = useMemo(() => {
     const search = q.trim().toLowerCase();
     return rows.filter((row) => {
       if (statusFilter !== "ALL" && row.status !== statusFilter) return false;
       if (!search) return true;
-      return [row.serial_number, row.name, row.barcode, row.nfc_tag_id]
+      return [row.serial_number, row.name, row.asset_code]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(search));
     });
   }, [q, rows, statusFilter]);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / ROWS_PER_PAGE));
-  const paginatedRows = useMemo(() => {
-    const start = (page - 1) * ROWS_PER_PAGE;
-    return filtered.slice(start, start + ROWS_PER_PAGE);
-  }, [filtered, page]);
-
-  function goToPage(p: number) {
-    const target = Math.max(1, Math.min(totalPages, p));
-    setPage(target);
-    setPageInput("");
-  }
-
-  useEffect(() => {
-    setPage(1);
-    setPageInput("");
-  }, [q, statusFilter, area]);
-
-  useEffect(() => {
-    setPage((current) => Math.min(current, totalPages));
-  }, [totalPages]);
 
   const labels = useMemo<LabelAsset[]>(() => {
     return filtered
@@ -487,278 +322,164 @@ body{margin:0;padding:0;background:#fff}
   return (
     <main className="panel">
       <div className="pageBar">
-        <div className="pageBarTitle">Attrezzature {areaLabel} - Etichette</div>
+        <div className="pageBarTitle">Stampa etichette</div>
       </div>
 
-      <div className="card" style={{ padding: 12 }}>
-        <div style={{ display: "grid", gap: 12 }}>
-          <div className="equipmentSectionHeader" style={{ marginBottom: 0 }}>
-            <div>
-              <div className="equipmentSectionTitle">Etichette {areaLabel}</div>
-              <div className="equipmentSectionHint">
-                Barcode, NFC e stampa etichette. Filtra, seleziona, associa NFC e genera le etichette.
-              </div>
-            </div>
-            <div className="equipmentAreaPill">Area: {areaLabel}</div>
-          </div>
-
-          <div className="equipmentFilterGrid mobileGrid1">
-            <div style={{ minWidth: 0 }}>
-              <label className="label" htmlFor={`labels-search-${area}`}>Cerca</label>
-              <input
-                id={`labels-search-${area}`}
-                className="input"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder={`Cerca in ${areaLabel.toLowerCase()} per seriale o nome`}
-              />
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <label className="label" htmlFor={`labels-status-${area}`}>Stato</label>
-              <select id={`labels-status-${area}`} className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as "ALL" | EquipmentStatus)}>
-                <option value="ALL">Tutti gli stati</option>
-                {EQUIPMENT_STATUS_OPTIONS.map((status) => (
-                  <option key={status} value={status}>{EQUIPMENT_STATUS_LABELS[status]}</option>
-                ))}
-              </select>
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <label className="label" htmlFor={`labels-print-mode-${area}`}>Stampa</label>
-              <select id={`labels-print-mode-${area}`} className="input" value={printMode} onChange={(e) => setPrintMode(e.target.value as PrintMode)}>
-                <option value="complete">Descrizione + Barcode + QR</option>
-                <option value="barcodeQr">Barcode + QR</option>
-                <option value="qrDescription">QR + descrizione</option>
-                <option value="barcodeDescription">Barcode + descrizione</option>
-                <option value="qrOnly">Solo QR</option>
-                <option value="barcodeOnly">Solo Barcode</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="equipmentActionGroup">
-            <button type="button" className="btn btnPrimary" onClick={selectAll}>Seleziona tutto</button>
-            <button type="button" className="btn" onClick={deselectAll}>Deseleziona</button>
-            <button type="button" className="btn btnPrimary" onClick={handleDownload} disabled={labels.length === 0}>Scarica HTML</button>
-            <button type="button" className="btn" onClick={handlePrint} disabled={labels.length === 0}>Stampa</button>
-          </div>
-
-          {msg && <div className="equipmentInlineMessage">{msg}</div>}
+      <div className="card" style={{ padding: 12, margin: 12 }}>
+        <div style={{ fontSize: 13, color: "#64748b", marginBottom: 16 }}>
+          Etichette QR {areaLabel}: filtra, seleziona e stampa. Una etichetta per attrezzatura.
         </div>
-      </div>
 
-      <div className="card" style={{ padding: 12, marginTop: 12 }}>
-        <div className="equipmentSectionHeader">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 16 }}>
           <div>
-            <div className="equipmentSectionTitle">Barcode e NFC</div>
-            <div className="equipmentSectionHint">
-              {filtered.length} risultati · Pagina {page} di {totalPages}. Scegli quali etichette stampare e associa i tag NFC.
-            </div>
+            <label className="label" htmlFor={`labels-search-${area}`} style={{ fontSize: 12 }}>Cerca attrezzatura</label>
+            <input
+              id={`labels-search-${area}`}
+              type="text"
+              className="input"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Seriale o nome..."
+              style={{ width: 200 }}
+            />
           </div>
-          {totalPages > 1 && (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                className="btn"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-              >
-                ← Prec
-              </button>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>Pagina {page} di {totalPages}</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <input
-                  type="number"
-                  min={1}
-                  max={totalPages}
-                  value={pageInput}
-                  onChange={(e) => setPageInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && goToPage(parseInt(pageInput, 10) || 1)}
-                  placeholder="n°"
-                  className="input"
-                  style={{ width: 52, padding: "6px 8px", fontSize: 13 }}
-                />
-                <button type="button" className="btn" onClick={() => goToPage(parseInt(pageInput, 10) || 1)}>
-                  Vai
-                </button>
-              </div>
-              <button
-                type="button"
-                className="btn"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              >
-                Succ →
-              </button>
-            </div>
-          )}
-        </div>
-        <div className="tableWrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th style={{ width: 42 }}>
-                  <input
-                    ref={headerCheckRef}
-                    type="checkbox"
-                    checked={selected === null && filtered.length > 0}
-                    onChange={(e) => {
-                      if (e.target.checked) selectAll();
-                      else deselectAll();
-                    }}
-                  />
-                </th>
-                <th>Seriale</th>
-                <th>Nome</th>
-                <th>Scaffale</th>
-                <th>Area</th>
-                <th>Stato</th>
-                <th>Barcode</th>
-                <th>NFC</th>
-                <th>Azioni</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading && (
-                <tr>
-                  <td colSpan={9}>Caricamento attrezzature...</td>
-                </tr>
-              )}
-              {!loading && filtered.length === 0 && (
-                <tr>
-                  <td colSpan={9}>Nessuna attrezzatura disponibile.</td>
-                </tr>
-              )}
-              {paginatedRows.map((row) => {
-                const checked = selected === null || selected.has(row.id);
-                return (
-                  <tr key={row.id}>
-                    <td>
-                      <input type="checkbox" checked={checked} onChange={() => toggleSelect(row.id)} />
-                    </td>
-                    <td>{row.serial_number || "—"}</td>
-                    <td>{row.name}</td>
-                    <td>{[row.shelf, row.place].filter(Boolean).join(" · ") || "—"}</td>
-                    <td>{EQUIPMENT_AREA_LABELS[row.equipment_area]}</td>
-                    <td>{EQUIPMENT_STATUS_LABELS[row.status]}</td>
-                    <td title={getBarcodeValue(row)}>{getBarcodeValue(row) || "Da generare"}</td>
-                    <td title={row.nfc_tag_id || "Non associato"}>{row.nfc_tag_id || "Non associato"}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={() => void doAssociateNfc(row)}
-                        disabled={nfcAssociatingId === row.id}
-                        style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-                      >
-                        <NfcIcon />
-                        {nfcAssociatingId === row.id ? "NFC..." : row.nfc_tag_id ? "Riassegna NFC" : "Associa NFC"}
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {totalPages > 1 && (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
-            <button
-              type="button"
-              className="btn"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              ← Prec
-            </button>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>Pagina {page} di {totalPages}</span>
-            <button
-              type="button"
-              className="btn"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              Succ →
-            </button>
-          </div>
-        )}
-      </div>
-
-      {!!nfcAssociatingId && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15,23,42,0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 20,
-            zIndex: 10050,
-          }}
-        >
-          <div
-            style={{
-              background: "white",
-              borderRadius: 14,
-              padding: 24,
-              maxWidth: 420,
-              width: "100%",
-              boxShadow: "0 24px 60px rgba(0,0,0,0.3)",
-            }}
-          >
-            <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Associazione NFC</div>
-            <div style={{ padding: 24, background: "#0f172a", borderRadius: 12, marginBottom: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-              <SpinnerIcon />
-              <div style={{ fontSize: 14, color: "#94a3b8" }}>Avvicina il telefono al tag NFC</div>
-            </div>
-            <button type="button" className="btn" onClick={() => setNfcAssociatingId(null)}>
-              Fine
-            </button>
-          </div>
-        </div>
-      )}
-
-      {nfcTagReassign && (
-        <div className="card" style={{ padding: 12, marginTop: 12, borderColor: "rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.08)" }}>
-          <div className="equipmentSectionHeader">
-            <div>
-              <div className="equipmentSectionTitle">Tag NFC già associato</div>
-              <div className="equipmentSectionHint">
-                Il tag letto è già associato a ` {nfcTagReassign.existingSerial} ` nell&apos;area {EQUIPMENT_AREA_LABELS[nfcTagReassign.existingArea]}.
-              </div>
-            </div>
-          </div>
-          <div className="equipmentActionGroup">
-            <button
-              className="btn btnPrimary"
-              onClick={() => void doAssociateNfc(nfcTagReassign.row, true, nfcTagReassign.serialNumber)}
-              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-            >
-              <NfcIcon />
-              Conferma riassegnazione
-            </button>
-            <button className="btn" onClick={() => setNfcTagReassign(null)}>
-              Annulla
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div className="card" style={{ padding: 12, marginTop: 12 }}>
-        <div className="equipmentSectionHeader">
           <div>
-            <div className="equipmentSectionTitle">Anteprima etichette {areaLabel}</div>
-            <div className="equipmentSectionHint">{labels.length} etichette selezionate</div>
+            <label className="label" htmlFor={`labels-status-${area}`} style={{ fontSize: 12 }}>Stato</label>
+            <select
+              id={`labels-status-${area}`}
+              className="input"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as "ALL" | EquipmentStatus)}
+              style={{ width: 180 }}
+            >
+              <option value="ALL">Tutti gli stati</option>
+              {EQUIPMENT_STATUS_OPTIONS.map((status) => (
+                <option key={status} value={status}>{EQUIPMENT_STATUS_LABELS[status]}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label" htmlFor={`labels-print-mode-${area}`} style={{ fontSize: 12 }}>Formato stampa</label>
+            <select
+              id={`labels-print-mode-${area}`}
+              className="input"
+              value={printMode}
+              onChange={(e) => setPrintMode(e.target.value as PrintMode)}
+              style={{ width: 180 }}
+            >
+              <option value="qrDescription">QR + descrizione</option>
+              <option value="qrOnly">Solo QR</option>
+            </select>
           </div>
         </div>
-        {labels.length === 0 ? (
-          <div style={{ color: "var(--muted)" }}>Seleziona almeno un&apos;attrezzatura da stampare.</div>
+
+        {loading ? (
+          <div style={{ padding: 24, textAlign: "center", color: "#64748b" }}>Caricamento...</div>
         ) : (
-          <div className="etichette-print-grid etichette-preview">
-            {labels.map((row) => (
-              <EquipmentLabelPreview key={row.id} row={row} areaLabel={areaLabel} printMode={printMode} />
-            ))}
-          </div>
+          <>
+            {msg && <div className="equipmentInlineMessage" style={{ marginBottom: 10 }}>{msg}</div>}
+            <div style={{ marginBottom: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button type="button" className="btn btnPrimary" onClick={selectAll}>
+                Seleziona tutti ({filtered.length})
+              </button>
+              <button type="button" className="btn" onClick={deselectAll}>
+                Deseleziona
+              </button>
+              <span style={{ fontSize: 13, color: "#64748b" }}>
+                {labels.length} etichette da stampare (1 per attrezzatura)
+              </span>
+            </div>
+
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>
+              Clicca sulle righe per selezionare/deselezionare.
+            </div>
+
+            <div className="no-print" style={{ marginBottom: 20, overflow: "auto", border: "1px solid #e2e8f0", borderRadius: 8, maxHeight: 320 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: "#f1f5f9", borderBottom: "2px solid #e2e8f0" }}>
+                    <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, width: 44 }}>
+                      <input
+                        ref={headerCheckRef}
+                        type="checkbox"
+                        checked={selected === null && filtered.length > 0}
+                        onChange={(e) => (e.target.checked ? selectAll() : deselectAll())}
+                      />
+                    </th>
+                    <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600 }}>Seriale</th>
+                    <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600 }}>Nome attrezzatura</th>
+                    <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600 }}>Scaffale</th>
+                    <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600 }}>Stato</th>
+                    <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600 }}>Codice QR</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ padding: "16px 12px", color: "#64748b" }}>Nessuna attrezzatura disponibile.</td>
+                    </tr>
+                  ) : (
+                    filtered.map((row) => {
+                      const checked = selected === null || selected.has(row.id);
+                      return (
+                        <tr
+                          key={row.id}
+                          onClick={() => toggleSelect(row.id)}
+                          style={{
+                            cursor: "pointer",
+                            background: checked ? "#e0f2fe" : undefined,
+                            borderBottom: "1px solid #e2e8f0",
+                          }}
+                        >
+                          <td style={{ padding: "8px 12px" }} onClick={(e) => e.stopPropagation()}>
+                            <input type="checkbox" checked={checked} onChange={() => toggleSelect(row.id)} />
+                          </td>
+                          <td style={{ padding: "8px 12px", fontWeight: 600 }}>{row.serial_number || "—"}</td>
+                          <td style={{ padding: "8px 12px", color: "#64748b", maxWidth: 240 }} title={row.name}>
+                            {row.name.slice(0, 48)}{row.name.length > 48 ? "…" : ""}
+                          </td>
+                          <td style={{ padding: "8px 12px", color: "#64748b" }}>{[row.shelf, row.place].filter(Boolean).join(" · ") || "—"}</td>
+                          <td style={{ padding: "8px 12px", color: "#64748b" }}>{EQUIPMENT_STATUS_LABELS[row.status]}</td>
+                          <td style={{ padding: "8px 12px", color: "#64748b" }} title={getBarcodeValue(row)}>{getBarcodeValue(row) || "Da generare"}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button type="button" className="btn btnPrimary no-print" onClick={() => void handleDownload()} disabled={labels.length === 0} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Scarica anteprima ({labels.length} etichette)
+              </button>
+              <button type="button" className="btn no-print" onClick={() => void handlePrint()} disabled={labels.length === 0} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <polyline points="6 9 6 2 18 2 18 9" />
+                  <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                </svg>
+                Stampa
+              </button>
+            </div>
+
+            {labels.length > 0 && (
+              <details className="no-print" style={{ marginTop: 16 }} open>
+                <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 13 }}>Anteprima stampa (stesso layout della stampa)</summary>
+                <div className="etichette-preview-wrap" style={{ marginTop: 8 }}>
+                  <div className="etichette-print-grid etichette-preview">
+                    {labels.map((row) => (
+                      <EquipmentLabelPreview key={row.id} row={row} areaLabel={areaLabel} printMode={printMode} />
+                    ))}
+                  </div>
+                </div>
+              </details>
+            )}
+          </>
         )}
       </div>
     </main>

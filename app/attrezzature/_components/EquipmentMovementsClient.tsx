@@ -157,27 +157,16 @@ function sameUser(a: string | null | undefined, b: string | null | undefined) {
   return !!a && !!b && a === b;
 }
 
-function BarcodeIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <rect x="2" y="6" width="2" height="12" />
-      <rect x="6" y="6" width="1" height="12" />
-      <rect x="9" y="6" width="2" height="12" />
-      <rect x="13" y="6" width="1" height="12" />
-      <rect x="16" y="6" width="2" height="12" />
-      <rect x="20" y="6" width="2" height="12" />
-    </svg>
-  );
-}
-
-function NfcIcon() {
+function QrIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="5" y="2" width="14" height="20" rx="2" />
-      <path d="M9 7h6" />
-      <path d="M9 11h6" />
-      <path d="M9 15h4" />
-      <path d="M12 6v12" />
+      <rect x="3" y="3" width="6" height="6" rx="1" />
+      <rect x="15" y="3" width="6" height="6" rx="1" />
+      <rect x="3" y="15" width="6" height="6" rx="1" />
+      <path d="M15 15h2v2h-2z" />
+      <path d="M19 15h2v6h-6v-2" />
+      <path d="M13 13h2" />
+      <path d="M13 19h2" />
     </svg>
   );
 }
@@ -1076,7 +1065,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       setMsg(null);
       setScanResult({ asset: matched, source: mode, mode: scanMode });
     } else {
-      setMsg(mode === "barcode" ? "Nessuna attrezzatura trovata per questo barcode nel magazzino selezionato." : "Nessuna attrezzatura associata a questo tag NFC nel magazzino selezionato.");
+      setMsg(mode === "barcode" ? "Nessuna attrezzatura trovata per questo QR nel magazzino selezionato." : "Nessuna attrezzatura associata a questo tag NFC nel magazzino selezionato.");
     }
   }
 
@@ -1299,7 +1288,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         .some((item) => String(item).trim().toLowerCase() === normalized)
     );
     if (!matched) {
-      setMsg("Nessuna attrezzatura trovata per questo Barcode/QR nel magazzino selezionato.");
+      setMsg("Nessuna attrezzatura trovata per questo QR nel magazzino selezionato.");
       return;
     }
     if (matched.status !== "AVAILABLE") {
@@ -2136,15 +2125,11 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 </div>
 
                 <div style={{ display: "flex", alignItems: "end", gap: 8, flexWrap: "wrap" }}>
-                  <button className="btn" onClick={startCameraScanForSearch} type="button" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    <BarcodeIcon />
-                    Barcode / QR
+                  <button className="btn btnPrimary" onClick={startCameraScanForSearch} type="button" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <QrIcon />
+                    QR
                   </button>
-                  <button className="btn" onClick={searchByNfc} disabled={searchByNfcScanning} type="button" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    <NfcIcon />
-                    {searchByNfcScanning ? "NFC..." : "NFC"}
-                  </button>
-                  <button className="btn" onClick={openRemoteScanModal} type="button" title="Usa telefono come lettore NFC" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <button className="btn" onClick={openRemoteScanModal} type="button" title="Usa telefono come lettore QR" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                     <PhoneIcon />
                     Telefono
                   </button>
@@ -2191,7 +2176,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                         </div>
                       </div>
                       <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.45 }}>
-                        Il PC resta interfaccia principale. Dal telefono puoi leggere NFC, Barcode o QR e inviare l&apos;attrezzatura qui.
+                        Il PC resta interfaccia principale. Dal telefono puoi leggere il QR e inviare l&apos;attrezzatura qui.
                       </div>
                       {remoteScanLoading && <div style={{ marginTop: 8, fontSize: 13, fontWeight: 800, color: "#0284c7" }}>Genero il QR...</div>}
                       {remoteScanError && <div style={{ marginTop: 8, fontSize: 13, fontWeight: 800, color: "#b91c1c" }}>{remoteScanError}</div>}
@@ -3025,17 +3010,19 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       </div>
 
       <AppScanStatusModal
-        open={cameraScanning || searchByNfcScanning}
-        mode={cameraScanning ? "barcode" : "nfc"}
+        open={cameraScanning}
+        mode="barcode"
         videoRef={videoRef}
         icon={<SpinnerIcon />}
-        onClose={cameraScanning ? stopCameraScan : stopNfcScan}
+        onClose={stopCameraScan}
+        barcodeTitle="Scanner QR"
+        barcodeHint="Inquadra il QR code"
       />
 
       {scanResult && (
         <AppModalFrame
           open
-          title={scanResult.source === "barcode" ? "Scansione Barcode / QR" : "Scansione NFC"}
+          title="Scansione QR"
           subtitle={scanResult.mode === "CART" ? "Aggiunta rapida al carrello" : "Conferma prelievo singolo"}
           onClose={resetScannedSelection}
           width="min(520px, 100%)"

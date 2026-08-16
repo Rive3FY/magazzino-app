@@ -20,7 +20,6 @@ import EquipmentStatusManager from "./EquipmentStatusManager";
 import EquipmentExcelImportClient from "./EquipmentExcelImportClient";
 import AppScanStatusModal from "../../_components/AppScanStatusModal";
 import ConfirmModal from "../../_components/ConfirmModal";
-import RemoteNfcScanModal from "./RemoteNfcScanModal";
 import { equipmentAssetSchema } from "../../_lib/validations";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../../_lib/fastBarcodeScanner";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentStatus } from "../../_lib/types";
@@ -117,16 +116,6 @@ const emptyForm: AssetFormState = {
   notes: "",
 };
 
-function PhoneIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="7" y="2" width="10" height="20" rx="2" />
-      <path d="M11 18h2" />
-      <path d="M10 5h4" />
-    </svg>
-  );
-}
-
 function FileTextIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -190,7 +179,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const [techSheetTargetRow, setTechSheetTargetRow] = useState<EquipmentAssetRow | null>(null);
   const [actionMenuOpenRowId, setActionMenuOpenRowId] = useState<string | null>(null);
   const [actionMenuPosition, setActionMenuPosition] = useState<ActionMenuPosition | null>(null);
-  const [remoteScanRow, setRemoteScanRow] = useState<EquipmentAssetRow | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<FastBarcodeReader | null>(null);
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
@@ -1096,7 +1084,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                       setSearchOpen(false);
                     }
                   }}
-                  placeholder={`Cerca in ${areaLabel.toLowerCase()} per seriale, nome, categoria, barcode o NFC`}
+                  placeholder={`Cerca in ${areaLabel.toLowerCase()} per seriale, nome o categoria`}
                   style={{ width: "100%", paddingRight: q ? 36 : undefined }}
                 />
                 {q && (
@@ -1206,11 +1194,13 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
       </div>
 
       <AppScanStatusModal
-        open={cameraScanning || searchByNfcScanning}
-        mode={cameraScanning ? "barcode" : "nfc"}
+        open={cameraScanning}
+        mode="barcode"
         videoRef={videoRef}
         icon={<SpinnerIcon />}
-        onClose={cameraScanning ? stopCameraScan : stopNfcScan}
+        onClose={stopCameraScan}
+        barcodeTitle="Scanner QR"
+        barcodeHint="Inquadra il QR code"
       />
 
       <div className="card" style={{ padding: 12, marginTop: 12 }}>
@@ -1556,21 +1546,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                                 <button
                                   type="button"
                                   className="btn"
-                                  style={{ width: "100%", justifyContent: "flex-start", borderRadius: 0, display: "flex", alignItems: "center", gap: 8 }}
-                                  onClick={() => {
-                                    setActionMenuOpenRowId(null);
-                                    setRemoteScanRow(row);
-                                  }}
-                                  title="Usa telefono come lettore NFC"
-                                >
-                                  <PhoneIcon />
-                                  Telefono
-                                </button>
-                              )}
-                              {isAdmin && (
-                                <button
-                                  type="button"
-                                  className="btn"
                                   style={{ width: "100%", justifyContent: "flex-start", borderRadius: 0 }}
                                   onClick={() => {
                                     setActionMenuOpenRowId(null);
@@ -1753,7 +1728,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
               {showCompactMobileDetail
                 ? `Dettaglio rapido dell'attrezzatura nell'area ${areaLabel}.`
                 : isAdmin
-                ? `L'attrezzatura restera vincolata in modo permanente all'area ${areaLabel}. Il seriale viene usato come identificativo principale; barcode e NFC si gestiscono dopo.`
+                ? `L'attrezzatura restera vincolata in modo permanente all'area ${areaLabel}. Il seriale viene usato come identificativo principale.`
                 : `Vista di sola lettura dell'attrezzatura nell'area ${areaLabel}.`}
             </div>
 
@@ -1811,17 +1786,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                       {techSheetBusyId === editingRow.id ? "Caricamento..." : editingRow.technical_sheet_path ? "Aggiorna scheda" : "Carica scheda"}
                     </button>
                   )}
-                  {isAdmin && (
-                    <button
-                      className="btn"
-                      onClick={() => setRemoteScanRow(editingRow)}
-                      title="Usa telefono come lettore NFC"
-                      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-                    >
-                      <PhoneIcon />
-                      Telefono
-                    </button>
-                  )}
                 </div>
               </div>
             )}
@@ -1871,17 +1835,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                       disabled={saving}
                     >
                       Gestisci stato
-                    </button>
-                  )}
-                  {isAdmin && (
-                    <button
-                      className="btn"
-                      onClick={() => setRemoteScanRow(editingRow)}
-                      title="Usa telefono come lettore NFC"
-                      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-                    >
-                      <PhoneIcon />
-                      Telefono
                     </button>
                   )}
                   {isAdmin && (
@@ -2085,33 +2038,6 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
           onSuccess={() => loadAssets()}
         />
       )}
-
-      <RemoteNfcScanModal
-        open={!!remoteScanRow}
-        onClose={() => {
-          setRemoteScanRow(null);
-        }}
-        context="equipment_associate"
-        equipmentId={remoteScanRow?.id}
-        area={area}
-        title={
-          remoteScanRow
-            ? `Associa NFC a ${remoteScanRow.serial_number || remoteScanRow.asset_code}`
-            : "Usa telefono come lettore NFC"
-        }
-        onTagReceived={async (nfcTagId, ctx) => {
-          const row = remoteScanRow;
-          if (row) {
-            try {
-              await saveNfcAssociation(row, nfcTagId);
-              toast.success("NFC associato");
-              await loadAssets();
-            } catch (e) {
-              toast.error(e instanceof Error ? e.message : "Errore associazione");
-            }
-          }
-        }}
-      />
     </main>
   );
 }

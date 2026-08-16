@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import ScopedRoleAdminUsersClient from "../../../_components/ScopedRoleAdminUsersClient";
-import EquipmentNfcCategoryTagsClient from "../../_components/EquipmentNfcCategoryTagsClient";
 import EquipmentCategoryGroupsClient from "../../_components/EquipmentCategoryGroupsClient";
 import ConfirmWithInputModal from "../../../_components/ConfirmWithInputModal";
 import { useIsAdmin } from "../../../_lib/hooks/useIsAdmin";
@@ -52,7 +51,6 @@ export default function LineeAdminPage() {
           scope="LINEE"
           intro="Da qui puoi scegliere chi gestisce le funzioni admin dell'area Attrezzature Linee."
         />
-        <EquipmentNfcCategoryTagsClient area="LINEE" />
         <EquipmentCategoryGroupsClient area="LINEE" />
       </div>
 

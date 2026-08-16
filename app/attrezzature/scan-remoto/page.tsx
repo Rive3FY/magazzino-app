@@ -91,7 +91,7 @@ export default function ScanRemotoPage() {
     const value = rawValue.trim();
     if (!value || value === "unknown") {
       setStatus("error");
-      setMsg(source === "nfc" ? "Tag NFC non leggibile. Riprova." : "Barcode / QR non leggibile. Riprova.");
+      setMsg(source === "nfc" ? "Tag NFC non leggibile. Riprova." : "QR code non leggibile. Riprova.");
       return;
     }
 
@@ -228,7 +228,7 @@ export default function ScanRemotoPage() {
 
     stopCameraScan();
     setStatus("scanning_code");
-    setMsg("Inquadra il barcode o il QR code...");
+    setMsg("Inquadra il QR code...");
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     let videoEl = videoRef.current;
@@ -304,7 +304,7 @@ export default function ScanRemotoPage() {
               <p style={{ margin: 0, fontSize: 10, fontWeight: 900, letterSpacing: "0.16em", textTransform: "uppercase", color: "#0284c7" }}>Terminale lettore</p>
               <h1 style={{ margin: "6px 0 0", fontSize: 28, lineHeight: 1, fontWeight: 950, color: "#0f172a" }}>Attrezzature</h1>
               <p style={{ margin: "9px 0 0", fontSize: 14, lineHeight: 1.35, color: "#475569" }}>
-                Leggi NFC, barcode o QR, controlla l&apos;attrezzatura e poi aggiungila al PC.
+                Leggi il QR code, controlla l&apos;attrezzatura e poi aggiungila al PC.
               </p>
             </div>
             <div style={{ borderRadius: 14, background: "rgba(16,185,129,0.12)", border: "1px solid rgba(16,185,129,0.18)", padding: "8px 10px", textAlign: "right", flexShrink: 0 }}>
@@ -316,20 +316,22 @@ export default function ScanRemotoPage() {
           {status === "idle" && (
             <div style={{ display: "grid", gap: 12 }}>
               <button type="button" onClick={startCodeScan} style={{ display: "flex", alignItems: "center", gap: 14, width: "100%", borderRadius: 18, border: "1px solid rgba(16,185,129,0.28)", background: "rgba(16,185,129,0.08)", padding: 14, color: "#0f172a", textAlign: "left" }}>
-                <span style={{ display: "flex", width: 54, height: 54, alignItems: "center", justifyContent: "center", borderRadius: 16, background: "#34d399", color: "#0f172a", fontSize: 20, fontWeight: 950, flexShrink: 0 }}>QR</span>
+                <span style={{ display: "flex", width: 54, height: 54, alignItems: "center", justifyContent: "center", borderRadius: 16, background: "#34d399", color: "#0f172a", flexShrink: 0 }}>
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="3" y="3" width="6" height="6" rx="1" />
+                    <rect x="15" y="3" width="6" height="6" rx="1" />
+                    <rect x="3" y="15" width="6" height="6" rx="1" />
+                    <path d="M15 15h2v2h-2z" />
+                    <path d="M19 15h2v6h-6v-2" />
+                    <path d="M13 13h2" />
+                    <path d="M13 19h2" />
+                  </svg>
+                </span>
                 <span style={{ display: "block", minWidth: 0, flex: 1 }}>
-                  <span style={{ display: "block", fontSize: 18, fontWeight: 950 }}>Barcode / QR</span>
-                  <span style={{ display: "block", marginTop: 4, fontSize: 13, lineHeight: 1.35, color: "#475569" }}>Apri camera compatta e leggi il codice.</span>
+                  <span style={{ display: "block", fontSize: 18, fontWeight: 950 }}>QR code</span>
+                  <span style={{ display: "block", marginTop: 4, fontSize: 13, lineHeight: 1.35, color: "#475569" }}>Apri camera e inquadra il QR dell&apos;attrezzatura.</span>
                 </span>
                 <span style={{ fontSize: 28, color: "#059669" }}>›</span>
-              </button>
-              <button type="button" onClick={startNfcScan} style={{ display: "flex", alignItems: "center", gap: 14, width: "100%", borderRadius: 18, border: "1px solid rgba(2,132,199,0.24)", background: "rgba(2,132,199,0.08)", padding: 14, color: "#0f172a", textAlign: "left" }}>
-                <span style={{ display: "flex", width: 54, height: 54, alignItems: "center", justifyContent: "center", borderRadius: 16, background: "#38bdf8", color: "#0f172a", fontSize: 18, fontWeight: 950, flexShrink: 0 }}>NFC</span>
-                <span style={{ display: "block", minWidth: 0, flex: 1 }}>
-                  <span style={{ display: "block", fontSize: 18, fontWeight: 950 }}>Tag NFC</span>
-                  <span style={{ display: "block", marginTop: 4, fontSize: 13, lineHeight: 1.35, color: "#475569" }}>Avvicina il telefono al tag attrezzatura.</span>
-                </span>
-                <span style={{ fontSize: 28, color: "#0284c7" }}>›</span>
               </button>
             </div>
           )}
@@ -348,7 +350,7 @@ export default function ScanRemotoPage() {
                     <div style={{ position: "absolute", right: -2, bottom: -2, width: 44, height: 44, borderRight: "4px solid #6ee7b7", borderBottom: "4px solid #6ee7b7", borderBottomRightRadius: 24 }} />
                   </div>
                   <div style={{ position: "absolute", left: 14, right: 14, bottom: 14, borderRadius: 16, background: "rgba(15,23,42,0.78)", padding: 12, textAlign: "center", fontSize: 13, fontWeight: 900, color: "#fff" }}>
-                    Centra il Barcode / QR nel riquadro
+                    Centra il QR code nel riquadro
                   </div>
                 </div>
               </div>

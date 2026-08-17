@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import AppModalFrame from "./AppModalFrame";
+import { AppBusyLabel, AppLoading } from "./AppSpinner";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import type { RoleScope } from "../_lib/admin-access";
 
@@ -196,7 +197,7 @@ export default function ScopedRoleAdminUsersClient({ scope, title, intro }: Prop
   }, [rows, search]);
 
   if (access.loading) {
-    return <div style={{ padding: 12 }}>Caricamento…</div>;
+    return <div style={{ padding: 12 }}><AppLoading align="start" /></div>;
   }
 
   if (!canManageScope) {
@@ -264,7 +265,7 @@ export default function ScopedRoleAdminUsersClient({ scope, title, intro }: Prop
                 </thead>
                 <tbody>
                   {loading ? (
-                    <tr><td colSpan={6} style={{ padding: 12 }}>Caricamento…</td></tr>
+                    <tr><td colSpan={6} style={{ padding: 12 }}><AppLoading align="start" size={18} /></td></tr>
                   ) : filteredRows.length === 0 ? (
                     <tr><td colSpan={6} style={{ padding: 12 }}>Nessun utente</td></tr>
                   ) : (
@@ -363,7 +364,7 @@ export default function ScopedRoleAdminUsersClient({ scope, title, intro }: Prop
                   Annulla
                 </button>
                 <button className="btn btnPrimary" disabled={editBusy} onClick={saveEdit}>
-                  {editBusy ? "Salvataggio…" : "Salva"}
+                  <AppBusyLabel busy={editBusy}>{editBusy ? "Salvataggio…" : "Salva"}</AppBusyLabel>
                 </button>
               </div>
           </div>

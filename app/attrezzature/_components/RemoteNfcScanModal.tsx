@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import AppModalFrame from "../../_components/AppModalFrame";
+import AppSpinner from "../../_components/AppSpinner";
 
 export type RemoteScanEvent = {
   type?: string;
@@ -174,16 +175,7 @@ export default function RemoteNfcScanModal({
               className="appModalSectionBody"
               style={{ display: "flex", justifyContent: "center", padding: "40px 12px" }}
             >
-              <div
-                style={{
-                  width: 40,
-                  height: 40,
-                  border: "3px solid #e2e8f0",
-                  borderTopColor: "#0f172a",
-                  borderRadius: "50%",
-                  animation: "spin 0.8s linear infinite",
-                }}
-              />
+              <AppSpinner size={40} style={{ color: "#0f172a" }} />
             </div>
           </div>
         ) : null}

@@ -25,6 +25,7 @@ import {
 import { movementNoteSchema } from "../_lib/validations";
 import type { CartRow, QuickMaterialInfo, DbItem, MovementRow, ReferentRow, ExcelLiveRow } from "../_lib/types";
 import { movementReportLink, notifyMaterialsAdmins } from "../_lib/adminAppNotifications";
+import AppSpinner, { AppBusyLabel, AppLoading } from "../_components/AppSpinner";
 
 const PAGE_LIMIT = 300;
 
@@ -199,11 +200,7 @@ function QrIcon() {
 }
 
 function SpinnerIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 1s linear infinite", transformOrigin: "center" }}>
-      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-    </svg>
-  );
+  return <AppSpinner size={18} />;
 }
 
 function AddIcon() {
@@ -3904,7 +3901,7 @@ function finalizeMaterialPickupSuccess() {
                     <div style={{ marginTop: 6, fontSize: 13, color: "#334155" }}>
                       <b>Disponibilità:</b>{" "}
                       {selectedStockInfo?.loading
-                        ? "calcolo in corso..."
+                        ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><AppSpinner size={13} />calcolo in corso...</span>
                         : warehouse === "PRM"
                           ? `PRM ${selectedStockInfo?.prmFree ?? 0}`
                           : warehouse === "REALE"
@@ -4123,7 +4120,7 @@ function finalizeMaterialPickupSuccess() {
                         onClick={confirmCartPickup}
                         disabled={cart.length === 0 || cartBusy || !pickupDetailsComplete}
                       >
-                        {cartBusy ? "Salvataggio..." : "Conferma prelievo multiplo"}
+                        <AppBusyLabel busy={cartBusy}>{cartBusy ? "Salvataggio..." : "Conferma prelievo multiplo"}</AppBusyLabel>
                       </button>
                     )}
                   </div>
@@ -4152,7 +4149,7 @@ function finalizeMaterialPickupSuccess() {
                     <div style={{ marginTop: 6 }}>
                       <b>Disponibilità:</b>{" "}
                       {selectedStockInfo?.loading
-                        ? "calcolo in corso..."
+                        ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><AppSpinner size={13} />calcolo in corso...</span>
                         : warehouse === "PRM"
                           ? `PRM ${selectedStockInfo?.prmFree ?? 0}`
                           : warehouse === "REALE"
@@ -4237,7 +4234,11 @@ function finalizeMaterialPickupSuccess() {
                       </>
                     ) : (
                       <div style={{ color: "#64748b" }}>
-                        {mixedPreviewLoading ? "Calcolo disponibilita in corso..." : "Impossibile calcolare la ripartizione in questo momento."}
+                        {mixedPreviewLoading ? (
+                          <AppLoading label="Calcolo disponibilita in corso..." align="start" size={18} />
+                        ) : (
+                          "Impossibile calcolare la ripartizione in questo momento."
+                        )}
                       </div>
                     )}
                   </div>
@@ -4556,7 +4557,7 @@ function finalizeMaterialPickupSuccess() {
                 disabled={deletingBulk}
                 style={{ background: "rgba(239,68,68,0.12)", borderColor: "rgba(239,68,68,0.4)" }}
               >
-                {deletingBulk ? "Eliminazione…" : `Elimina ${selectedIds.size} selezionati`}
+                <AppBusyLabel busy={deletingBulk}>{deletingBulk ? "Eliminazione…" : `Elimina ${selectedIds.size} selezionati`}</AppBusyLabel>
               </button>
             )}
             {SHOW_HISTORY_FILTERS && (
@@ -4595,7 +4596,7 @@ function finalizeMaterialPickupSuccess() {
               {loading ? (
                 <tr>
                   <td colSpan={isAdmin ? 7 : 6} style={{ padding: 12, color: "#0f172a" }}>
-                    Caricamento…
+                    <AppLoading align="start" size={18} />
                   </td>
                 </tr>
               ) : history.length === 0 ? (
@@ -4782,10 +4783,14 @@ function finalizeMaterialPickupSuccess() {
                   onClick={() => void downloadRegistroPDF(closingGroup.length > 0 ? closingGroup : [closing])}
                   style={{ whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 8 }}
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M12 3v12m0 0 4-4m-4 4-4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M5 19h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                  </svg>
+                  {registerBusy ? (
+                    <AppSpinner size={15} />
+                  ) : (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M12 3v12m0 0 4-4m-4 4-4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M5 19h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  )}
                   {registerBusy ? "Generazione…" : "Scarica registro"}
                 </button>
               </div>
@@ -5148,7 +5153,7 @@ function finalizeMaterialPickupSuccess() {
                         onClick={saveOpenMovementQty}
                         disabled={openQtySaving}
                       >
-                        {openQtySaving ? "Salvataggio..." : "Salva quantità"}
+                        <AppBusyLabel busy={openQtySaving}>{openQtySaving ? "Salvataggio..." : "Salva quantità"}</AppBusyLabel>
                       </button>
                     </div>
                   </div>
@@ -5471,7 +5476,7 @@ function finalizeMaterialPickupSuccess() {
                   {historyLoading ? (
                     <tr>
                       <td colSpan={6} style={{ padding: 12 }}>
-                        Caricamento…
+                        <AppLoading align="start" size={18} />
                       </td>
                     </tr>
                   ) : historyRows.length === 0 ? (

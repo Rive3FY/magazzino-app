@@ -1,6 +1,7 @@
 "use client";
 
 import AppModalFrame from "../../_components/AppModalFrame";
+import AppSpinner, { AppLoading } from "../../_components/AppSpinner";
 import { fmtDate } from "../../_lib/utils";
 
 export type MaterialsDashboardStats = {
@@ -122,7 +123,8 @@ export default function AdminMaterialsOverviewModal({
       bodyStyle={{ background: "#f8fafc" }}
       headerRight={
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button className="btn" type="button" onClick={onRefresh} disabled={loading}>
+          <button className="btn" type="button" onClick={onRefresh} disabled={loading} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            {loading && <AppSpinner size={15} />}
             {loading ? "Aggiornamento..." : "Aggiorna"}
           </button>
           <button className="btn" type="button" onClick={onClose}>Chiudi</button>
@@ -136,7 +138,7 @@ export default function AdminMaterialsOverviewModal({
       )}
 
       {loading && !stats ? (
-        <div style={{ padding: 24, textAlign: "center", color: "#64748b" }}>Caricamento statistiche...</div>
+        <div style={{ padding: 24 }}><AppLoading label="Caricamento statistiche..." /></div>
       ) : stats ? (
         <>
           <div

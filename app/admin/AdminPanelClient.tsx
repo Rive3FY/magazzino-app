@@ -6,6 +6,7 @@ import { createClient } from "../_lib/supabase/client";
 import ConfirmModal from "../_components/ConfirmModal";
 import ConfirmWithInputModal from "../_components/ConfirmWithInputModal";
 import AppModalFrame from "../_components/AppModalFrame";
+import AppSpinner, { AppBusyLabel, AppLoading } from "../_components/AppSpinner";
 
 type Row = {
   Materiale?: any;
@@ -424,8 +425,12 @@ export default function AdminPanelClient() {
               borderColor: "rgba(239,68,68,0.5)",
               background: "rgba(239,68,68,0.10)",
               color: "#991b1b",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
             }}
           >
+            {resetting && <AppSpinner size={15} />}
             {resetting ? "Reset in corso..." : "Reset magazzino"}
           </button>
 
@@ -476,7 +481,7 @@ export default function AdminPanelClient() {
 
             <tbody>
               {loadingUsers ? (
-                <tr><td colSpan={5}>Caricamento…</td></tr>
+                <tr><td colSpan={5}><AppLoading align="start" size={18} /></td></tr>
               ) : filteredUsers.length === 0 ? (
                 <tr><td colSpan={5}>Nessun operatore.</td></tr>
               ) : (
@@ -549,7 +554,8 @@ export default function AdminPanelClient() {
 
           <div className="field">
             <label>Stato</label>
-            <div className="input" style={{ background: "#f8fafc" }}>
+            <div className="input" style={{ background: "#f8fafc", display: "flex", alignItems: "center", gap: 8 }}>
+              {(importBusy || resetting) && <AppSpinner size={15} />}
               {importBusy ? "Importazione…" : resetting ? "Reset in corso..." : "Pronto"}
             </div>
           </div>
@@ -616,7 +622,7 @@ export default function AdminPanelClient() {
             </thead>
             <tbody>
               {loadingMov ? (
-                <tr><td colSpan={7}>Caricamento…</td></tr>
+                <tr><td colSpan={7}><AppLoading align="start" size={18} /></td></tr>
               ) : movements.length === 0 ? (
                 <tr><td colSpan={7}>Nessun movimento.</td></tr>
               ) : (
@@ -697,7 +703,7 @@ export default function AdminPanelClient() {
                   Annulla
                 </button>
                 <button className="btn btnPrimary" disabled={editBusy} onClick={saveEdit}>
-                  {editBusy ? "Salvataggio…" : "Salva"}
+                  <AppBusyLabel busy={editBusy}>{editBusy ? "Salvataggio…" : "Salva"}</AppBusyLabel>
                 </button>
               </div>
 

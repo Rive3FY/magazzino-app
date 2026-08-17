@@ -13,6 +13,7 @@ import {
 } from "../../_lib/equipment";
 import AppModalFrame from "../../_components/AppModalFrame";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentMovementRow } from "../../_lib/types";
+import { AppLoading } from "../../_components/AppSpinner";
 
 type Props = {
   area: EquipmentArea;
@@ -135,7 +136,7 @@ export default function EquipmentAssigneesClient({ area, basePath }: Props) {
         <div className="pageBar">
           <div className="pageBarTitle">Assegnatari {areaLabel}</div>
         </div>
-        <div className="card" style={{ padding: 12 }}>Caricamento...</div>
+        <div className="card" style={{ padding: 12 }}><AppLoading align="start" /></div>
       </main>
     );
   }
@@ -159,7 +160,7 @@ export default function EquipmentAssigneesClient({ area, basePath }: Props) {
         {msg && <div className="equipmentInlineMessage">{msg}</div>}
 
         {loading ? (
-          <div style={{ padding: 24, textAlign: "center" }}>Caricamento...</div>
+          <div style={{ padding: 24 }}><AppLoading /></div>
         ) : (
           <div className="tableWrap" style={{ marginTop: 12 }}>
             <table className="table">

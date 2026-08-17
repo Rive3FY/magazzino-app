@@ -5,6 +5,7 @@ import { createClient } from "../../_lib/supabase/client";
 import { notifyEquipmentSync } from "../../_lib/equipmentSync";
 import type { EquipmentArea } from "../../_lib/types";
 import { useToast } from "../../_lib/ToastContext";
+import { AppBusyLabel, AppLoading } from "../../_components/AppSpinner";
 
 type NfcCategoryTagRow = {
   id: string;
@@ -196,7 +197,7 @@ export default function EquipmentNfcCategoryTagsClient({ area }: Props) {
           </div>
 
           {loading ? (
-            <div style={{ padding: 16, textAlign: "center", color: "var(--muted)" }}>Caricamento…</div>
+            <div style={{ padding: 16 }}><AppLoading /></div>
           ) : rows.length === 0 ? (
             <div style={{ marginTop: 16, padding: 16, border: "1px dashed var(--border)", borderRadius: 8, color: "var(--muted)", fontSize: 13 }}>
               Nessun tag registrato. Clicca &quot;Aggiungi tag NFC&quot; e scansiona un tag sul rack.
@@ -308,7 +309,7 @@ export default function EquipmentNfcCategoryTagsClient({ area }: Props) {
                 disabled={saving || !effectiveCategory.trim()}
                 style={{ background: "var(--primary)", color: "#fff", borderColor: "var(--primary)" }}
               >
-                {saving ? "Salvataggio…" : "Salva"}
+                <AppBusyLabel busy={saving}>{saving ? "Salvataggio…" : "Salva"}</AppBusyLabel>
               </button>
             </div>
           </div>

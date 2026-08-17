@@ -1,6 +1,7 @@
 "use client";
 
 import AppModalFrame from "../../_components/AppModalFrame";
+import { AppLoading } from "../../_components/AppSpinner";
 import styles from "./MaterialSearchResultsModal.module.css";
 
 export type MaterialSearchResult = {
@@ -52,7 +53,7 @@ export default function MaterialSearchResultsModal({
       </div>
 
       {loading ? (
-        <div className={styles.state}>Ricerca dei materiali in corso…</div>
+        <div className={styles.state}><AppLoading label="Ricerca dei materiali in corso…" /></div>
       ) : results.length === 0 ? (
         <div className={styles.state}>
           <div style={{ fontWeight: 900, color: "#334155" }}>Nessun materiale trovato</div>

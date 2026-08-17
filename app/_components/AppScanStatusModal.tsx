@@ -2,6 +2,7 @@
 
 import type { RefObject, ReactNode } from "react";
 import AppModalFrame from "./AppModalFrame";
+import AppSpinner from "./AppSpinner";
 
 export const SCAN_RESOLVE_MIN_MS = 280;
 
@@ -11,22 +12,7 @@ export async function waitScanResolveFeedback(startedAt: number, minMs = SCAN_RE
 }
 
 function ResolvingSpinner() {
-  return (
-    <svg
-      width="36"
-      height="36"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="#38bdf8"
-      strokeWidth="2.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      style={{ animation: "spin 0.8s linear infinite", transformOrigin: "center" }}
-    >
-      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-    </svg>
-  );
+  return <AppSpinner size={38} style={{ color: "#38bdf8" }} />;
 }
 
 export function ScanResolvingPanel({ hint = "Caricamento dati..." }: { hint?: string }) {

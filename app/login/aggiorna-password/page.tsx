@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "../../_lib/supabase/client";
+import { AppBusyLabel, AppLoading } from "../../_components/AppSpinner";
 
 export default function AggiornaPasswordPage() {
   const supabase = createClient();
@@ -67,7 +68,7 @@ export default function AggiornaPasswordPage() {
       <main className="loginPage">
         <div className="loginCardNew">
           <h1 className="loginTitleNew">AGGIORNA PASSWORD</h1>
-          <div className="loginBodyNew">Caricamento…</div>
+          <div className="loginBodyNew"><AppLoading style={{ color: "rgba(255,255,255,0.85)" }} /></div>
         </div>
       </main>
     );
@@ -116,7 +117,7 @@ export default function AggiornaPasswordPage() {
           </div>
 
           <button type="submit" className="loginBtnPrimary" disabled={working}>
-            {working ? "Salvataggio…" : "SALVA PASSWORD"}
+            <AppBusyLabel busy={working}>{working ? "Salvataggio…" : "SALVA PASSWORD"}</AppBusyLabel>
           </button>
 
           <a href="/login" className="loginBtnSecondary" style={{ display: "block", textAlign: "center", textDecoration: "none" }}>

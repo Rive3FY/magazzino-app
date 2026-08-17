@@ -2,7 +2,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { createClient } from "../_lib/supabase/client";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../_lib/fastBarcodeScanner";
 import {
@@ -21,6 +20,7 @@ import AdminMaterialsOverviewModal, {
 import MaterialSearchResultsModal from "./_components/MaterialSearchResultsModal";
 import AppScanStatusModal, { waitScanResolveFeedback } from "../_components/AppScanStatusModal";
 import type { MovementRow } from "../_lib/types";
+import AppSpinner, { AppLoading } from "../_components/AppSpinner";
 
 type Movement = {
   id: string;
@@ -222,7 +222,6 @@ export default function Home() {
   const [open, setOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<DbItem[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [suggestionsBox, setSuggestionsBox] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null);
   const [searchResultsOpen, setSearchResultsOpen] = useState(false);
   const [searchResultsQuery, setSearchResultsQuery] = useState("");
   const [searchResultsLoading, setSearchResultsLoading] = useState(false);
@@ -240,24 +239,8 @@ export default function Home() {
   const [adminOverviewOpen, setAdminOverviewOpen] = useState(false);
 
   const boxRef = useRef<HTMLDivElement | null>(null);
-  const searchFieldRef = useRef<HTMLDivElement | null>(null);
-  const suggestionsRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<FastBarcodeReader | null>(null);
-
-  const updateSuggestionsBox = useCallback(() => {
-    const el = searchFieldRef.current;
-    if (!el || typeof window === "undefined") return;
-    const rect = el.getBoundingClientRect();
-    const top = rect.bottom + 6;
-    const maxHeight = Math.max(160, Math.min(280, window.innerHeight - top - 12));
-    setSuggestionsBox({
-      left: rect.left,
-      top,
-      width: rect.width,
-      maxHeight,
-    });
-  }, []);
 
   async function loadSuggestions(text: string): Promise<DbItem[]> {
     const parsed = parseMaterialSearchInput(text);
@@ -710,7 +693,7 @@ export default function Home() {
   useEffect(() => {
     function onDocMouseDown(e: MouseEvent) {
       const target = e.target as Node;
-      if (boxRef.current?.contains(target) || suggestionsRef.current?.contains(target)) return;
+      if (boxRef.current?.contains(target)) return;
       setOpen(false);
     }
     document.addEventListener("mousedown", onDocMouseDown);
@@ -728,21 +711,6 @@ export default function Home() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, open]);
-
-  useEffect(() => {
-    if (!open || !search.trim()) {
-      setSuggestionsBox(null);
-      return;
-    }
-
-    updateSuggestionsBox();
-    window.addEventListener("resize", updateSuggestionsBox);
-    window.addEventListener("scroll", updateSuggestionsBox, true);
-    return () => {
-      window.removeEventListener("resize", updateSuggestionsBox);
-      window.removeEventListener("scroll", updateSuggestionsBox, true);
-    };
-  }, [open, search, suggestions.length, updateSuggestionsBox]);
 
   const filteredSuggestions = suggestions;
 
@@ -811,10 +779,10 @@ export default function Home() {
         <div className="pageBarTitle">Materiali - Dashboard</div>
       </div>
 
-      <div className="filtersRow" style={{ padding: 12 }}>
+      <div className="filtersRow" style={{ padding: 12, overflow: open && search.trim() ? "visible" : undefined }}>
         <div style={{ opacity: 0.85, marginBottom: 14 }}>Panoramica rapida di anagrafica e operatività.</div>
 
-        <div className="glass" style={{ marginTop: 14 }}>
+        <div className="glass" style={{ marginTop: 14, overflow: open && search.trim() ? "visible" : undefined }}>
           <div>
             <div style={{ fontWeight: 900, fontSize: 16 }}> Controllo veloce materiale</div>
             <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
@@ -827,127 +795,126 @@ export default function Home() {
               <SearchIcon />
               Ricerca manuale
             </label>
-            <div ref={searchFieldRef} style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <ClearableInput
-                  id="searchMaterial"
-                  value={search}
-                  onChange={(v) => {
-                    setSearch(v);
-                    setOpen(true);
-                    setPicked(null);
-                    setStock(null);
-                    setShelves(null);
-                    setMsg(null);
-                    if (!v.trim()) setSuggestions([]);
-                  }}
-                  onClear={resetSearch}
-                  onFocus={() => setOpen(true)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      void showAllSearchResults();
-                      return;
-                    }
-
-                    if (!open) return;
-
-                    if (e.key === "ArrowDown") {
-                      e.preventDefault();
-                      setActiveIndex((i) => Math.min(i + 1, filteredSuggestions.length - 1));
-                    } else if (e.key === "ArrowUp") {
-                      e.preventDefault();
-                      setActiveIndex((i) => Math.max(i - 1, 0));
-                    } else if (e.key === "Escape") {
-                      setOpen(false);
-                    }
-                  }}
-                  placeholder="Codice, descrizione o posizione..."
-                  style={{ width: "100%" }}
-                />
-              </div>
-              <button
-                type="button"
-                className="btn btnPrimary"
-                onClick={() => void startScan()}
-                title="Scansiona QR materiale"
-                aria-label="Scansiona QR materiale"
-                style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 46, paddingInline: 12 }}
-              >
-                <QrIcon />
-              </button>
-            </div>
-
-            {typeof document !== "undefined" && open && search.trim() && suggestionsBox
-              ? createPortal(
-                  <div
-                    ref={suggestionsRef}
-                    style={{
-                      position: "fixed",
-                      left: suggestionsBox.left,
-                      top: suggestionsBox.top,
-                      width: suggestionsBox.width,
-                      background: "rgba(255,255,255,0.98)",
-                      border: "1px solid rgba(15,23,42,0.12)",
-                      borderRadius: 14,
-                      boxShadow: "0 16px 40px rgba(0,0,0,0.20)",
-                      overflowY: "auto",
-                      overscrollBehavior: "contain",
-                      maxHeight: suggestionsBox.maxHeight,
-                      zIndex: 40,
+            <div style={{ position: "relative" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <ClearableInput
+                    id="searchMaterial"
+                    value={search}
+                    onChange={(v) => {
+                      setSearch(v);
+                      setOpen(true);
+                      setPicked(null);
+                      setStock(null);
+                      setShelves(null);
+                      setMsg(null);
+                      if (!v.trim()) setSuggestions([]);
                     }}
-                  >
-                    {filteredSuggestions.length === 0 ? (
-                      <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
-                    ) : (
-                      <>
-                        {filteredSuggestions.map((it, idx) => (
-                          <div
-                            key={it.code}
-                            onMouseEnter={() => setActiveIndex(idx)}
-                            onMouseDown={(ev) => {
-                              ev.preventDefault();
-                              pickItem(it);
-                            }}
-                            style={{
-                              padding: "10px 12px",
-                              cursor: "pointer",
-                              background: idx === activeIndex ? "#eef2ff" : "white",
-                              borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "space-between",
-                              gap: 10,
-                            }}
-                          >
-                            <div>
-                              <div style={{ fontWeight: 900, color: "#0f172a" }}>{it.code}</div>
-                              <div style={{ fontSize: 12, color: "#334155" }}>{it.name}</div>
-                              {it.matchInfo && (
-                                <div style={{ fontSize: 12, color: "#0284c7", fontWeight: 700, marginTop: 3 }}>
-                                  {it.matchInfo}
-                                </div>
-                              )}
-                            </div>
-                            <div style={{ fontSize: 12, opacity: 0.8, color: "#0f172a" }}>
-                              ↵ seleziona
-                            </div>
+                    onClear={resetSearch}
+                    onFocus={() => setOpen(true)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void showAllSearchResults();
+                        return;
+                      }
+
+                      if (!open) return;
+
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setActiveIndex((i) => Math.min(i + 1, filteredSuggestions.length - 1));
+                      } else if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setActiveIndex((i) => Math.max(i - 1, 0));
+                      } else if (e.key === "Escape") {
+                        setOpen(false);
+                      }
+                    }}
+                    placeholder="Codice, descrizione o posizione..."
+                    style={{ width: "100%" }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="btn btnPrimary"
+                  onClick={() => void startScan()}
+                  title="Scansiona QR materiale"
+                  aria-label="Scansiona QR materiale"
+                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 46, paddingInline: 12 }}
+                >
+                  <QrIcon />
+                </button>
+              </div>
+
+              {open && search.trim() ? (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    top: "100%",
+                    marginTop: 6,
+                    background: "rgba(255,255,255,0.98)",
+                    border: "1px solid rgba(15,23,42,0.12)",
+                    borderRadius: 14,
+                    boxShadow: "0 16px 40px rgba(0,0,0,0.20)",
+                    overflowY: "auto",
+                    overscrollBehavior: "contain",
+                    maxHeight: 280,
+                    zIndex: 5,
+                  }}
+                >
+                  {filteredSuggestions.length === 0 ? (
+                    <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
+                  ) : (
+                    <>
+                      {filteredSuggestions.map((it, idx) => (
+                        <div
+                          key={it.code}
+                          onMouseEnter={() => setActiveIndex(idx)}
+                          onMouseDown={(ev) => {
+                            ev.preventDefault();
+                            pickItem(it);
+                          }}
+                          style={{
+                            padding: "10px 12px",
+                            cursor: "pointer",
+                            background: idx === activeIndex ? "#eef2ff" : "white",
+                            borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 10,
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 900, color: "#0f172a" }}>{it.code}</div>
+                            <div style={{ fontSize: 12, color: "#334155" }}>{it.name}</div>
+                            {it.matchInfo && (
+                              <div style={{ fontSize: 12, color: "#0284c7", fontWeight: 700, marginTop: 3 }}>
+                                {it.matchInfo}
+                              </div>
+                            )}
                           </div>
-                        ))}
-                        <div style={{ padding: "9px 12px", fontSize: 12, color: "#1d4ed8", background: "#eff6ff", borderTop: "1px solid #bfdbfe", fontWeight: 800 }}>
-                          Premi Invio per aprire tutti i risultati
+                          <div style={{ fontSize: 12, opacity: 0.8, color: "#0f172a" }}>
+                            ↵ seleziona
+                          </div>
                         </div>
-                        {filteredSuggestions.length >= MAX_MATERIAL_SUGGESTIONS && (
-                          <div style={{ padding: "10px 12px", fontSize: 12, color: "#475569", background: "#f8fafc", borderTop: "1px solid #e2e8f0" }}>
-                            Ci sono molti risultati: scrivi qualche carattere in più per affinare la ricerca.
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>,
-                  document.body
-                )
-              : null}
+                      ))}
+                      <div style={{ padding: "9px 12px", fontSize: 12, color: "#1d4ed8", background: "#eff6ff", borderTop: "1px solid #bfdbfe", fontWeight: 800 }}>
+                        Premi Invio per aprire tutti i risultati
+                      </div>
+                      {filteredSuggestions.length >= MAX_MATERIAL_SUGGESTIONS && (
+                        <div style={{ padding: "10px 12px", fontSize: 12, color: "#475569", background: "#f8fafc", borderTop: "1px solid #e2e8f0" }}>
+                          Ci sono molti risultati: scrivi qualche carattere in più per affinare la ricerca.
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </div>
           </div>
 
           {msg && <div style={{ marginTop: 10, fontWeight: 800 }}>{msg}</div>}
@@ -1033,7 +1000,7 @@ export default function Home() {
                 {loading ? (
                   <tr>
                     <td colSpan={7} style={{ padding: 12, color: "#0f172a" }}>
-                      Caricamento…
+                      <AppLoading align="start" size={18} />
                     </td>
                   </tr>
                 ) : last10.length === 0 ? (
@@ -1149,10 +1116,14 @@ export default function Home() {
                   onClick={() => void downloadRegistro(selectedMovementEntry.rows as MovementRow[])}
                   style={{ whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 8 }}
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M12 3v12m0 0 4-4m-4 4-4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M5 19h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                  </svg>
+                  {registerBusy ? (
+                    <AppSpinner size={15} />
+                  ) : (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M12 3v12m0 0 4-4m-4 4-4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M5 19h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  )}
                   {registerBusy ? "Generazione…" : "Scarica registro"}
                 </button>
               </div>

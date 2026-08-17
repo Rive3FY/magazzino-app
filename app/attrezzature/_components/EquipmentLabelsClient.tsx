@@ -13,6 +13,7 @@ import {
   EQUIPMENT_STATUS_OPTIONS,
 } from "../../_lib/equipment";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentStatus } from "../../_lib/types";
+import { AppLoading } from "../../_components/AppSpinner";
 
 type Props = {
   area: EquipmentArea;
@@ -313,7 +314,7 @@ body{margin:0;padding:0;background:#fff}
         <div className="pageBar">
           <div className="pageBarTitle">Attrezzature {areaLabel} - Etichette</div>
         </div>
-        <div className="card" style={{ padding: 12 }}>Caricamento...</div>
+        <div className="card" style={{ padding: 12 }}><AppLoading align="start" /></div>
       </main>
     );
   }
@@ -384,7 +385,7 @@ body{margin:0;padding:0;background:#fff}
         </div>
 
         {loading ? (
-          <div style={{ padding: 24, textAlign: "center", color: "#64748b" }}>Caricamento...</div>
+          <div style={{ padding: 24 }}><AppLoading /></div>
         ) : (
           <>
             {msg && <div className="equipmentInlineMessage" style={{ marginBottom: 10 }}>{msg}</div>}

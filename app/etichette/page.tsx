@@ -7,6 +7,7 @@ import { createClient } from "../_lib/supabase/client";
 import { useAuth } from "../_lib/hooks/useAuth";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import { matchesMaterialSearch } from "../_lib/materialSearch";
+import { AppLoading } from "../_components/AppSpinner";
 import {
   buildDefinitivaDefaults,
   buildDefinitivaLabelHtml,
@@ -435,7 +436,7 @@ export default function EtichettePage() {
         </div>
 
         {loading ? (
-          <div style={{ padding: 24, textAlign: "center", color: "#64748b" }}>Caricamento...</div>
+          <div style={{ padding: 24 }}><AppLoading /></div>
         ) : (
           <>
             {msg && <div className="equipmentInlineMessage" style={{ marginBottom: 10 }}>{msg}</div>}

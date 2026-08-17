@@ -26,6 +26,7 @@ import AppModalFrame from "../../_components/AppModalFrame";
 import AppScanStatusModal, { waitScanResolveFeedback } from "../../_components/AppScanStatusModal";
 import ConfirmModal from "../../_components/ConfirmModal";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../../_lib/fastBarcodeScanner";
+import AppSpinner, { AppBusyLabel, AppLoading } from "../../_components/AppSpinner";
 import type {
   EquipmentArea,
   EquipmentAssetRow,
@@ -172,11 +173,7 @@ function QrIcon() {
 }
 
 function SpinnerIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 1s linear infinite", transformOrigin: "center" }}>
-      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-    </svg>
-  );
+  return <AppSpinner size={18} />;
 }
 
 function PhoneIcon() {
@@ -1916,7 +1913,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         <div className="pageBar">
           <div className="pageBarTitle">Attrezzature {areaLabel} - Movimenti</div>
         </div>
-        <div className="card" style={{ padding: 12 }}>Caricamento...</div>
+        <div className="card" style={{ padding: 12 }}><AppLoading align="start" /></div>
       </main>
     );
   }
@@ -2837,11 +2834,11 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                   </button>
                   {scanMode === "CART" ? (
                     <button className="btn btnPrimary" onClick={confirmCartPickup} disabled={cartBusy || cartItems.length === 0 || !cartDestination.trim()} type="button">
-                      {cartBusy ? "Salvataggio..." : "Conferma prelievo"}
+                      <AppBusyLabel busy={cartBusy}>{cartBusy ? "Salvataggio..." : "Conferma prelievo"}</AppBusyLabel>
                     </button>
                   ) : (
                     <button className="btn btnPrimary" onClick={saveMovement} disabled={saving || !form.equipment_id} type="button">
-                      {saving ? "Salvataggio..." : "Conferma prelievo"}
+                      <AppBusyLabel busy={saving}>{saving ? "Salvataggio..." : "Conferma prelievo"}</AppBusyLabel>
                     </button>
                   )}
                 </div>
@@ -2932,7 +2929,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={isAdmin ? 10 : 9}>Caricamento...</td>
+                  <td colSpan={isAdmin ? 10 : 9}><AppLoading align="start" size={18} /></td>
                 </tr>
               ) : openMovements.length === 0 ? (
                 <tr>
@@ -3007,7 +3004,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                               color: "#991b1b",
                             }}
                           >
-                            {busy ? "Eliminazione..." : "Elimina"}
+                            <AppBusyLabel busy={busy}>{busy ? "Eliminazione..." : "Elimina"}</AppBusyLabel>
                           </button>
                         </td>
                       )}
@@ -3123,7 +3120,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 </button>
               ) : (
                 <button className="btn btnPrimary" type="button" onClick={confirmScannedSinglePickup} disabled={!scanResultCanPickup || saving}>
-                  {saving ? "Salvataggio..." : "Conferma prelievo"}
+                  <AppBusyLabel busy={saving}>{saving ? "Salvataggio..." : "Conferma prelievo"}</AppBusyLabel>
                 </button>
               )}
             </div>
@@ -3145,7 +3142,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 disabled={pickupPdfBusy}
                 onClick={downloadClosingPickupPdf}
               >
-                {pickupPdfBusy ? "Generazione PDF..." : "Scarica registro PDF"}
+                <AppBusyLabel busy={pickupPdfBusy}>{pickupPdfBusy ? "Generazione PDF..." : "Scarica registro PDF"}</AppBusyLabel>
               </button>
               {isAdmin && (
                 <button
@@ -3221,7 +3218,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                         <div style={{ fontWeight: 900 }}>Rettifica / Chiusura uscita</div>
                         <button className="btn btnPrimary" type="button" onClick={confirmClose} disabled={saving || !canEditRow(closing)}>
-                          {saving ? "Salvataggio..." : "Conferma chiusura"}
+                          <AppBusyLabel busy={saving}>{saving ? "Salvataggio..." : "Conferma chiusura"}</AppBusyLabel>
                         </button>
                       </div>
 
@@ -3370,13 +3367,15 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                       )
                     }
                   >
-                    {saving
-                      ? "Salvataggio..."
-                      : `Conferma rientro selezionati (${
-                          closingGroup.filter(
-                            (row) => getMovementStatus(row) === "OPEN" && groupEditState[row.id]?.selectedForClose
-                          ).length
-                        })`}
+                    <AppBusyLabel busy={saving}>
+                      {saving
+                        ? "Salvataggio..."
+                        : `Conferma rientro selezionati (${
+                            closingGroup.filter(
+                              (row) => getMovementStatus(row) === "OPEN" && groupEditState[row.id]?.selectedForClose
+                            ).length
+                          })`}
+                    </AppBusyLabel>
                   </button>
                 </div>
               </>

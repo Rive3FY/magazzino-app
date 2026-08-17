@@ -6,6 +6,7 @@ import { useAuth } from "../../_lib/hooks/useAuth";
 import { useToast } from "../../_lib/ToastContext";
 import { EQUIPMENT_AREA_LABELS } from "../../_lib/equipment";
 import type { EquipmentArea } from "../../_lib/types";
+import { AppLoading } from "../../_components/AppSpinner";
 
 type Props = {
   area: EquipmentArea;
@@ -78,7 +79,7 @@ export default function EquipmentRegistriClient({ area }: Props) {
         <div className="pageBar">
           <div className="pageBarTitle">Attrezzature {areaLabel} - Registri</div>
         </div>
-        <div className="card" style={{ padding: 12 }}>Caricamento...</div>
+        <div className="card" style={{ padding: 12 }}><AppLoading align="start" /></div>
       </main>
     );
   }

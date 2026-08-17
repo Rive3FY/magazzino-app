@@ -5,6 +5,7 @@ import { useState } from "react";
 import { createClient } from "../../_lib/supabase/client";
 import { useToast } from "../../_lib/ToastContext";
 import AppModalFrame from "../../_components/AppModalFrame";
+import { AppBusyLabel } from "../../_components/AppSpinner";
 import type { EquipmentArea } from "../../_lib/types";
 
 const EQUIPMENT_FIELDS = [
@@ -302,7 +303,7 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
                     disabled={importing || validRows.length === 0}
                     onClick={() => void doImport()}
                   >
-                    {importing ? "Importazione…" : `Importa ${validRows.length} attrezzature`}
+                    <AppBusyLabel busy={importing}>{importing ? "Importazione…" : `Importa ${validRows.length} attrezzature`}</AppBusyLabel>
                   </button>
                   <button type="button" className="btn" onClick={() => setStep("mapping")}>
                     Modifica associazioni

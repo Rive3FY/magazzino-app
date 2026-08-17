@@ -8,6 +8,7 @@ import { useToast } from "../_lib/ToastContext";
 import { referentSchema } from "../_lib/validations";
 import { fmtDateTime } from "../_lib/utils";
 import type { ReferentRow } from "../_lib/types";
+import { AppBusyLabel, AppLoading } from "../_components/AppSpinner";
 
 type UserRow = {
   id: string;
@@ -735,7 +736,7 @@ export default function AdminPage() {
         <div className="pageBar">
           <div className="pageBarTitle">Super Admin</div>
         </div>
-        <div style={{ padding: 12 }}>Caricamento…</div>
+            <div style={{ padding: 12 }}><AppLoading align="start" /></div>
       </main>
     );
   }
@@ -825,7 +826,7 @@ export default function AdminPage() {
                 </thead>
                 <tbody>
                   {loading ? (
-                    <tr><td colSpan={9} style={{ padding: 12 }}>Caricamento…</td></tr>
+                    <tr><td colSpan={9} style={{ padding: 12 }}><AppLoading align="start" size={18} /></td></tr>
                   ) : rows.length === 0 ? (
                     <tr><td colSpan={9} style={{ padding: 12 }}>Nessun utente</td></tr>
                   ) : (
@@ -877,7 +878,7 @@ export default function AdminPage() {
                                   onClick={() => deleteUser(u.id, u.email)}
                                   style={{ borderColor: "rgba(239,68,68,0.5)", background: "rgba(239,68,68,0.08)", color: "#991b1b" }}
                                 >
-                                  {deletingId === u.id ? "Eliminazione…" : "Elimina"}
+                                  <AppBusyLabel busy={deletingId === u.id}>{deletingId === u.id ? "Eliminazione…" : "Elimina"}</AppBusyLabel>
                                 </button>
                               )}
                             </div>
@@ -913,7 +914,7 @@ export default function AdminPage() {
                   </select>
                 </div>
                 <div style={{ display: "flex", gap: 10 }}>
-                  <button className="btn btnPrimary" onClick={saveReferent} disabled={refSaving}>{refSaving ? "Salvataggio..." : editingId ? "Salva" : "Crea"}</button>
+                  <button className="btn btnPrimary" onClick={saveReferent} disabled={refSaving}><AppBusyLabel busy={refSaving}>{refSaving ? "Salvataggio..." : editingId ? "Salva" : "Crea"}</AppBusyLabel></button>
                   <button className="btn" onClick={resetRefForm} disabled={refSaving}>Pulisci</button>
                 </div>
               </div>
@@ -923,7 +924,7 @@ export default function AdminPage() {
             <div className="card" style={{ padding: 12, marginTop: 12 }}>
               <div style={{ fontWeight: 900, marginBottom: 10 }}>Elenco referenti</div>
               {refLoading ? (
-                <div style={{ padding: 12 }}>Caricamento…</div>
+                <div style={{ padding: 12 }}><AppLoading align="start" /></div>
               ) : refRows.length === 0 ? (
                 <div style={{ padding: 12 }}>Nessun referente.</div>
               ) : (
@@ -971,7 +972,7 @@ export default function AdminPage() {
             </div>
             {excelRequestsMsg && <div style={{ marginBottom: 10, fontWeight: 700 }}>{excelRequestsMsg}</div>}
             {excelRequestsLoading ? (
-              <div style={{ padding: 12 }}>Caricamento…</div>
+              <div style={{ padding: 12 }}><AppLoading align="start" /></div>
             ) : excelRequests.length === 0 ? (
               <div style={{ padding: 12 }}>Nessuna richiesta in attesa.</div>
             ) : (
@@ -1077,7 +1078,7 @@ export default function AdminPage() {
 
             <div className="card" style={{ padding: 12, marginTop: 12 }}>
               {auditLoading ? (
-                <div style={{ padding: 12 }}>Caricamento…</div>
+                <div style={{ padding: 12 }}><AppLoading align="start" /></div>
               ) : auditRows.length === 0 ? (
                 <div style={{ padding: 12 }}>Nessun record.</div>
               ) : (

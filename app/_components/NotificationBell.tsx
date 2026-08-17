@@ -6,6 +6,7 @@ import Link from "next/link";
 import { createClient } from "../_lib/supabase/client";
 import { useAuth } from "../_lib/hooks/useAuth";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
+import { AppLoading } from "./AppSpinner";
 
 type NegativeStock = { code: string; warehouse: string; qty_free: number };
 type OpenMovement = { id: string; code: string; qty: number; note: string | null; created_at: string };
@@ -214,7 +215,7 @@ export default function NotificationBell() {
           >
             <div className="notificationBellDropdownScroll">
               {loading ? (
-                <div className="notificationBellItem">Caricamento…</div>
+                <div className="notificationBellItem"><AppLoading align="start" size={18} /></div>
               ) : total === 0 ? (
                 <div className="notificationBellItem notificationBellEmpty">
                   Nessun avviso

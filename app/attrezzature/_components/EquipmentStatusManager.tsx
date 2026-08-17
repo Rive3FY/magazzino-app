@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import AppModalFrame from "../../_components/AppModalFrame";
+import { AppBusyLabel } from "../../_components/AppSpinner";
 import { EQUIPMENT_STATUS_LABELS, equipmentStatusStyle } from "../../_lib/equipment";
 import type { EquipmentAssetRow, EquipmentStatus } from "../../_lib/types";
 
@@ -83,7 +84,7 @@ export default function EquipmentStatusManager({ asset, isOpen, isSaving = false
             disabled={!canSubmit || isSaving}
             onClick={() => void onSubmit(targetStatus as AllowedTargetStatus, maintenanceNote)}
           >
-            {isSaving ? "Salvataggio..." : "Conferma"}
+            <AppBusyLabel busy={isSaving}>{isSaving ? "Salvataggio..." : "Conferma"}</AppBusyLabel>
           </button>
         </>
       }

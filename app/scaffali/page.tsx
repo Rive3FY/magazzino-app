@@ -6,6 +6,7 @@ import { createClient } from "../_lib/supabase/client";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../_lib/fastBarcodeScanner";
 import { matchesMaterialSearch } from "../_lib/materialSearch";
+import { AppLoading } from "../_components/AppSpinner";
 
 function QrIcon() {
   return (
@@ -674,7 +675,7 @@ export default function ScaffaliPage() {
         )}
 
         {loading ? (
-          <div style={{ padding: 24 }}>Caricamento…</div>
+          <div style={{ padding: 24 }}><AppLoading /></div>
         ) : (
           <div className="tableWrap" style={{ marginTop: 8 }}>
             <table className="table">

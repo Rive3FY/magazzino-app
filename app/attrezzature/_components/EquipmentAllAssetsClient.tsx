@@ -23,6 +23,7 @@ import ConfirmModal from "../../_components/ConfirmModal";
 import { equipmentAssetSchema } from "../../_lib/validations";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../../_lib/fastBarcodeScanner";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentStatus } from "../../_lib/types";
+import AppSpinner, { AppBusyLabel, AppLoading } from "../../_components/AppSpinner";
 
 const EQUIPMENT_TABLE_SORT_STATUS_ORDER: Record<EquipmentStatus, number> = EQUIPMENT_STATUS_OPTIONS.reduce(
   (acc, s, i) => {
@@ -129,11 +130,7 @@ function FileTextIcon() {
 }
 
 function SpinnerIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 1s linear infinite", transformOrigin: "center" }}>
-      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-    </svg>
-  );
+  return <AppSpinner size={18} />;
 }
 
 function PlusIcon() {
@@ -1013,7 +1010,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
         <div className="pageBar">
           <div className="pageBarTitle">Attrezzature {areaLabel}</div>
         </div>
-        <div className="card" style={{ padding: 12 }}>Caricamento...</div>
+        <div className="card" style={{ padding: 12 }}><AppLoading align="start" /></div>
       </main>
     );
   }
@@ -1240,7 +1237,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                       color: "#991b1b",
                     }}
                   >
-                    {deletingBulk ? "Eliminazione…" : `Elimina ${selectedIds.size} selezionate`}
+                    <AppBusyLabel busy={deletingBulk}>{deletingBulk ? "Eliminazione…" : `Elimina ${selectedIds.size} selezionate`}</AppBusyLabel>
                   </button>
                 </>
               )}
@@ -1423,7 +1420,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
               )}
               {loading && (
                 <tr>
-                  <td colSpan={11}>Caricamento attrezzature...</td>
+                  <td colSpan={11}><AppLoading label="Caricamento attrezzature..." align="start" size={18} /></td>
                 </tr>
               )}
               {paginatedRows.map((row) => {
@@ -1537,7 +1534,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                                   }}
                                   disabled={techSheetBusyId === row.id}
                                 >
-                                  <FileTextIcon />
+                                  {techSheetBusyId === row.id ? <AppSpinner size={16} /> : <FileTextIcon />}
                                   {techSheetBusyId === row.id ? "Caricamento..." : row.technical_sheet_path ? "Aggiorna scheda" : "Carica scheda"}
                                 </button>
                               )}
@@ -1618,7 +1615,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                     color: "#991b1b",
                   }}
                 >
-                  {deletingBulk ? "Eliminazione…" : `Elimina ${selectedIds.size} selezionate`}
+                  <AppBusyLabel busy={deletingBulk}>{deletingBulk ? "Eliminazione…" : `Elimina ${selectedIds.size} selezionate`}</AppBusyLabel>
                 </button>
               </>
             )}
@@ -1732,7 +1729,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
 
               {isAdmin && (!showCompactMobileDetail || !editingRow) && (
                 <button className="btn btnPrimary" disabled={saving} onClick={saveAsset}>
-                  {saving ? "Salvataggio..." : "Salva"}
+                  <AppBusyLabel busy={saving}>{saving ? "Salvataggio..." : "Salva"}</AppBusyLabel>
                 </button>
               )}
             </div>
@@ -1795,7 +1792,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                       disabled={techSheetBusyId === editingRow.id}
                       style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
                     >
-                      <FileTextIcon />
+                      {techSheetBusyId === editingRow.id ? <AppSpinner size={16} /> : <FileTextIcon />}
                       {techSheetBusyId === editingRow.id ? "Caricamento..." : editingRow.technical_sheet_path ? "Aggiorna scheda" : "Carica scheda"}
                     </button>
                   )}
@@ -1834,7 +1831,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
                       disabled={techSheetBusyId === editingRow.id}
                       style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
                     >
-                      <FileTextIcon />
+                      {techSheetBusyId === editingRow.id ? <AppSpinner size={16} /> : <FileTextIcon />}
                       {techSheetBusyId === editingRow.id ? "Caricamento..." : editingRow.technical_sheet_path ? "Aggiorna scheda" : "Carica scheda"}
                     </button>
                   )}

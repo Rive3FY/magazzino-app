@@ -6,6 +6,7 @@ import { createClient } from "../_lib/supabase/client";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import { useToast } from "../_lib/ToastContext";
 import { toNumberLoose } from "../_lib/utils";
+import AppSpinner, { AppLoading } from "../_components/AppSpinner";
 
 type WarehouseKind = "PRM" | "REALE";
 
@@ -487,13 +488,14 @@ export default function ImportPage() {
             </div>
           </div>
 
-          <button type="button" className="btn" onClick={() => void loadBackupFiles()} disabled={backupsLoading}>
+          <button type="button" className="btn" onClick={() => void loadBackupFiles()} disabled={backupsLoading} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            {backupsLoading && <AppSpinner size={15} />}
             {backupsLoading ? "Aggiornamento..." : "Aggiorna archivio"}
           </button>
         </div>
 
         {backupsLoading ? (
-          <div style={{ marginTop: 12 }}>Caricamento archivio backup...</div>
+          <div style={{ marginTop: 12 }}><AppLoading label="Caricamento archivio backup..." align="start" /></div>
         ) : backupSetupMsg ? (
           <div style={{ marginTop: 12, fontWeight: 700 }}>{backupSetupMsg}</div>
         ) : backupFiles.length === 0 ? (
@@ -556,7 +558,7 @@ export default function ImportPage() {
         )}
       </div>
 
-      {busy && <div style={{ padding: 12 }}>Import in corso...</div>}
+      {busy && <div style={{ padding: 12 }}><AppLoading label="Import in corso..." align="start" /></div>}
 
       {msg && (
         <div style={{ padding: 12, fontWeight: 800, whiteSpace: "pre-wrap" }}>

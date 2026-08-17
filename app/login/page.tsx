@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "../_lib/supabase/client";
 import { clearCachedAdminAccess, deriveAdminAccess, writeCachedAdminAccess } from "../_lib/admin-access";
+import AppSpinner, { AppBusyLabel, AppLoading } from "../_components/AppSpinner";
 
 export default function LoginPage() {
   const searchParams = useSearchParams();
@@ -264,7 +265,7 @@ export default function LoginPage() {
               </g>
             </svg>
           </div>
-          <div className="loginBodyNew">Caricamento…</div>
+          <div className="loginBodyNew"><AppLoading style={{ color: "rgba(255,255,255,0.85)" }} /></div>
         </div>
       </main>
     );
@@ -274,7 +275,7 @@ export default function LoginPage() {
     <main className="loginPage">
       {working && (
         <div className="loginRedirectOverlay" aria-live="polite">
-          <div className="loginRedirectSpinner" aria-hidden />
+          <AppSpinner size={38} />
           <span>Accesso completato, reindirizzamento…</span>
         </div>
       )}
@@ -425,9 +426,11 @@ export default function LoginPage() {
             className="loginBtnPrimary"
             disabled={working}
           >
-            {mode === "login"
-              ? working ? "Accesso…" : "ACCEDI"
-              : working ? "Creazione…" : "REGISTRATI"}
+            <AppBusyLabel busy={working}>
+              {mode === "login"
+                ? working ? "Accesso…" : "ACCEDI"
+                : working ? "Creazione…" : "REGISTRATI"}
+            </AppBusyLabel>
           </button>
 
           <button

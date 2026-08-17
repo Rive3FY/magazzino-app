@@ -16,6 +16,7 @@ import { useToast } from "../../_lib/ToastContext";
 import { fmtDateTime } from "../../_lib/utils";
 import AppModalFrame from "../../_components/AppModalFrame";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentMovementRow } from "../../_lib/types";
+import AppSpinner, { AppBusyLabel, AppLoading } from "../../_components/AppSpinner";
 
 type Props = {
   area: EquipmentArea;
@@ -181,7 +182,7 @@ function MaintenanceDetailModal({ mov, asset, area, userId, userEmail, onClose, 
             onClick={() => void handleReintegrate()}
             title={!asset ? "Anagrafica non trovata" : assetResolved(asset) ? "Già disponibile o dismessa" : openMovementMsg ?? "Reintegra in magazzino"}
           >
-            {reintBusy ? "Reintegro…" : "Reintegra (disponibile)"}
+            <AppBusyLabel busy={reintBusy}>{reintBusy ? "Reintegro…" : "Reintegra (disponibile)"}</AppBusyLabel>
           </button>
         </>
       }
@@ -374,7 +375,7 @@ export default function EquipmentMaintenanceListClient({ area, basePath }: Props
         <div className="pageBar">
           <div className="pageBarTitle">Attrezzature {areaLabel} — Manutenzioni</div>
         </div>
-        <div className="card" style={{ padding: 12 }}>Caricamento…</div>
+        <div className="card" style={{ padding: 12 }}><AppLoading align="start" /></div>
       </main>
     );
   }
@@ -424,7 +425,8 @@ export default function EquipmentMaintenanceListClient({ area, basePath }: Props
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <button type="button" className="btn" onClick={() => void load()} disabled={loading}>
+            <button type="button" className="btn" onClick={() => void load()} disabled={loading} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              {loading && <AppSpinner size={15} />}
               {loading ? "Aggiornamento…" : "Aggiorna"}
             </button>
           </div>
@@ -458,7 +460,7 @@ export default function EquipmentMaintenanceListClient({ area, basePath }: Props
         {msg && <div style={{ marginBottom: 12, fontWeight: 700, color: "#b91c1c" }}>{msg}</div>}
 
         {loading ? (
-          <div style={{ padding: 12 }}>Caricamento…</div>
+          <div style={{ padding: 12 }}><AppLoading align="start" /></div>
         ) : sortedRows.length === 0 ? (
           <div style={{ padding: 12, color: "#64748b" }}>
             {listMode === "queue"

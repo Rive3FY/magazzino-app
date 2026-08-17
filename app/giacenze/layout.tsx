@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { AppLoading } from "../_components/AppSpinner";
 
 export default function GiacenzeLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -9,7 +10,7 @@ export default function GiacenzeLayout({ children }: { children: React.ReactNode
             <div className="pageBarTitle">Magazzino - Inventario</div>
           </div>
           <div className="card" style={{ padding: 24 }}>
-            Caricamento…
+            <AppLoading />
           </div>
         </main>
       }

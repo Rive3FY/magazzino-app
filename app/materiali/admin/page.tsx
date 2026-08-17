@@ -8,6 +8,7 @@ import { useToast } from "../../_lib/ToastContext";
 import { referentSchema } from "../../_lib/validations";
 import { fmtDateTime } from "../../_lib/utils";
 import { useIsAdmin } from "../../_lib/hooks/useIsAdmin";
+import { AppBusyLabel, AppLoading } from "../../_components/AppSpinner";
 import type { ReferentRow } from "../../_lib/types";
 
 type TabId = "utenti" | "referenti" | "richieste-excel";
@@ -284,7 +285,7 @@ export default function MaterialiAdminPage() {
         <div className="pageBar">
           <div className="pageBarTitle">Materiali - Gestione Admin</div>
         </div>
-        <div style={{ padding: 12 }}>Caricamento…</div>
+        <div style={{ padding: 12 }}><AppLoading align="start" /></div>
       </main>
     );
   }
@@ -347,7 +348,7 @@ export default function MaterialiAdminPage() {
                   </select>
                 </div>
                 <div style={{ display: "flex", gap: 10 }}>
-                  <button className="btn btnPrimary" onClick={saveReferent} disabled={refSaving}>{refSaving ? "Salvataggio..." : editingId ? "Salva" : "Crea"}</button>
+                  <button className="btn btnPrimary" onClick={saveReferent} disabled={refSaving}><AppBusyLabel busy={refSaving}>{refSaving ? "Salvataggio..." : editingId ? "Salva" : "Crea"}</AppBusyLabel></button>
                   <button className="btn" onClick={resetRefForm} disabled={refSaving}>Pulisci</button>
                 </div>
               </div>
@@ -357,7 +358,7 @@ export default function MaterialiAdminPage() {
             <div className="card" style={{ padding: 12 }}>
               <div style={{ fontWeight: 900, marginBottom: 10 }}>Elenco referenti</div>
               {refLoading ? (
-                <div style={{ padding: 12 }}>Caricamento…</div>
+                <div style={{ padding: 12 }}><AppLoading align="start" /></div>
               ) : refRows.length === 0 ? (
                 <div style={{ padding: 12 }}>Nessun referente.</div>
               ) : (
@@ -405,7 +406,7 @@ export default function MaterialiAdminPage() {
             </div>
             {excelRequestsMsg && <div style={{ marginBottom: 10, fontWeight: 700 }}>{excelRequestsMsg}</div>}
             {excelRequestsLoading ? (
-              <div style={{ padding: 12 }}>Caricamento…</div>
+              <div style={{ padding: 12 }}><AppLoading align="start" /></div>
             ) : excelRequests.length === 0 ? (
               <div style={{ padding: 12 }}>Nessuna richiesta in attesa.</div>
             ) : (

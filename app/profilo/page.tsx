@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
+import { AppBusyLabel, AppLoading } from "../_components/AppSpinner";
 
 function metaStr(v: unknown): string {
   if (v === null || v === undefined) return "";
@@ -167,7 +168,7 @@ export default function ProfiloPage() {
         <div className="pageBar">
           <div className="pageBarTitle">Profilo operatore</div>
         </div>
-        <div style={{ padding: 12 }}>Caricamento…</div>
+        <div style={{ padding: 12 }}><AppLoading align="start" /></div>
       </main>
     );
   }
@@ -219,7 +220,7 @@ export default function ProfiloPage() {
             onClick={save}
             disabled={saving}
           >
-            {saving ? "Salvataggio…" : "Salva"}
+            <AppBusyLabel busy={saving}>{saving ? "Salvataggio…" : "Salva"}</AppBusyLabel>
           </button>
         </div>
       </div>

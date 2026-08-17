@@ -6,6 +6,7 @@ import { notifyEquipmentSync } from "../../_lib/equipmentSync";
 import type { EquipmentArea } from "../../_lib/types";
 import { useToast } from "../../_lib/ToastContext";
 import { isRelationMissingOrNotExposedError } from "../../_lib/postgrestErrors";
+import { AppBusyLabel, AppLoading } from "../../_components/AppSpinner";
 
 type CategoryGroupRow = {
   id: string;
@@ -218,12 +219,12 @@ export default function EquipmentCategoryGroupsClient({ area }: Props) {
               disabled={saving || !newGroupName.trim() || !newCategory.trim()}
               style={{ padding: "8px 14px", fontSize: 13 }}
             >
-              {saving ? "Salvataggio…" : "Aggiungi"}
+              <AppBusyLabel busy={saving}>{saving ? "Salvataggio…" : "Aggiungi"}</AppBusyLabel>
             </button>
           </div>
 
           {loading ? (
-            <div style={{ padding: 16, textAlign: "center", color: "var(--muted)" }}>Caricamento…</div>
+            <div style={{ padding: 16 }}><AppLoading /></div>
           ) : rows.length === 0 ? (
             <div style={{ marginTop: 16, padding: 16, border: "1px dashed var(--border)", borderRadius: 8, color: "var(--muted)", fontSize: 13 }}>
               Nessun gruppo configurato. Inserisci gruppo e categoria sopra.

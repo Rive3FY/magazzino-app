@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "../../_lib/supabase/client";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../../_lib/fastBarcodeScanner";
+import AppSpinner, { AppLoading } from "../../_components/AppSpinner";
 
 type Warehouse = "PRM" | "REALE";
 
@@ -279,7 +280,7 @@ export default function MaterialiScanRemotoPage() {
   if (authLoading || !user) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center p-4">
-        <div className="animate-pulse text-slate-500">Caricamento...</div>
+        <AppLoading />
       </div>
     );
   }
@@ -375,7 +376,7 @@ export default function MaterialiScanRemotoPage() {
           {(status === "scanning_nfc" || status === "resolving" || status === "sending") && (
             <div style={{ borderRadius: 18, border: "1px solid rgba(2,132,199,0.18)", background: "rgba(2,132,199,0.06)", padding: 24, textAlign: "center" }}>
               <div style={{ margin: "0 auto 16px", display: "flex", width: 76, height: 76, alignItems: "center", justifyContent: "center", borderRadius: 999, background: "rgba(2,132,199,0.10)" }}>
-                <div style={{ width: 46, height: 46, borderRadius: 999, border: "4px solid #0284c7", borderTopColor: "transparent", animation: "spin 1s linear infinite" }} />
+                <AppSpinner size={46} style={{ color: "#0284c7" }} />
               </div>
               <div style={{ fontSize: 18, fontWeight: 950, color: "#0f172a" }}>
                 {status === "sending" ? "Invio al PC..." : status === "resolving" ? "Ricerca materiale..." : "Lettura NFC attiva"}

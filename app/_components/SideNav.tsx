@@ -7,6 +7,7 @@ import { createClient } from "../_lib/supabase/client";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import { useEquipmentMaintenanceNotifications } from "../_lib/hooks/useEquipmentMaintenanceNotifications";
 import { useSidebar } from "../_lib/SidebarContext";
+import EquipmentToolsIcon from "./EquipmentToolsIcon";
 
 type Props = { hideSidebar?: boolean };
 
@@ -314,14 +315,7 @@ export default function SideNav({ hideSidebar = false }: Props) {
           {inLinee && (
             <>
               <div className="sideLink sideSectionHeader" style={{ opacity: 0.7, pointerEvents: "none" }}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M5 19 19 5" />
-                  <path d="M8.5 5.5 6 8l2 2 3-3-2.5-1.5Z" />
-                  <path d="m14 13 5 5" />
-                  <path d="m13 14 4 4" />
-                  <path d="M15.5 4.5a3.5 3.5 0 0 1 4 4L17 11l-3-1-1-3 2.5-2.5Z" />
-                  <path d="M6.5 12.5 4 15a3.5 3.5 0 0 0 5 5l2.5-2.5" />
-                </svg>
+                <EquipmentToolsIcon />
                 Attrezzature Linee
               </div>
               <Link className={clsExact("/attrezzature/linee")} href="/attrezzature/linee" onClick={handleLinkClick} prefetch={false}><NavLabel icon="dashboard" label="Dashboard" /></Link>
@@ -370,14 +364,7 @@ export default function SideNav({ hideSidebar = false }: Props) {
           {inStazioni && (
             <>
               <div className="sideLink sideSectionHeader" style={{ opacity: 0.7, pointerEvents: "none" }}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M5 19 19 5" />
-                  <path d="M8.5 5.5 6 8l2 2 3-3-2.5-1.5Z" />
-                  <path d="m14 13 5 5" />
-                  <path d="m13 14 4 4" />
-                  <path d="M15.5 4.5a3.5 3.5 0 0 1 4 4L17 11l-3-1-1-3 2.5-2.5Z" />
-                  <path d="M6.5 12.5 4 15a3.5 3.5 0 0 0 5 5l2.5-2.5" />
-                </svg>
+                <EquipmentToolsIcon />
                 Attrezzature Stazioni
               </div>
               <Link className={clsExact("/attrezzature/stazioni")} href="/attrezzature/stazioni" onClick={handleLinkClick} prefetch={false}><NavLabel icon="dashboard" label="Dashboard" /></Link>

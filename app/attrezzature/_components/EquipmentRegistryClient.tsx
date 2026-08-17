@@ -27,6 +27,7 @@ import ConfirmModal from "../../_components/ConfirmModal";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../../_lib/fastBarcodeScanner";
 import { matchesMaterialSearch } from "../../_lib/materialSearch";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentMovementRow, EquipmentStatus } from "../../_lib/types";
+import AppSpinner, { AppLoading } from "../../_components/AppSpinner";
 
 type Props = {
   area: EquipmentArea;
@@ -82,11 +83,7 @@ function PlusMinusIcon({ open }: { open: boolean }) {
 }
 
 function SpinnerIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 1s linear infinite", transformOrigin: "center" }}>
-      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-    </svg>
-  );
+  return <AppSpinner size={18} />;
 }
 
 function ClearableInput(props: {
@@ -852,7 +849,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
         <div className="pageBar">
           <div className="pageBarTitle">Attrezzature {areaLabel}</div>
         </div>
-        <div className="card" style={{ padding: 12 }}>Caricamento...</div>
+        <div className="card" style={{ padding: 12 }}><AppLoading align="start" /></div>
       </main>
     );
   }
@@ -1268,7 +1265,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={isAdmin ? 9 : 8}>Caricamento...</td>
+                  <td colSpan={isAdmin ? 9 : 8}><AppLoading align="start" size={18} /></td>
                 </tr>
               ) : displayHistory.length === 0 ? (
                 <tr>

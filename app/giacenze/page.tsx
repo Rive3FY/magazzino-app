@@ -15,6 +15,7 @@ import { useToast } from "../_lib/ToastContext";
 import AppModalFrame from "../_components/AppModalFrame";
 import type { WarehouseView, SortDir } from "../_lib/types";
 import { materialReportLink, notifyMaterialsAdmins } from "../_lib/adminAppNotifications";
+import AppSpinner, { AppBusyLabel, AppLoading } from "../_components/AppSpinner";
 
 const supabase = createClient();
 
@@ -144,6 +145,12 @@ export default function GiacenzePage() {
   });
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    if (adminLoading || isAdmin) return;
+    setShelfFilter("ALL");
+    setStockFilter("ALL");
+  }, [adminLoading, isAdmin]);
 
   const [sortKey, setSortKey] = useState<string>("Materiale");
   const [sortDir, setSortDir] = useState<SortDir>("none");
@@ -943,7 +950,9 @@ await writeAuditLog({
           className="mobileGrid1"
           style={{
             display: "grid",
-            gridTemplateColumns: "180px 190px 170px minmax(240px,1fr) auto auto auto auto",
+            gridTemplateColumns: isAdmin
+              ? "180px 190px 170px minmax(240px,1fr) auto auto auto auto"
+              : "180px minmax(240px,1fr) auto auto",
             gap: 10,
             alignItems: "end",
           }}
@@ -959,39 +968,43 @@ await writeAuditLog({
             </select>
           </div>
 
-          <div style={{ minWidth: 0 }}>
-            <label className="label" htmlFor="stockFilterSel">
-              Quantità
-            </label>
-            <select
-              id="stockFilterSel"
-              name="stockFilterSel"
-              className="input"
-              value={stockFilter}
-              onChange={(event) => setStockFilter(event.target.value as StockQuantityFilter)}
-            >
-              <option value="ALL">Tutte</option>
-              <option value="ZERO">Quantità 0 (magazzino)</option>
-              <option value="ZERO_TOTAL">Quantità 0 totale (PRM+REALE)</option>
-            </select>
-          </div>
+          {isAdmin && (
+            <div style={{ minWidth: 0 }}>
+              <label className="label" htmlFor="stockFilterSel">
+                Quantità
+              </label>
+              <select
+                id="stockFilterSel"
+                name="stockFilterSel"
+                className="input"
+                value={stockFilter}
+                onChange={(event) => setStockFilter(event.target.value as StockQuantityFilter)}
+              >
+                <option value="ALL">Tutte</option>
+                <option value="ZERO">Quantità 0 (magazzino)</option>
+                <option value="ZERO_TOTAL">Quantità 0 totale (PRM+REALE)</option>
+              </select>
+            </div>
+          )}
 
-          <div style={{ minWidth: 0 }}>
-            <label className="label" htmlFor="shelfFilterSel">
-              Assegnazione scaffale
-            </label>
-            <select
-              id="shelfFilterSel"
-              name="shelfFilterSel"
-              className="input"
-              value={shelfFilter}
-              onChange={(event) => setShelfFilter(event.target.value as ShelfAssignmentFilter)}
-            >
-              <option value="ALL">Tutti</option>
-              <option value="WITH">Con scaffale</option>
-              <option value="WITHOUT">Senza scaffale</option>
-            </select>
-          </div>
+          {isAdmin && (
+            <div style={{ minWidth: 0 }}>
+              <label className="label" htmlFor="shelfFilterSel">
+                Assegnazione scaffale
+              </label>
+              <select
+                id="shelfFilterSel"
+                name="shelfFilterSel"
+                className="input"
+                value={shelfFilter}
+                onChange={(event) => setShelfFilter(event.target.value as ShelfAssignmentFilter)}
+              >
+                <option value="ALL">Tutti</option>
+                <option value="WITH">Con scaffale</option>
+                <option value="WITHOUT">Senza scaffale</option>
+              </select>
+            </div>
+          )}
 
           <div style={{ minWidth: 0 }}>
             <label className="label" htmlFor="qSearch">
@@ -1018,7 +1031,8 @@ await writeAuditLog({
             Aggiorna
           </button>
 
-          <button className="btn" onClick={() => void exportXlsx()} disabled={exporting}>
+          <button className="btn" onClick={() => void exportXlsx()} disabled={exporting} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            {exporting && <AppSpinner size={15} />}
             {exporting ? "Export in corso..." : "Export Excel"}
           </button>
         </div>
@@ -1198,7 +1212,7 @@ await writeAuditLog({
       {msg && <div style={{ padding: 12, fontWeight: 800 }}>{msg}</div>}
 
       {loading ? (
-        <div style={{ padding: 12 }}>Caricamento…</div>
+        <div style={{ padding: 12 }}><AppLoading align="start" /></div>
       ) : (
         <>
           {/* ✅ SCROLLBAR ORIZZONTALE SEMPRE DISPONIBILE - nascosta su mobile */}
@@ -1440,7 +1454,7 @@ await writeAuditLog({
                 </button>
 
                 <button className="btn btnPrimary" disabled={saving} onClick={saveEdit}>
-                  {saving ? "Salvataggio…" : "Salva"}
+                  <AppBusyLabel busy={saving}>{saving ? "Salvataggio…" : "Salva"}</AppBusyLabel>
                 </button>
               </div>
             </div>
@@ -1606,7 +1620,7 @@ await writeAuditLog({
                 {historyLoading ? (
                   <tr>
                     <td colSpan={6} style={{ padding: 12 }}>
-                      Caricamento…
+                      <AppLoading align="start" size={18} />
                     </td>
                   </tr>
                 ) : historyRows.length === 0 ? (

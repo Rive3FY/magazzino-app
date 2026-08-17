@@ -67,19 +67,17 @@ async function waitForVideoReady(video: HTMLVideoElement) {
   }
 }
 
-type FocusCapableTrack = MediaStreamTrack & {
-  getCapabilities?: () => MediaTrackCapabilities & {
-    focusMode?: string[];
-    zoom?: { min: number; max: number };
-  };
+type CameraTrackCaps = {
+  focusMode?: string[];
+  zoom?: { min: number; max: number };
 };
 
 async function applyCameraTuning(stream: MediaStream) {
-  const track = stream.getVideoTracks()[0] as FocusCapableTrack | undefined;
-  if (!track?.getCapabilities) return;
+  const track = stream.getVideoTracks()[0];
+  if (!track || typeof track.getCapabilities !== "function") return;
 
   try {
-    const caps = track.getCapabilities();
+    const caps = track.getCapabilities() as CameraTrackCaps;
     const advanced: Record<string, unknown>[] = [];
 
     if (caps.focusMode?.includes("continuous")) {

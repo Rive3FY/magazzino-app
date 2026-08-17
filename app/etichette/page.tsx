@@ -71,7 +71,7 @@ export default function EtichettePage() {
   const [loading, setLoading] = useState(true);
   const [onlyWithShelf, setOnlyWithShelf] = useState(false);
   const [q, setQ] = useState("");
-  const [selected, setSelected] = useState<Set<string> | null>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [msg, setMsg] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Record<string, Partial<DefinitivaFields>>>({});
   const [editCode, setEditCode] = useState<string | null>(null);
@@ -214,17 +214,13 @@ export default function EtichettePage() {
   });
 
   const selectableCount = filtered.length;
-
-  const allSelectableKeys = useMemo(() => {
-    const keys = new Set<string>();
-    for (const it of filtered) keys.add(it.code);
-    return keys;
-  }, [filtered]);
+  const visibleSelectedCount = filtered.reduce((count, it) => count + (selected.has(it.code) ? 1 : 0), 0);
+  const allVisibleSelected = selectableCount > 0 && visibleSelectedCount === selectableCount;
 
   const definitivaLabels = useMemo(() => {
     const out: Array<{ code: string; fields: DefinitivaFields; qrValue: string }> = [];
     for (const it of filtered) {
-      if (selected !== null && !selected.has(it.code)) continue;
+      if (!selected.has(it.code)) continue;
       const defaults = buildDefinitivaDefaults({
         code: it.code,
         name: it.name ?? it.code,
@@ -245,27 +241,31 @@ export default function EtichettePage() {
 
   const toggleSelect = (key: string) => {
     setSelected((prev) => {
-      const current = prev === null ? new Set(allSelectableKeys) : prev;
-      const next = new Set(current);
+      const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
-      return next.size === 0 ? new Set() : next.size === allSelectableKeys.size ? null : next;
+      return next;
     });
   };
 
   useEffect(() => {
     const el = headerCheckRef.current;
     if (!el) return;
-    const selSize = selected === null ? selectableCount : selected.size;
-    el.indeterminate = selSize > 0 && selSize < selectableCount;
-  }, [selected, selectableCount]);
+    el.indeterminate = visibleSelectedCount > 0 && visibleSelectedCount < selectableCount;
+  }, [visibleSelectedCount, selectableCount]);
 
   useEffect(() => {
     if (editCode && definitivaLabels.some((l) => l.code === editCode)) return;
     setEditCode(definitivaLabels[0]?.code ?? null);
   }, [definitivaLabels, editCode]);
 
-  const selectAll = () => setSelected(null);
+  const selectAll = () => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const it of filtered) next.add(it.code);
+      return next;
+    });
+  };
   const deselectAll = () => setSelected(new Set());
 
   function updateOverride(code: string, patch: Partial<DefinitivaFields>) {
@@ -445,8 +445,17 @@ export default function EtichettePage() {
                       <input
                         ref={headerCheckRef}
                         type="checkbox"
-                        checked={selected === null}
-                        onChange={(e) => (e.target.checked ? selectAll() : deselectAll())}
+                        checked={allVisibleSelected}
+                        onChange={(e) => {
+                          if (e.target.checked) selectAll();
+                          else {
+                            setSelected((prev) => {
+                              const next = new Set(prev);
+                              for (const it of filtered) next.delete(it.code);
+                              return next;
+                            });
+                          }
+                        }}
                       />
                     </th>
                     <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600 }}>Codice</th>
@@ -458,7 +467,7 @@ export default function EtichettePage() {
                 <tbody>
                   {filtered.map((it) => {
                     const key = it.code;
-                    const sel = selected === null || selected.has(key);
+                    const sel = selected.has(key);
                     const defaults = buildDefinitivaDefaults({
                       code: it.code,
                       name: it.name ?? it.code,

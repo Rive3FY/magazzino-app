@@ -65,7 +65,7 @@ export default function EquipmentLabelsClient({ area }: Props) {
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | EquipmentStatus>("ALL");
   const [printMode, setPrintMode] = useState<PrintMode>("qrDescription");
-  const [selected, setSelected] = useState<Set<string> | null>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const headerCheckRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -101,10 +101,18 @@ export default function EquipmentLabelsClient({ area }: Props) {
     });
   }, [q, rows, statusFilter]);
 
+  const selectableIds = useMemo(
+    () => filtered.filter((row) => getBarcodeValue(row)).map((row) => row.id),
+    [filtered]
+  );
+  const selectableCount = selectableIds.length;
+  const visibleSelectedCount = selectableIds.reduce((count, id) => count + (selected.has(id) ? 1 : 0), 0);
+  const allVisibleSelected = selectableCount > 0 && visibleSelectedCount === selectableCount;
+
   const labels = useMemo<LabelAsset[]>(() => {
     return filtered
       .filter((row) => getBarcodeValue(row))
-      .filter((row) => selected === null || selected.has(row.id))
+      .filter((row) => selected.has(row.id))
       .map((row) => ({
         ...row,
         barcode_value: getBarcodeValue(row),
@@ -114,23 +122,25 @@ export default function EquipmentLabelsClient({ area }: Props) {
   useEffect(() => {
     const el = headerCheckRef.current;
     if (!el) return;
-    const selectableCount = filtered.filter((row) => getBarcodeValue(row)).length;
-    const currentCount = selected === null ? selectableCount : selected.size;
-    el.indeterminate = currentCount > 0 && currentCount < selectableCount;
-  }, [filtered, selected]);
+    el.indeterminate = visibleSelectedCount > 0 && visibleSelectedCount < selectableCount;
+  }, [visibleSelectedCount, selectableCount]);
 
   function toggleSelect(id: string) {
     setSelected((prev) => {
-      const selectable = new Set(filtered.filter((row) => getBarcodeValue(row)).map((row) => row.id));
-      const current = prev === null ? selectable : prev;
-      const next = new Set(current);
+      const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
-      return next.size === 0 ? new Set() : next.size === selectable.size ? null : next;
+      return next;
     });
   }
 
-  const selectAll = () => setSelected(null);
+  const selectAll = () => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const id of selectableIds) next.add(id);
+      return next;
+    });
+  };
   const deselectAll = () => setSelected(new Set());
 
   async function persistMissingBarcodes(targetRows: LabelAsset[]) {
@@ -402,8 +412,17 @@ body{margin:0;padding:0;background:#fff}
                       <input
                         ref={headerCheckRef}
                         type="checkbox"
-                        checked={selected === null && filtered.length > 0}
-                        onChange={(e) => (e.target.checked ? selectAll() : deselectAll())}
+                        checked={allVisibleSelected}
+                        onChange={(e) => {
+                          if (e.target.checked) selectAll();
+                          else {
+                            setSelected((prev) => {
+                              const next = new Set(prev);
+                              for (const id of selectableIds) next.delete(id);
+                              return next;
+                            });
+                          }
+                        }}
                       />
                     </th>
                     <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600 }}>Seriale</th>
@@ -420,7 +439,7 @@ body{margin:0;padding:0;background:#fff}
                     </tr>
                   ) : (
                     filtered.map((row) => {
-                      const checked = selected === null || selected.has(row.id);
+                      const checked = selected.has(row.id);
                       return (
                         <tr
                           key={row.id}

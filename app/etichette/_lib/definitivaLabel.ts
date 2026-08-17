@@ -104,17 +104,21 @@ export function definitivaPrintStyles(): string {
   return `
 @page{size:A4;margin:8mm 10mm}
 *{box-sizing:border-box}
-body{margin:0;padding:0;background:#fff;font-family:Arial,Helvetica,sans-serif;color:#000}
-.definitiva-print-stack{display:flex;flex-direction:column;gap:5mm;width:${DEFINITIVA_LABEL_WIDTH_MM}mm}
+html,body{margin:0;padding:0;background:#fff;font-family:Arial,Helvetica,sans-serif;color:#000}
+.definitiva-print-stack{display:block;width:${DEFINITIVA_LABEL_WIDTH_MM}mm}
 .definitiva-label{
+  display:block;
   width:${DEFINITIVA_LABEL_WIDTH_MM}mm;
   height:${DEFINITIVA_LABEL_HEIGHT_MM}mm;
+  margin:0 0 5mm 0;
   border:0.7pt solid #000;
   break-inside:avoid;
   page-break-inside:avoid;
+  -webkit-column-break-inside:avoid;
   overflow:hidden;
   background:#fff;
 }
+.definitiva-label:last-child{margin-bottom:0}
 .definitiva-grid{
   width:100%;
   height:100%;

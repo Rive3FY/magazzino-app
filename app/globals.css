@@ -2688,10 +2688,15 @@ html, body {
 
 /* Etichetta definitiva a08IO035RE — formato landscape come allegato/foto */
 .definitiva-print-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 5mm;
+  display: block;
   width: 180mm;
+}
+.definitiva-print-stack > .definitiva-label {
+  display: block;
+  margin: 0 0 5mm 0;
+}
+.definitiva-print-stack > .definitiva-label:last-child {
+  margin-bottom: 0;
 }
 .definitiva-preview {
   margin: 12px;
@@ -2846,8 +2851,7 @@ html, body {
     page-break-inside: avoid;
   }
   .print-area.definitiva-print-stack {
-    display: flex !important;
-    flex-direction: column !important;
+    display: block !important;
     width: 180mm !important;
     max-width: 180mm !important;
     page-break-inside: auto;

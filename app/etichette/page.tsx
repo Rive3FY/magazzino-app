@@ -320,7 +320,7 @@ export default function EtichettePage() {
         return buildDefinitivaLabelHtml(l.fields, { logoHtml, qrHtml, esc: escHtml });
       })
       .join("");
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etichette definitive</title>
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etichette definitive (${definitivaLabels.length})</title>
 <style>${definitivaPrintStyles()}</style>
 </head><body><div class="definitiva-print-stack">${stack}</div></body></html>`;
   }
@@ -340,8 +340,26 @@ export default function EtichettePage() {
   const handlePrint = () => {
     if (printCount === 0) return;
     const html = buildLabelsHtml();
+    const win = window.open("", "_blank");
+    if (win) {
+      win.document.open();
+      win.document.write(html);
+      win.document.close();
+      let printed = false;
+      const printWin = () => {
+        if (printed) return;
+        printed = true;
+        win.focus();
+        win.print();
+      };
+      win.onload = printWin;
+      setTimeout(printWin, 400);
+      return;
+    }
+
     const iframe = document.createElement("iframe");
-    iframe.style.cssText = "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none";
+    iframe.setAttribute("title", "Stampa etichette");
+    iframe.style.cssText = "position:fixed;left:0;top:0;width:210mm;height:297mm;border:0;opacity:0;pointer-events:none";
     document.body.appendChild(iframe);
     const doc = iframe.contentWindow?.document;
     if (!doc) {

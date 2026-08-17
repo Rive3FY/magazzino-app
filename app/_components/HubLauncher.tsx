@@ -29,14 +29,37 @@ function LauncherMeta({ items }: { items: string[] }) {
 }
 
 export default function HubLauncher() {
-  const { isSuperAdmin, loading } = useIsAdmin();
+  const {
+    isSuperAdmin,
+    canManageMaterials,
+    canManageEquipmentLinee,
+    canManageEquipmentStazioni,
+    loading,
+  } = useIsAdmin();
+
+  const materialsAdmin = !loading && canManageMaterials;
+  const equipmentAdmin = !loading && (canManageEquipmentLinee || canManageEquipmentStazioni);
+
+  const materialsText = materialsAdmin
+    ? "Dashboard, movimenti, inventario e strumenti di gestione: scaffali, etichette e import."
+    : "Consulta giacenze, registra prelievi e segui i movimenti del magazzino.";
+  const materialsMeta = materialsAdmin
+    ? ["Movimenti", "Inventario", "Gestione Admin"]
+    : ["Dashboard", "Movimenti", "Inventario"];
+
+  const equipmentText = equipmentAdmin
+    ? "Scegli il registro Linee o Stazioni. Da admin trovi anche manutenzione, etichette e gestione."
+    : "Scegli il registro Linee o Stazioni per consultare attrezzature, movimenti e assegnatari.";
+  const equipmentMeta = equipmentAdmin
+    ? ["Linee", "Stazioni", "Gestione"]
+    : ["Linee", "Stazioni"];
 
   return (
     <div className="card" style={{ padding: 20 }}>
       <div className="launcherHero">
         <div className="launcherTitle">Scegli l&apos;area di lavoro</div>
         <div className="launcherText">
-          Accedi rapidamente ai materiali, alle attrezzature oppure alla gestione del tuo profilo.
+          Accedi all&apos;area disponibile per il tuo profilo: materiali, attrezzature o dati personali.
           Se scegli attrezzature, nel passaggio successivo potrai entrare in Linee o Stazioni.
         </div>
       </div>
@@ -51,10 +74,8 @@ export default function HubLauncher() {
             <LauncherIcon label="M" />
             <div className="launcherCardBadge">Materiali</div>
             <div className="launcherCardTitle">Materiali</div>
-            <div className="launcherCardText">
-              Entra nel flusso materiali per dashboard, movimenti, inventario, scaffali, etichette e gestione operativa.
-            </div>
-            <LauncherMeta items={["Movimenti", "Inventario", "Etichette"]} />
+            <div className="launcherCardText">{materialsText}</div>
+            <LauncherMeta items={materialsMeta} />
           </div>
           <div className="launcherCardFooter">
             <span>Apri modulo materiali</span>
@@ -71,10 +92,8 @@ export default function HubLauncher() {
             <LauncherIcon label="A" />
             <div className="launcherCardBadge">Attrezzature</div>
             <div className="launcherCardTitle">Attrezzature</div>
-            <div className="launcherCardText">
-              Accedi alle attrezzature e scegli il registro corretto tra Linee e Stazioni.
-            </div>
-            <LauncherMeta items={["Linee", "Stazioni", "Manutenzioni"]} />
+            <div className="launcherCardText">{equipmentText}</div>
+            <LauncherMeta items={equipmentMeta} />
           </div>
           <div className="launcherCardFooter">
             <span>Scegli area attrezzature</span>

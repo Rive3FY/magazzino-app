@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 
 function LauncherArrow() {
   return (
@@ -26,6 +29,10 @@ function LauncherMeta({ items }: { items: string[] }) {
 }
 
 export default function AttrezzaturePage() {
+  const { canManageEquipmentLinee, canManageEquipmentStazioni, loading } = useIsAdmin();
+  const lineeAdmin = !loading && canManageEquipmentLinee;
+  const stazioniAdmin = !loading && canManageEquipmentStazioni;
+
   return (
     <main className="panel launcherPanel">
       <div className="pageBar">
@@ -36,7 +43,7 @@ export default function AttrezzaturePage() {
         <div className="launcherHero">
           <div className="launcherTitle">Scegli il registro attrezzature</div>
           <div className="launcherText">
-            Le attrezzature di Linee e Stazioni sono separate, non condividono inventario e avranno una navigazione dedicata.
+            Le attrezzature di Linee e Stazioni sono separate, non condividono inventario e hanno una navigazione dedicata.
           </div>
         </div>
 
@@ -51,9 +58,13 @@ export default function AttrezzaturePage() {
               <div className="launcherCardBadge">Dashboard Linee</div>
               <div className="launcherCardTitle">Attrezzature Linee</div>
               <div className="launcherCardText">
-                Gestisci anagrafica, assegnazioni, rientri, manutenzione ed etichette delle attrezzature usate sulle linee.
+                {lineeAdmin
+                  ? "Gestisci anagrafica, assegnazioni, rientri, manutenzione ed etichette delle attrezzature usate sulle linee."
+                  : "Consulta il registro linee, i movimenti, gli assegnatari e i registri."}
               </div>
-              <LauncherMeta items={["Movimenti", "Assegnazioni", "Registri"]} />
+              <LauncherMeta
+                items={lineeAdmin ? ["Movimenti", "Manutenzioni", "Etichette"] : ["Movimenti", "Assegnatari", "Registri"]}
+              />
             </div>
             <div className="launcherCardFooter">
               <span>Apri Linee</span>
@@ -71,9 +82,13 @@ export default function AttrezzaturePage() {
               <div className="launcherCardBadge">Dashboard Stazioni</div>
               <div className="launcherCardTitle">Attrezzature Stazioni</div>
               <div className="launcherCardText">
-                Gestisci un registro separato per le attrezzature delle stazioni, con storico ed etichette dedicati.
+                {stazioniAdmin
+                  ? "Gestisci il registro stazioni, con storico, manutenzione ed etichette dedicate."
+                  : "Consulta il registro stazioni, i movimenti, gli assegnatari e i registri."}
               </div>
-              <LauncherMeta items={["Inventario", "Manutenzioni", "Etichette"]} />
+              <LauncherMeta
+                items={stazioniAdmin ? ["Movimenti", "Manutenzioni", "Etichette"] : ["Movimenti", "Assegnatari", "Registri"]}
+              />
             </div>
             <div className="launcherCardFooter">
               <span>Apri Stazioni</span>

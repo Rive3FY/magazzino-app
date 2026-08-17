@@ -2,6 +2,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { createClient } from "../_lib/supabase/client";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../_lib/fastBarcodeScanner";
 import {
@@ -62,14 +63,6 @@ type ShelfInfo = {
   REALE: string;
 };
 
-function isSameDay(d: Date, ref: Date) {
-  return (
-    d.getFullYear() === ref.getFullYear() &&
-    d.getMonth() === ref.getMonth() &&
-    d.getDate() === ref.getDate()
-  );
-}
-
 function fmtDate(iso: string) {
   const d = new Date(iso);
   const dd = String(d.getDate()).padStart(2, "0");
@@ -95,6 +88,62 @@ function SearchIcon() {
       <circle cx="11" cy="11" r="8" />
       <path d="m21 21-4.35-4.35" />
     </svg>
+  );
+}
+
+function ClearableInput(props: {
+  id?: string;
+  value: string;
+  onChange: (value: string) => void;
+  onClear?: () => void;
+  placeholder?: string;
+  style?: React.CSSProperties;
+  onFocus?: () => void;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+}) {
+  const { id, value, onChange, onClear, placeholder, style, onFocus, onKeyDown } = props;
+  const showClear = value.length > 0;
+
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        id={id}
+        className="input"
+        type="text"
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={onFocus}
+        onKeyDown={onKeyDown}
+        style={{
+          ...style,
+          paddingRight: showClear ? 36 : undefined,
+        }}
+      />
+      {showClear && (
+        <button
+          type="button"
+          onClick={() => (onClear ? onClear() : onChange(""))}
+          aria-label="Cancella"
+          style={{
+            position: "absolute",
+            right: 8,
+            top: "50%",
+            transform: "translateY(-50%)",
+            border: "none",
+            background: "transparent",
+            color: "#64748b",
+            cursor: "pointer",
+            fontSize: 18,
+            lineHeight: 1,
+            padding: 4,
+            zIndex: 2,
+          }}
+        >
+          ×
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -165,7 +214,6 @@ export default function Home() {
   const { canManageMaterials, loading: adminAccessLoading } = useIsAdmin();
 
   const [loading, setLoading] = useState(true);
-  const [itemsCount, setItemsCount] = useState<number>(0);
   const [movements, setMovements] = useState<Movement[]>([]);
   const [nameMap, setNameMap] = useState<Record<string, string>>({});
   const [selectedMovementEntry, setSelectedMovementEntry] = useState<DashboardMovementEntry | null>(null);
@@ -192,14 +240,17 @@ export default function Home() {
   const [adminOverviewOpen, setAdminOverviewOpen] = useState(false);
 
   const boxRef = useRef<HTMLDivElement | null>(null);
+  const searchFieldRef = useRef<HTMLDivElement | null>(null);
+  const suggestionsRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<FastBarcodeReader | null>(null);
 
   const updateSuggestionsBox = useCallback(() => {
-    if (!boxRef.current || typeof window === "undefined") return;
-    const rect = boxRef.current.getBoundingClientRect();
+    const el = searchFieldRef.current;
+    if (!el || typeof window === "undefined") return;
+    const rect = el.getBoundingClientRect();
     const top = rect.bottom + 6;
-    const maxHeight = Math.max(160, Math.min(420, window.innerHeight - top - 12));
+    const maxHeight = Math.max(160, Math.min(280, window.innerHeight - top - 12));
     setSuggestionsBox({
       left: rect.left,
       top,
@@ -563,20 +614,13 @@ export default function Home() {
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const { count: cItems, error: eItems } = await supabase
-      .from("items")
-      .select("code", { count: "exact", head: true });
-
     const { data: movs, error: eMovs } = await supabase
       .from("movements")
       .select("id,created_at,type,code,qty,note,created_by_name,warehouse,status,returned_qty,return_note,referee_email,referee_name,closed_at,closed_by,movement_group_id")
       .order("created_at", { ascending: false })
       .limit(100);
 
-    if (eItems) console.error(eItems);
     if (eMovs) console.error(eMovs);
-
-    setItemsCount(cItems ?? 0);
     const nextMovements = (movs ?? []) as Movement[];
     setMovements(nextMovements);
 
@@ -665,8 +709,9 @@ export default function Home() {
 
   useEffect(() => {
     function onDocMouseDown(e: MouseEvent) {
-      if (!boxRef.current) return;
-      if (!boxRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (boxRef.current?.contains(target) || suggestionsRef.current?.contains(target)) return;
+      setOpen(false);
     }
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
@@ -700,11 +745,6 @@ export default function Home() {
   }, [open, search, suggestions.length, updateSuggestionsBox]);
 
   const filteredSuggestions = suggestions;
-
-  const movementsToday = useMemo(() => {
-    const today = new Date();
-    return movements.filter((m) => isSameDay(new Date(m.created_at), today)).length;
-  }, [movements]);
 
   const lastMovement = movements[0] ?? null;
   const last10 = useMemo(() => {
@@ -775,19 +815,10 @@ export default function Home() {
         <div style={{ opacity: 0.85, marginBottom: 14 }}>Panoramica rapida di anagrafica e operatività.</div>
 
         <div className="glass" style={{ marginTop: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-            <div>
-              <div style={{ fontWeight: 900, fontSize: 16 }}> Controllo veloce materiale</div>
-              <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
-                Cerca per testo oppure scansiona il QR: vedi inventario PRM/REALE, dove si trova e lo scaffale.
-              </div>
-            </div>
-
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-              <button type="button" className="btn" onClick={resetSearch} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <SearchIcon />
-                Pulisci
-              </button>
+          <div>
+            <div style={{ fontWeight: 900, fontSize: 16 }}> Controllo veloce materiale</div>
+            <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
+              Cerca per testo oppure scansiona il QR: vedi inventario PRM/REALE e lo scaffale.
             </div>
           </div>
 
@@ -796,44 +827,45 @@ export default function Home() {
               <SearchIcon />
               Ricerca manuale
             </label>
-            <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
-              <input
-                id="searchMaterial"
-                className="input"
-                value={search}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setSearch(v);
-                  setOpen(true);
-                  setPicked(null);
-                  setStock(null);
-                  setShelves(null);
-                  setMsg(null);
-                  if (!v.trim()) setSuggestions([]);
-                }}
-                onFocus={() => setOpen(true)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void showAllSearchResults();
-                    return;
-                  }
+            <div ref={searchFieldRef} style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <ClearableInput
+                  id="searchMaterial"
+                  value={search}
+                  onChange={(v) => {
+                    setSearch(v);
+                    setOpen(true);
+                    setPicked(null);
+                    setStock(null);
+                    setShelves(null);
+                    setMsg(null);
+                    if (!v.trim()) setSuggestions([]);
+                  }}
+                  onClear={resetSearch}
+                  onFocus={() => setOpen(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void showAllSearchResults();
+                      return;
+                    }
 
-                  if (!open) return;
+                    if (!open) return;
 
-                  if (e.key === "ArrowDown") {
-                    e.preventDefault();
-                    setActiveIndex((i) => Math.min(i + 1, filteredSuggestions.length - 1));
-                  } else if (e.key === "ArrowUp") {
-                    e.preventDefault();
-                    setActiveIndex((i) => Math.max(i - 1, 0));
-                  } else if (e.key === "Escape") {
-                    setOpen(false);
-                  }
-                }}
-                placeholder="Codice, descrizione o posizione..."
-                style={{ width: "100%", flex: 1 }}
-              />
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      setActiveIndex((i) => Math.min(i + 1, filteredSuggestions.length - 1));
+                    } else if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      setActiveIndex((i) => Math.max(i - 1, 0));
+                    } else if (e.key === "Escape") {
+                      setOpen(false);
+                    }
+                  }}
+                  placeholder="Codice, descrizione o posizione..."
+                  style={{ width: "100%" }}
+                />
+              </div>
               <button
                 type="button"
                 className="btn btnPrimary"
@@ -846,72 +878,76 @@ export default function Home() {
               </button>
             </div>
 
-            {open && search.trim() && suggestionsBox && (
-              <div
-                style={{
-                  position: "fixed",
-                  left: suggestionsBox?.left ?? 0,
-                  top: suggestionsBox?.top ?? 0,
-                  width: suggestionsBox?.width ?? "100%",
-                  background: "rgba(255,255,255,0.98)",
-                  border: "1px solid rgba(15,23,42,0.12)",
-                  borderRadius: 14,
-                  boxShadow: "0 16px 40px rgba(0,0,0,0.20)",
-                  overflowY: "auto",
-                  overscrollBehavior: "contain",
-                  maxHeight: suggestionsBox?.maxHeight ?? "55vh",
-                  zIndex: 10060,
-                }}
-              >
-                {filteredSuggestions.length === 0 ? (
-                  <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
-                ) : (
-                  <>
-                    {filteredSuggestions.map((it, idx) => (
-                      <div
-                        key={it.code}
-                        onMouseEnter={() => setActiveIndex(idx)}
-                        onMouseDown={(ev) => {
-                          ev.preventDefault();
-                          pickItem(it);
-                        }}
-                        style={{
-                          padding: "10px 12px",
-                          cursor: "pointer",
-                          background: idx === activeIndex ? "#eef2ff" : "white",
-                          borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: 10,
-                        }}
-                      >
-                        <div>
-                          <div style={{ fontWeight: 900, color: "#0f172a" }}>{it.code}</div>
-                          <div style={{ fontSize: 12, color: "#334155" }}>{it.name}</div>
-                          {it.matchInfo && (
-                            <div style={{ fontSize: 12, color: "#0284c7", fontWeight: 700, marginTop: 3 }}>
-                              {it.matchInfo}
+            {typeof document !== "undefined" && open && search.trim() && suggestionsBox
+              ? createPortal(
+                  <div
+                    ref={suggestionsRef}
+                    style={{
+                      position: "fixed",
+                      left: suggestionsBox.left,
+                      top: suggestionsBox.top,
+                      width: suggestionsBox.width,
+                      background: "rgba(255,255,255,0.98)",
+                      border: "1px solid rgba(15,23,42,0.12)",
+                      borderRadius: 14,
+                      boxShadow: "0 16px 40px rgba(0,0,0,0.20)",
+                      overflowY: "auto",
+                      overscrollBehavior: "contain",
+                      maxHeight: suggestionsBox.maxHeight,
+                      zIndex: 40,
+                    }}
+                  >
+                    {filteredSuggestions.length === 0 ? (
+                      <div style={{ padding: 12, color: "#0f172a" }}>Nessun risultato</div>
+                    ) : (
+                      <>
+                        {filteredSuggestions.map((it, idx) => (
+                          <div
+                            key={it.code}
+                            onMouseEnter={() => setActiveIndex(idx)}
+                            onMouseDown={(ev) => {
+                              ev.preventDefault();
+                              pickItem(it);
+                            }}
+                            style={{
+                              padding: "10px 12px",
+                              cursor: "pointer",
+                              background: idx === activeIndex ? "#eef2ff" : "white",
+                              borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              gap: 10,
+                            }}
+                          >
+                            <div>
+                              <div style={{ fontWeight: 900, color: "#0f172a" }}>{it.code}</div>
+                              <div style={{ fontSize: 12, color: "#334155" }}>{it.name}</div>
+                              {it.matchInfo && (
+                                <div style={{ fontSize: 12, color: "#0284c7", fontWeight: 700, marginTop: 3 }}>
+                                  {it.matchInfo}
+                                </div>
+                              )}
                             </div>
-                          )}
+                            <div style={{ fontSize: 12, opacity: 0.8, color: "#0f172a" }}>
+                              ↵ seleziona
+                            </div>
+                          </div>
+                        ))}
+                        <div style={{ padding: "9px 12px", fontSize: 12, color: "#1d4ed8", background: "#eff6ff", borderTop: "1px solid #bfdbfe", fontWeight: 800 }}>
+                          Premi Invio per aprire tutti i risultati
                         </div>
-                        <div style={{ fontSize: 12, opacity: 0.8, color: "#0f172a" }}>
-                          ↵ seleziona
-                        </div>
-                      </div>
-                    ))}
-                    <div style={{ padding: "9px 12px", fontSize: 12, color: "#1d4ed8", background: "#eff6ff", borderTop: "1px solid #bfdbfe", fontWeight: 800 }}>
-                      Premi Invio per aprire tutti i risultati
-                    </div>
-                    {filteredSuggestions.length >= MAX_MATERIAL_SUGGESTIONS && (
-                      <div style={{ padding: "10px 12px", fontSize: 12, color: "#475569", background: "#f8fafc", borderTop: "1px solid #e2e8f0" }}>
-                        Ci sono molti risultati: scrivi qualche carattere in più per affinare la ricerca.
-                      </div>
+                        {filteredSuggestions.length >= MAX_MATERIAL_SUGGESTIONS && (
+                          <div style={{ padding: "10px 12px", fontSize: 12, color: "#475569", background: "#f8fafc", borderTop: "1px solid #e2e8f0" }}>
+                            Ci sono molti risultati: scrivi qualche carattere in più per affinare la ricerca.
+                          </div>
+                        )}
+                      </>
                     )}
-                  </>
-                )}
-              </div>
-            )}
+                  </div>,
+                  document.body
+                )
+              : null}
           </div>
 
           {msg && <div style={{ marginTop: 10, fontWeight: 800 }}>{msg}</div>}
@@ -959,93 +995,25 @@ export default function Home() {
                 </div>
               </div>
 
-              {(shelves?.PRM || shelves?.REALE) && (
-                <div
-                  className="glass"
-                  style={{
-                    marginTop: 12,
-                    padding: 14,
-                    background: "linear-gradient(135deg, rgba(2,132,199,0.08) 0%, rgba(124,58,237,0.08) 100%)",
-                    border: "1px solid rgba(15,23,42,0.1)",
-                  }}
-                >
-                  <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 8 }}>Dove si trova</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 16, fontSize: 15, fontWeight: 800 }}>
-                    {shelves?.PRM && stock && stock.PRM > 0 && (
-                      <span>
-                        PRM: <span style={{ color: "#0284c7" }}>{shelves.PRM}</span>
-                      </span>
-                    )}
-                    {shelves?.REALE && stock && stock.REALE > 0 && (
-                      <span>
-                        REALE: <span style={{ color: "#7c3aed" }}>{shelves.REALE}</span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
-
             </div>
           )}
         </div>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))",
-            gap: 12,
-            marginTop: 14,
-          }}
-        >
-          <div className="glass">
-            <div style={{ opacity: 0.85, fontSize: 12 }}>Materiali</div>
-            <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>
-              {loading ? "…" : itemsCount}
-            </div>
-            <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>Codici in anagrafica</div>
-          </div>
-
-          <div className="glass">
-            <div style={{ opacity: 0.85, fontSize: 12 }}>Movimenti oggi</div>
-            <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>
-              {loading ? "…" : movementsToday}
-            </div>
-            <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6 }}>
-              Entrate/uscite registrate oggi
-            </div>
-          </div>
-
-          <div className="glass">
-            <div style={{ opacity: 0.85, fontSize: 12 }}>Ultimo movimento</div>
-            <div style={{ marginTop: 8, fontWeight: 800 }}>
-              {loading
-                ? "…"
-                : lastMovement
-                ? `${lastMovement.code} · ${lastMovement.type === "IN" ? "Entrata" : "Uscita"} · ${lastMovement.warehouse ?? "-"}`
-                : "—"}
-            </div>
-            <div style={{ opacity: 0.85, fontSize: 12, marginTop: 6 }}>
-              {loading ? "" : lastMovement ? fmtDate(lastMovement.created_at) : ""}
-            </div>
-          </div>
-        </div>
-
-        {canManageMaterials && (
-          <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end" }}>
-            <button
-              className="btn btnPrimary"
-              type="button"
-              onClick={() => setAdminOverviewOpen(true)}
-            >
-              Panoramica admin
-            </button>
-          </div>
-        )}
-
         <div style={{ marginTop: 14 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
             <h2 style={{ margin: 0 }}>Ultimi movimenti</h2>
-            <a className="btn btnPrimary" href="/movimenti">Vedi tutto</a>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {canManageMaterials && (
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => setAdminOverviewOpen(true)}
+                >
+                  Panoramica admin
+                </button>
+              )}
+              <a className="btn btnPrimary" href="/movimenti">Vedi tutto</a>
+            </div>
           </div>
 
           <div className="tableWrap" style={{ marginTop: 10 }}>
@@ -1337,6 +1305,7 @@ export default function Home() {
           stats={adminStats}
           loading={adminStatsLoading}
           error={adminStatsError}
+          lastMovement={lastMovement}
           onClose={() => setAdminOverviewOpen(false)}
           onRefresh={() => void loadAdminStats()}
         />

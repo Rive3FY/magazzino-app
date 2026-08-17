@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import { useEquipmentMaintenanceNotifications } from "../_lib/hooks/useEquipmentMaintenanceNotifications";
@@ -195,6 +195,17 @@ export default function SideNav({ hideSidebar = false }: Props) {
     pathname.startsWith("/audit-log") ||
     pathname.startsWith("/scan");
 
+  const materialsAdminOpenByRoute =
+    pathname.startsWith("/scaffali") ||
+    pathname.startsWith("/etichette") ||
+    pathname.startsWith("/import") ||
+    pathname.startsWith("/materiali/admin");
+  const [materialsAdminOpen, setMaterialsAdminOpen] = useState(materialsAdminOpenByRoute);
+
+  useEffect(() => {
+    if (materialsAdminOpenByRoute) setMaterialsAdminOpen(true);
+  }, [materialsAdminOpenByRoute]);
+
   useEffect(() => {
     if (checked) return;
     let alive = true;
@@ -261,10 +272,42 @@ export default function SideNav({ hideSidebar = false }: Props) {
               <Link className={clsExact("/materiali")} href="/materiali" onClick={handleLinkClick} prefetch={false}><NavLabel icon="dashboard" label="Dashboard" /></Link>
               <Link className={cls("/movimenti")} href="/movimenti" onClick={handleLinkClick} prefetch={false}><NavLabel icon="movimenti" label="Movimenti" /></Link>
               <Link className={cls("/giacenze")} href="/giacenze" onClick={handleLinkClick} prefetch={false}><NavLabel icon="giacenze" label="Inventario" /></Link>
-              {canManageMaterials && <Link className={cls("/scaffali")} href="/scaffali" onClick={handleLinkClick} prefetch={false}><NavLabel icon="scaffali" label="Scaffali" /></Link>}
-              {canManageMaterials && <Link className={cls("/etichette")} href="/etichette" onClick={handleLinkClick} prefetch={false}><NavLabel icon="etichette" label="Etichette" /></Link>}
-              {canManageMaterials && <Link className={cls("/import")} href="/import" onClick={handleLinkClick} prefetch={false}><NavLabel icon="importExport" label="Import & Export" /></Link>}
-              {canManageMaterials && <Link className={cls("/materiali/admin")} href="/materiali/admin" onClick={handleLinkClick} prefetch={false}><NavLabel icon="admin" label="Gestione Admin" /></Link>}
+              {canManageMaterials && (
+                <div>
+                  <button
+                    type="button"
+                    className={`sideLink sideGroupToggle${materialsAdminOpenByRoute ? " active" : ""}`}
+                    onClick={() => setMaterialsAdminOpen((open) => !open)}
+                    aria-expanded={materialsAdminOpen}
+                  >
+                    <NavLabel icon="admin" label="Gestione Admin" />
+                    <svg
+                      className="sideGroupChevron"
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden
+                      style={{ transform: materialsAdminOpen ? "rotate(90deg)" : "rotate(0deg)" }}
+                    >
+                      <path d="m9 18 6-6-6-6" />
+                    </svg>
+                  </button>
+                  {materialsAdminOpen && (
+                    <div className="sideSubNav">
+                      <Link className={cls("/scaffali")} href="/scaffali" onClick={handleLinkClick} prefetch={false}><NavLabel icon="scaffali" label="Scaffali" /></Link>
+                      <Link className={cls("/etichette")} href="/etichette" onClick={handleLinkClick} prefetch={false}><NavLabel icon="etichette" label="Etichette" /></Link>
+                      <Link className={cls("/import")} href="/import" onClick={handleLinkClick} prefetch={false}><NavLabel icon="importExport" label="Import & Export" /></Link>
+                      <Link className={cls("/materiali/admin")} href="/materiali/admin" onClick={handleLinkClick} prefetch={false}><NavLabel icon="admin" label="Pannello admin" /></Link>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           )}
 

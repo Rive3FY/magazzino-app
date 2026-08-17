@@ -1,6 +1,7 @@
 "use client";
 
 import AppModalFrame from "../../_components/AppModalFrame";
+import { fmtDate } from "../../_lib/utils";
 
 export type MaterialsDashboardStats = {
   items_count: number;
@@ -27,6 +28,12 @@ type Props = {
   stats: MaterialsDashboardStats | null;
   loading: boolean;
   error: string | null;
+  lastMovement?: {
+    code: string;
+    type: string;
+    warehouse: string | null;
+    created_at: string;
+  } | null;
   onClose: () => void;
   onRefresh: () => void;
 };
@@ -101,6 +108,7 @@ export default function AdminMaterialsOverviewModal({
   stats,
   loading,
   error,
+  lastMovement,
   onClose,
   onRefresh,
 }: Props) {
@@ -131,6 +139,37 @@ export default function AdminMaterialsOverviewModal({
         <div style={{ padding: 24, textAlign: "center", color: "#64748b" }}>Caricamento statistiche...</div>
       ) : stats ? (
         <>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))",
+              gap: 12,
+              marginBottom: 14,
+            }}
+          >
+            <div style={{ padding: 14, borderRadius: 12, background: "#fff", border: "1px solid #e2e8f0" }}>
+              <div style={{ fontSize: 12, color: "#64748b" }}>Materiali</div>
+              <div style={{ marginTop: 5, fontSize: 28, fontWeight: 900 }}>{stats.items_count}</div>
+              <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>Codici in anagrafica</div>
+            </div>
+            <div style={{ padding: 14, borderRadius: 12, background: "#fff", border: "1px solid #e2e8f0" }}>
+              <div style={{ fontSize: 12, color: "#64748b" }}>Movimenti oggi</div>
+              <div style={{ marginTop: 5, fontSize: 28, fontWeight: 900 }}>{stats.movements_today}</div>
+              <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>Entrate/uscite registrate oggi</div>
+            </div>
+            <div style={{ padding: 14, borderRadius: 12, background: "#fff", border: "1px solid #e2e8f0" }}>
+              <div style={{ fontSize: 12, color: "#64748b" }}>Ultimo movimento</div>
+              <div style={{ marginTop: 8, fontWeight: 800 }}>
+                {lastMovement
+                  ? `${lastMovement.code} · ${lastMovement.type === "IN" ? "Entrata" : "Uscita"} · ${lastMovement.warehouse ?? "-"}`
+                  : "—"}
+              </div>
+              <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
+                {lastMovement ? fmtDate(lastMovement.created_at) : ""}
+              </div>
+            </div>
+          </div>
+
           <div
             style={{
               display: "grid",
@@ -170,7 +209,6 @@ export default function AdminMaterialsOverviewModal({
             }}
           >
             {[
-              { label: "Codici in anagrafica", value: stats.items_count, href: "/scaffali" },
               { label: "Codici distinti Excel", value: stats.excel_codes_distinct, href: "/import" },
               { label: "Q.tà 0 totale (PRM+REALE)", value: stats.zero_stock_count, href: "/giacenze?stock=zero-total" },
               { label: "Q.tà 0 PRM", value: stats.zero_stock_prm, href: "/giacenze?stock=zero&warehouse=PRM" },

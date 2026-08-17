@@ -10,6 +10,7 @@ import { useAuth } from "../_lib/hooks/useAuth";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import { useToast } from "../_lib/ToastContext";
 import ConfirmModal from "../_components/ConfirmModal";
+import { ScanResolvingPanel, waitScanResolveFeedback } from "../_components/AppScanStatusModal";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../_lib/fastBarcodeScanner";
 import {
   matchesMaterialSearch,
@@ -354,6 +355,7 @@ export default function MovimentiPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<FastBarcodeReader | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [scanResolving, setScanResolving] = useState(false);
   const [remoteMaterialScanOpen, setRemoteMaterialScanOpen] = useState(false);
   const [remoteScanCode, setRemoteScanCode] = useState<string | null>(null);
   const [remoteScanLoading, setRemoteScanLoading] = useState(false);
@@ -1172,6 +1174,7 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
     stopFastBarcodeScan(videoRef.current, readerRef.current);
     readerRef.current = null;
     setScanning(false);
+    setScanResolving(false);
   }
 
   async function startScan() {
@@ -1209,9 +1212,18 @@ async function loadMaterialForScan(code: string, wh: "PRM" | "REALE"): Promise<Q
           readerRef.current = reader;
         },
       });
-      stopScan();
-      if (text) {
-        await pickItemByCode(text, scanMode === "CART");
+      stopFastBarcodeScan(videoEl, readerRef.current);
+      readerRef.current = null;
+      setScanResolving(true);
+      const startedAt = Date.now();
+      try {
+        if (text) {
+          await pickItemByCode(text, scanMode === "CART");
+        }
+        await waitScanResolveFeedback(startedAt);
+      } finally {
+        setScanning(false);
+        setScanResolving(false);
       }
     } catch (e: any) {
       console.error(e);
@@ -5513,6 +5525,15 @@ function finalizeMaterialPickupSuccess() {
       }}
     >
       {scanning ? (
+        scanResolving ? (
+          <>
+            <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner QR code</div>
+            <ScanResolvingPanel hint="Caricamento materiale..." />
+            <button type="button" className="btn" onClick={() => { stopScan(); setScanInfo(null); if (cart.length > 0) setCartOpen(true); }} style={{ marginTop: 12 }}>
+              Fine
+            </button>
+          </>
+        ) : (
         <>
           <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner QR code</div>
           <div style={{ padding: 12, background: "#0f172a", borderRadius: 12, marginBottom: 12 }}>
@@ -5523,6 +5544,7 @@ function finalizeMaterialPickupSuccess() {
             Fine
           </button>
         </>
+        )
       ) : cartNfcScanning ? (
         <>
           <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 12 }}>Scanner NFC</div>

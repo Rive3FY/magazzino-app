@@ -18,7 +18,7 @@ import {
 import { applyEquipmentMaintenanceReintegration } from "../../_lib/equipmentMaintenanceReintegration";
 import EquipmentStatusManager from "./EquipmentStatusManager";
 import EquipmentExcelImportClient from "./EquipmentExcelImportClient";
-import AppScanStatusModal from "../../_components/AppScanStatusModal";
+import AppScanStatusModal, { waitScanResolveFeedback } from "../../_components/AppScanStatusModal";
 import ConfirmModal from "../../_components/ConfirmModal";
 import { equipmentAssetSchema } from "../../_lib/validations";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../../_lib/fastBarcodeScanner";
@@ -172,6 +172,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   const [statusModalRow, setStatusModalRow] = useState<EquipmentAssetRow | null>(null);
   const [formEntries, setFormEntries] = useState<AssetFormState[]>([emptyForm]);
   const [cameraScanning, setCameraScanning] = useState(false);
+  const [scanResolving, setScanResolving] = useState(false);
   const [searchByNfcScanning, setSearchByNfcScanning] = useState(false);
   const [isNfcSupported, setIsNfcSupported] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
@@ -508,6 +509,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     stopFastBarcodeScan(videoRef.current, readerRef.current);
     readerRef.current = null;
     setCameraScanning(false);
+    setScanResolving(false);
   }
 
   async function startCameraScanForSearch() {
@@ -539,8 +541,17 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
           readerRef.current = reader;
         },
       });
-      stopCameraScan();
-      if (text) applySearchResult(text, "barcode");
+      stopFastBarcodeScan(videoEl, readerRef.current);
+      readerRef.current = null;
+      setScanResolving(true);
+      const startedAt = Date.now();
+      try {
+        if (text) applySearchResult(text, "barcode");
+        await waitScanResolveFeedback(startedAt);
+      } finally {
+        setCameraScanning(false);
+        setScanResolving(false);
+      }
     } catch (error) {
       stopCameraScan();
       setMsg("Errore camera: " + (error instanceof Error ? error.message : "sconosciuto"));
@@ -1196,11 +1207,13 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
       <AppScanStatusModal
         open={cameraScanning}
         mode="barcode"
+        phase={scanResolving ? "resolving" : "scanning"}
         videoRef={videoRef}
         icon={<SpinnerIcon />}
         onClose={stopCameraScan}
         barcodeTitle="Scanner QR"
         barcodeHint="Inquadra il QR code"
+        resolvingHint="Apertura attrezzatura..."
       />
 
       <div className="card" style={{ padding: 12, marginTop: 12 }}>

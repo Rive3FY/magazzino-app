@@ -3,9 +3,61 @@
 import type { RefObject, ReactNode } from "react";
 import AppModalFrame from "./AppModalFrame";
 
+export const SCAN_RESOLVE_MIN_MS = 280;
+
+export async function waitScanResolveFeedback(startedAt: number, minMs = SCAN_RESOLVE_MIN_MS) {
+  const remaining = minMs - (Date.now() - startedAt);
+  if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+}
+
+function ResolvingSpinner() {
+  return (
+    <svg
+      width="36"
+      height="36"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#38bdf8"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ animation: "spin 0.8s linear infinite", transformOrigin: "center" }}
+    >
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
+}
+
+export function ScanResolvingPanel({ hint = "Caricamento dati..." }: { hint?: string }) {
+  return (
+    <div className="appModalSection">
+      <div
+        className="appModalSectionBody"
+        style={{
+          padding: 28,
+          background: "#0f172a",
+          borderRadius: 12,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 12,
+          minHeight: 180,
+          justifyContent: "center",
+        }}
+      >
+        <ResolvingSpinner />
+        <div style={{ fontSize: 16, color: "#e2e8f0", fontWeight: 800 }}>QR riconosciuto</div>
+        <div style={{ fontSize: 13, color: "#94a3b8" }}>{hint}</div>
+      </div>
+    </div>
+  );
+}
+
 type Props = {
   open: boolean;
   mode: "barcode" | "nfc";
+  phase?: "scanning" | "resolving";
   videoRef?: RefObject<HTMLVideoElement | null>;
   icon?: ReactNode;
   onClose: () => void;
@@ -13,11 +65,13 @@ type Props = {
   nfcTitle?: string;
   barcodeHint?: string;
   nfcHint?: string;
+  resolvingHint?: string;
 };
 
 export default function AppScanStatusModal({
   open,
   mode,
+  phase = "scanning",
   videoRef,
   icon,
   onClose,
@@ -25,12 +79,20 @@ export default function AppScanStatusModal({
   nfcTitle = "Scanner NFC",
   barcodeHint = "Inquadra il barcode o il QR code",
   nfcHint = "Avvicina il telefono al tag NFC",
+  resolvingHint = "Caricamento dati...",
 }: Props) {
+  const resolving = phase === "resolving";
   return (
     <AppModalFrame
       open={open}
       title={mode === "barcode" ? barcodeTitle : nfcTitle}
-      subtitle={mode === "barcode" ? "Lettura in corso" : "Attendi la lettura del tag"}
+      subtitle={
+        resolving
+          ? "QR riconosciuto"
+          : mode === "barcode"
+            ? "Lettura in corso"
+            : "Attendi la lettura del tag"
+      }
       onClose={onClose}
       width="min(420px, 100%)"
       footer={
@@ -39,7 +101,9 @@ export default function AppScanStatusModal({
         </button>
       }
     >
-      {mode === "barcode" ? (
+      {resolving ? (
+        <ScanResolvingPanel hint={resolvingHint} />
+      ) : mode === "barcode" ? (
         <div className="appModalSection">
           <div className="appModalSectionBody">
             <div style={{ padding: 12, background: "#0f172a", borderRadius: 12 }}>

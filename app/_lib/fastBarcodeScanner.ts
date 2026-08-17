@@ -22,6 +22,13 @@ type FastScanOptions = {
 const QR_FORMATS = ["qr_code"];
 const LINEAR_FORMATS = ["ean_13", "ean_8", "code_128", "code_39", "codabar", "upc_a", "upc_e"];
 
+/** Ignore the first frames while autofocus settles. */
+const CAMERA_SETTLE_MS = 300;
+/** Pause between decode attempts. Typical handheld scanners sit around 150–250ms. */
+const SCAN_ATTEMPT_MS = 200;
+/** Same value must be read this many times in a row before accepting. */
+const CONFIRM_MATCHES = 2;
+
 export const FAST_BARCODE_CONSTRAINTS: MediaStreamConstraints = {
   audio: false,
   video: {
@@ -158,6 +165,8 @@ export async function scanFastBarcode(video: HTMLVideoElement, options: FastScan
     }
     const startedAt = Date.now();
     let frame = 0;
+    let lastValue = "";
+    let matchCount = 0;
 
     while (Date.now() - startedAt < timeoutMs) {
       if (!streamIsLive(video)) {
@@ -168,22 +177,39 @@ export async function scanFastBarcode(video: HTMLVideoElement, options: FastScan
         continue;
       }
 
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < CAMERA_SETTLE_MS) {
+        await sleep(SCAN_ATTEMPT_MS);
+        continue;
+      }
+
       const source = grabScanFrame(video, canvas, ctx, frame % 2 === 0);
+      let found = "";
 
       try {
-        const found = firstRawValue(await qrDetector.detect(source));
-        if (found) return found;
+        found = firstRawValue(await qrDetector.detect(source));
       } catch {}
 
-      if (linearDetector && frame % 3 === 0) {
+      if (!found && linearDetector && frame % 3 === 0) {
         try {
-          const found = firstRawValue(await linearDetector.detect(source));
-          if (found) return found;
+          found = firstRawValue(await linearDetector.detect(source));
         } catch {}
       }
 
+      if (found) {
+        if (found === lastValue) matchCount += 1;
+        else {
+          lastValue = found;
+          matchCount = 1;
+        }
+        if (matchCount >= CONFIRM_MATCHES) return found;
+      } else {
+        lastValue = "";
+        matchCount = 0;
+      }
+
       frame += 1;
-      await nextFrame();
+      await sleep(SCAN_ATTEMPT_MS);
     }
 
     throw new Error("Timeout: nessun Barcode/QR rilevato entro 30 secondi");
@@ -207,12 +233,15 @@ export async function scanFastBarcode(video: HTMLVideoElement, options: FastScan
   ]);
   hints.set(DecodeHintType.TRY_HARDER, false);
 
-  const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 50 });
+  const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: SCAN_ATTEMPT_MS });
   options.onReady?.();
 
   return await new Promise<string>((resolve, reject) => {
     let settled = false;
     let stopScan: (() => void) | null = null;
+    let lastValue = "";
+    let matchCount = 0;
+    const readyAt = Date.now();
 
     const finish = (error?: Error, text?: string) => {
       if (settled) return;
@@ -236,8 +265,19 @@ export async function scanFastBarcode(video: HTMLVideoElement, options: FastScan
           reset: () => controls.stop(),
           stopContinuousDecode: () => controls.stop(),
         });
+        if (Date.now() - readyAt < CAMERA_SETTLE_MS) return;
         const text = String(result?.getText?.() ?? "").trim();
-        if (text) finish(undefined, text);
+        if (!text) {
+          lastValue = "";
+          matchCount = 0;
+          return;
+        }
+        if (text === lastValue) matchCount += 1;
+        else {
+          lastValue = text;
+          matchCount = 1;
+        }
+        if (matchCount >= CONFIRM_MATCHES) finish(undefined, text);
       })
       .then((controls) => {
         stopScan = () => controls.stop();

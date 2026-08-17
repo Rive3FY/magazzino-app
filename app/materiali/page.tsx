@@ -18,6 +18,7 @@ import AdminMaterialsOverviewModal, {
   type MaterialsDashboardStats,
 } from "./_components/AdminMaterialsOverviewModal";
 import MaterialSearchResultsModal from "./_components/MaterialSearchResultsModal";
+import AppScanStatusModal, { waitScanResolveFeedback } from "../_components/AppScanStatusModal";
 import type { MovementRow } from "../_lib/types";
 
 type Movement = {
@@ -183,6 +184,7 @@ export default function Home() {
   const [shelves, setShelves] = useState<ShelfInfo | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [scanResolving, setScanResolving] = useState(false);
   const [registerBusy, setRegisterBusy] = useState(false);
   const [adminStats, setAdminStats] = useState<MaterialsDashboardStats | null>(null);
   const [adminStatsLoading, setAdminStatsLoading] = useState(false);
@@ -342,10 +344,10 @@ export default function Home() {
   }
 
   async function computeStockBoth(code: string) {
-    const { data: liveRows, error: eLive } = await supabase
-      .from("excel_live")
-      .select("warehouse,qty_free,row_json")
-      .eq("code", code);
+    const [{ data: liveRows, error: eLive }, { data: shelfRows }] = await Promise.all([
+      supabase.from("excel_live").select("warehouse,qty_free,row_json").eq("code", code),
+      supabase.from("material_shelves").select("warehouse,shelf,place").eq("code", code),
+    ]);
 
     if (eLive) {
       console.error("excel_live error:", eLive);
@@ -366,11 +368,6 @@ export default function Home() {
     }
 
     setStock({ PRM: prmQty, REALE: realeQty });
-
-    const { data: shelfRows } = await supabase
-      .from("material_shelves")
-      .select("warehouse,shelf,place")
-      .eq("code", code);
 
     const shelfMap: ShelfInfo = { PRM: "", REALE: "" };
     for (const s of shelfRows ?? []) {
@@ -396,51 +393,43 @@ export default function Home() {
     stopFastBarcodeScan(videoRef.current, readerRef.current);
     readerRef.current = null;
     setScanning(false);
+    setScanResolving(false);
+  }
+
+  function itemFromLive(live: { code?: string; row_json?: Record<string, unknown> } | null): DbItem | null {
+    if (!live?.code) return null;
+    const name = String(live.row_json?.["Descrizione Materiale"] ?? live.code).trim() || live.code;
+    return { code: live.code, name, um: null };
   }
 
   async function resolveScannedValue(raw: string): Promise<DbItem | null> {
     const value = raw.trim();
     if (!value) return null;
 
-    const { data: byBarcode } = await supabase
-      .from("material_shelves")
-      .select("code")
-      .eq("barcode", value)
-      .maybeSingle();
+    const [{ data: byBarcode }, { data: byNfc }, { data: itemDirect }, { data: liveDirect }] = await Promise.all([
+      supabase.from("material_shelves").select("code").eq("barcode", value).maybeSingle(),
+      supabase.from("material_shelves").select("code").eq("nfc_tag_id", value).maybeSingle(),
+      supabase.from("items").select("code,name,um").eq("code", value).maybeSingle(),
+      supabase.from("excel_live").select("code,row_json").eq("code", value).limit(1).maybeSingle(),
+    ]);
 
-    let code = String((byBarcode as { code?: string } | null)?.code ?? "").trim() || value;
+    const mappedCode =
+      String((byBarcode as { code?: string } | null)?.code ?? "").trim() ||
+      String((byNfc as { code?: string } | null)?.code ?? "").trim() ||
+      value;
 
-    if (code === value) {
-      const { data: byNfc } = await supabase
-        .from("material_shelves")
-        .select("code")
-        .eq("nfc_tag_id", value)
-        .maybeSingle();
-      const nfcCode = String((byNfc as { code?: string } | null)?.code ?? "").trim();
-      if (nfcCode) code = nfcCode;
+    if (mappedCode === value) {
+      if (itemDirect?.code) return itemDirect as DbItem;
+      return itemFromLive(liveDirect as { code?: string; row_json?: Record<string, unknown> } | null);
     }
 
-    const { data: item } = await supabase
-      .from("items")
-      .select("code,name,um")
-      .eq("code", code)
-      .maybeSingle();
+    const [{ data: item }, { data: live }] = await Promise.all([
+      supabase.from("items").select("code,name,um").eq("code", mappedCode).maybeSingle(),
+      supabase.from("excel_live").select("code,row_json").eq("code", mappedCode).limit(1).maybeSingle(),
+    ]);
 
     if (item?.code) return item as DbItem;
-
-    const { data: live } = await supabase
-      .from("excel_live")
-      .select("code,row_json")
-      .eq("code", code)
-      .limit(1)
-      .maybeSingle();
-
-    if (live?.code) {
-      const name = String((live as { row_json?: Record<string, unknown> }).row_json?.["Descrizione Materiale"] ?? live.code).trim() || live.code;
-      return { code: live.code, name, um: null };
-    }
-
-    return null;
+    return itemFromLive(live as { code?: string; row_json?: Record<string, unknown> } | null);
   }
 
   async function pickItemByScan(raw: string) {
@@ -491,8 +480,17 @@ export default function Home() {
           readerRef.current = reader;
         },
       });
-      stopScan();
-      if (text) await pickItemByScan(text);
+      stopFastBarcodeScan(videoEl, readerRef.current);
+      readerRef.current = null;
+      setScanResolving(true);
+      const startedAt = Date.now();
+      try {
+        if (text) await pickItemByScan(text);
+        await waitScanResolveFeedback(startedAt);
+      } finally {
+        setScanning(false);
+        setScanResolving(false);
+      }
     } catch (e: unknown) {
       console.error(e);
       setMsg("Errore camera/scansione: " + (e instanceof Error ? e.message : "sconosciuto"));
@@ -1357,46 +1355,16 @@ export default function Home() {
         }}
       />
 
-      {scanning && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15,23,42,0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 20,
-            zIndex: 10060,
-          }}
-        >
-          <div
-            style={{
-              background: "white",
-              borderRadius: 14,
-              padding: 24,
-              maxWidth: 420,
-              width: "100%",
-              boxShadow: "0 24px 60px rgba(0,0,0,0.3)",
-            }}
-          >
-            <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
-              <QrIcon />
-              Scanner QR materiale
-            </div>
-            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 12 }}>
-              Inquadra il QR dell&apos;etichetta per vedere subito le quantità in magazzino.
-            </div>
-            <div style={{ padding: 12, background: "#0f172a", borderRadius: 12, marginBottom: 12 }}>
-              <video ref={videoRef} style={{ width: "100%", maxWidth: 360, borderRadius: 8 }} muted playsInline />
-              <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Inquadra il QR code</div>
-            </div>
-            <button type="button" className="btn" onClick={stopScan}>
-              Chiudi
-            </button>
-          </div>
-        </div>
-      )}
+      <AppScanStatusModal
+        open={scanning}
+        mode="barcode"
+        phase={scanResolving ? "resolving" : "scanning"}
+        videoRef={videoRef}
+        onClose={stopScan}
+        barcodeTitle="Scanner QR materiale"
+        barcodeHint="Inquadra il QR dell'etichetta per vedere subito le quantità in magazzino."
+        resolvingHint="Caricamento quantità e ubicazione..."
+      />
     </main>
   );
 }

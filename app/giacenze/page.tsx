@@ -990,7 +990,7 @@ await writeAuditLog({
           {isAdmin && (
             <div style={{ minWidth: 0 }}>
               <label className="label" htmlFor="shelfFilterSel">
-                Assegnazione scaffale
+                Assegnazione posizione
               </label>
               <select
                 id="shelfFilterSel"
@@ -1000,8 +1000,8 @@ await writeAuditLog({
                 onChange={(event) => setShelfFilter(event.target.value as ShelfAssignmentFilter)}
               >
                 <option value="ALL">Tutti</option>
-                <option value="WITH">Con scaffale</option>
-                <option value="WITHOUT">Senza scaffale</option>
+                <option value="WITH">Con posizione</option>
+                <option value="WITHOUT">Senza posizione</option>
               </select>
             </div>
           )}

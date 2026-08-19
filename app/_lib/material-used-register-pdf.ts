@@ -231,7 +231,7 @@ function drawFormPage(
   const colOrder: Array<{ key: keyof typeof COLS; label: string; align?: "left" | "right" | "center" }> = [
     { key: "matricola", label: "MATRICOLA" },
     { key: "descrizione", label: "DESCRIZIONE MATERIALE" },
-    { key: "scaffale", label: "Scaffale", align: "center" },
+    { key: "scaffale", label: "Posizione", align: "center" },
     { key: "posizione", label: "Posizione", align: "center" },
     { key: "prelevata", label: "Q.tà Prelevata", align: "center" },
     { key: "utilizzata", label: "Q.tà Utilizzata", align: "center" },

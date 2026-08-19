@@ -430,7 +430,7 @@ export default function EtichettePage() {
           <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
               <input type="checkbox" checked={onlyWithShelf} onChange={(e) => setOnlyWithShelf(e.target.checked)} />
-              Solo con scaffale assegnato
+              Solo con posizione assegnata
             </label>
           </div>
         </div>

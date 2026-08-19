@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       equipmentReset: eqCount,
       shelvesReset: shelfCount,
       message: eqCount > 0 || shelfCount > 0
-        ? `Tag NFC resettato. ${eqCount} attrezzatura/e, ${shelfCount} scaffale/i aggiornati.`
+        ? `Tag NFC resettato. ${eqCount} attrezzatura/e, ${shelfCount} posizione/i aggiornati.`
         : "Nessuna associazione trovata per questo tag NFC.",
     });
   } catch (err: unknown) {

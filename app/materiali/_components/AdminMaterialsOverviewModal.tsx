@@ -117,7 +117,7 @@ export default function AdminMaterialsOverviewModal({
     <AppModalFrame
       open={open}
       title="Panoramica admin materiali"
-      subtitle="Copertura delle assegnazioni scaffale e qualità dell'anagrafica"
+      subtitle="Copertura delle assegnazioni posizione e qualità dell'anagrafica"
       onClose={onClose}
       width="min(1040px, 100%)"
       bodyStyle={{ background: "#f8fafc" }}
@@ -250,7 +250,7 @@ export default function AdminMaterialsOverviewModal({
                 fontWeight: 800,
               }}
             >
-              {stats.orphan_shelf_rows} scaffali senza riga Excel · Apri elenco →
+              {stats.orphan_shelf_rows} posizioni senza riga Excel · Apri elenco →
             </a>
           )}
           {stats.excel_codes_without_item > 0 && (

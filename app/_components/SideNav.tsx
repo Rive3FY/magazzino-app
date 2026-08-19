@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import { useEquipmentMaintenanceNotifications } from "../_lib/hooks/useEquipmentMaintenanceNotifications";
@@ -156,6 +156,8 @@ export default function SideNav({ hideSidebar = false }: Props) {
   } = useIsAdmin();
   const { isOpen, setIsOpen } = useSidebar();
   const checked = !loading;
+  const sidebarRef = useRef<HTMLElement | null>(null);
+  const [navInteractive, setNavInteractive] = useState(false);
 
   const inLinee = pathname.startsWith("/attrezzature/linee");
   const inStazioni = pathname.startsWith("/attrezzature/stazioni");
@@ -170,7 +172,7 @@ export default function SideNav({ hideSidebar = false }: Props) {
   );
 
   const isActive = (href: string) =>
-    pathname === href || (href !== "/" && pathname.startsWith(href));
+    pathname === href || (href !== "/" && pathname.startsWith(`${href}/`));
 
   const isExactActive = (href: string) => pathname === href;
 
@@ -180,6 +182,9 @@ export default function SideNav({ hideSidebar = false }: Props) {
   const handleLinkClick = () => {
     if (typeof window !== "undefined" && window.innerWidth < 901) {
       setIsOpen(false);
+    }
+    if (!materialsAdminOpenByRoute) {
+      setMaterialsAdminOpen(false);
     }
   };
 
@@ -204,8 +209,30 @@ export default function SideNav({ hideSidebar = false }: Props) {
   const [materialsAdminOpen, setMaterialsAdminOpen] = useState(materialsAdminOpenByRoute);
 
   useEffect(() => {
-    if (materialsAdminOpenByRoute) setMaterialsAdminOpen(true);
+    setMaterialsAdminOpen(materialsAdminOpenByRoute);
   }, [materialsAdminOpenByRoute]);
+
+  useEffect(() => {
+    const sidebar = sidebarRef.current;
+    if (!sidebar) return;
+
+    const syncInteractive = () => {
+      const styles = window.getComputedStyle(sidebar);
+      const matrix = new DOMMatrixReadOnly(styles.transform);
+      const hiddenOffscreen = Math.abs(matrix.m41) > sidebar.offsetWidth * 0.5;
+      setNavInteractive(isOpen && !hiddenOffscreen);
+    };
+
+    syncInteractive();
+
+    const onTransitionEnd = (event: TransitionEvent) => {
+      if (event.target !== sidebar || event.propertyName !== "transform") return;
+      syncInteractive();
+    };
+
+    sidebar.addEventListener("transitionend", onTransitionEnd);
+    return () => sidebar.removeEventListener("transitionend", onTransitionEnd);
+  }, [isOpen]);
 
   useEffect(() => {
     if (checked) return;
@@ -249,7 +276,11 @@ export default function SideNav({ hideSidebar = false }: Props) {
         onClick={() => setIsOpen(false)}
         aria-hidden="true"
       />
-      <aside className={`sidebar ${isOpen ? "sidebarOpen" : ""}${hiddenClass}`} aria-label="Menu di navigazione">
+      <aside
+        ref={sidebarRef}
+        className={`sidebar ${isOpen ? "sidebarOpen" : ""}${hiddenClass}`}
+        aria-label="Menu di navigazione"
+      >
         <button
           type="button"
           className="sidebarCloseBtn"
@@ -259,7 +290,7 @@ export default function SideNav({ hideSidebar = false }: Props) {
           ✕
         </button>
 
-        <nav className="sideNav">
+        <nav className={`sideNav${navInteractive ? " sideNavInteractive" : ""}`}>
           {inMaterials && (
             <>
               <div className="sideLink sideSectionHeader" style={{ opacity: 0.7, pointerEvents: "none" }}>
@@ -301,7 +332,7 @@ export default function SideNav({ hideSidebar = false }: Props) {
                   </button>
                   {materialsAdminOpen && (
                     <div className="sideSubNav">
-                      <Link className={cls("/scaffali")} href="/scaffali" onClick={handleLinkClick} prefetch={false}><NavLabel icon="scaffali" label="Scaffali" /></Link>
+                      <Link className={cls("/scaffali")} href="/scaffali" onClick={handleLinkClick} prefetch={false}><NavLabel icon="scaffali" label="Posizioni" /></Link>
                       <Link className={cls("/etichette")} href="/etichette" onClick={handleLinkClick} prefetch={false}><NavLabel icon="etichette" label="Etichette" /></Link>
                       <Link className={cls("/import")} href="/import" onClick={handleLinkClick} prefetch={false}><NavLabel icon="importExport" label="Import & Export" /></Link>
                       <Link className={cls("/materiali/admin")} href="/materiali/admin" onClick={handleLinkClick} prefetch={false}><NavLabel icon="admin" label="Pannello admin" /></Link>

@@ -41,7 +41,7 @@ export default function HubLauncher() {
   const equipmentAdmin = !loading && (canManageEquipmentLinee || canManageEquipmentStazioni);
 
   const materialsText = materialsAdmin
-    ? "Dashboard, movimenti, inventario e strumenti di gestione: scaffali, etichette e import."
+    ? "Dashboard, movimenti, inventario e strumenti di gestione: posizioni, etichette e import."
     : "Consulta giacenze, registra prelievi e segui i movimenti del magazzino.";
   const materialsMeta = materialsAdmin
     ? ["Movimenti", "Inventario", "Gestione Admin"]

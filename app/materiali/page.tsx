@@ -205,7 +205,7 @@ function shelfMatchLabel(row: any) {
   const wh = String(row?.warehouse ?? "").trim();
   const shelf = String(row?.shelf ?? "").trim();
   const place = String(row?.place ?? "").trim();
-  const position = [shelf && shelf !== "—" ? `Scaffale ${shelf}` : "", place ? `Luogo ${place}` : ""].filter(Boolean).join(" · ");
+  const position = [shelf && shelf !== "—" ? `Posizione ${shelf}` : "", place ? `Luogo ${place}` : ""].filter(Boolean).join(" · ");
   return [wh, position].filter(Boolean).join(": ");
 }
 
@@ -786,7 +786,7 @@ export default function Home() {
           <div>
             <div style={{ fontWeight: 900, fontSize: 16 }}> Controllo veloce materiale</div>
             <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
-              Cerca per testo oppure scansiona il QR: vedi inventario PRM/REALE e lo scaffale.
+              Cerca per testo oppure scansiona il QR: vedi inventario PRM/REALE e la posizione.
             </div>
           </div>
 
@@ -942,7 +942,7 @@ export default function Home() {
                   <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>{stock.PRM}</div>
                   {shelves?.PRM ? (
                     <div style={{ fontSize: 13, fontWeight: 700, marginTop: 10, color: "#0284c7" }}>
-                      Scaffale · Luogo: {shelves.PRM}
+                      Posizione · Luogo: {shelves.PRM}
                     </div>
                   ) : (
                     <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>Posizione non assegnata</div>
@@ -954,7 +954,7 @@ export default function Home() {
                   <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>{stock.REALE}</div>
                   {shelves?.REALE ? (
                     <div style={{ fontSize: 13, fontWeight: 700, marginTop: 10, color: "#7c3aed" }}>
-                      Scaffale · Luogo: {shelves.REALE}
+                      Posizione · Luogo: {shelves.REALE}
                     </div>
                   ) : (
                     <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>Posizione non assegnata</div>

@@ -4401,7 +4401,7 @@ function finalizeMaterialPickupSuccess() {
                 <div style={{ fontSize: 12, color: "#64748b" }}>disponibili</div>
                 {(warehouseChoicePopup.prmShelf || warehouseChoicePopup.prmPlace) && (
                   <div style={{ fontSize: 12, marginTop: 4, fontWeight: 700, color: "#0284c7" }}>
-                    {[warehouseChoicePopup.prmShelf && `Scaffale: ${warehouseChoicePopup.prmShelf}`, warehouseChoicePopup.prmPlace && `Luogo: ${warehouseChoicePopup.prmPlace}`].filter(Boolean).join(" · ")}
+                    {[warehouseChoicePopup.prmShelf && `Posizione: ${warehouseChoicePopup.prmShelf}`, warehouseChoicePopup.prmPlace && `Luogo: ${warehouseChoicePopup.prmPlace}`].filter(Boolean).join(" · ")}
                   </div>
                 )}
               </div>
@@ -4411,7 +4411,7 @@ function finalizeMaterialPickupSuccess() {
                 <div style={{ fontSize: 12, color: "#64748b" }}>disponibili</div>
                 {(warehouseChoicePopup.realeShelf || warehouseChoicePopup.realePlace) && (
                   <div style={{ fontSize: 12, marginTop: 4, fontWeight: 700, color: "#7c3aed" }}>
-                    {[warehouseChoicePopup.realeShelf && `Scaffale: ${warehouseChoicePopup.realeShelf}`, warehouseChoicePopup.realePlace && `Luogo: ${warehouseChoicePopup.realePlace}`].filter(Boolean).join(" · ")}
+                    {[warehouseChoicePopup.realeShelf && `Posizione: ${warehouseChoicePopup.realeShelf}`, warehouseChoicePopup.realePlace && `Luogo: ${warehouseChoicePopup.realePlace}`].filter(Boolean).join(" · ")}
                   </div>
                 )}
               </div>
@@ -4537,7 +4537,7 @@ function finalizeMaterialPickupSuccess() {
                 >
                   <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Magazzino {it.warehouse}</div>
                   <div style={{ fontWeight: 900, fontSize: 18 }}>
-                    {[it.shelf && `Scaffale ${it.shelf}`, it.place && `Luogo ${it.place}`].filter(Boolean).join(" · ") || "—"}
+                    {[it.shelf && `Posizione ${it.shelf}`, it.place && `Luogo ${it.place}`].filter(Boolean).join(" · ") || "—"}
                   </div>
                 </div>
               ))}
@@ -5066,7 +5066,7 @@ function finalizeMaterialPickupSuccess() {
                       { label: "Codice", value: closing.code },
                       { label: "Descrizione", value: closingMeta ? closingMeta.name : (nameMap[closing.code] ?? "-") },
                       { label: "Unità di misura", value: closingMeta?.um ?? "-" },
-                      { label: "Scaffale · Luogo", value: (closingMeta?.shelf || closingMeta?.place) ? [closingMeta.shelf, closingMeta.place].filter(Boolean).join(" · ") : "-" },
+                      { label: "Posizione · Luogo", value: (closingMeta?.shelf || closingMeta?.place) ? [closingMeta.shelf, closingMeta.place].filter(Boolean).join(" · ") : "-" },
                       { label: "Magazzino uscita", value: closing.warehouse ?? "-" },
                       { label: "Quantità uscita", value: String(Math.abs(n(closing.qty))) },
                       { label: "Quantità rientrata", value: String(n(closing.returned_qty)) },
@@ -5597,14 +5597,14 @@ function finalizeMaterialPickupSuccess() {
               <div style={{ fontWeight: 900, color: "#0284c7" }}>PRM</div>
               <div style={{ marginTop: 4, fontSize: 13 }}>Disponibili: {mixedCartInfo.prmFree}</div>
               <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>
-                {mixedCartInfo.prmShelf ? `${mixedCartInfo.prmShelf}${mixedCartInfo.prmPlace ? ` · ${mixedCartInfo.prmPlace}` : ""}` : "Scaffale non assegnato"}
+                {mixedCartInfo.prmShelf ? `${mixedCartInfo.prmShelf}${mixedCartInfo.prmPlace ? ` · ${mixedCartInfo.prmPlace}` : ""}` : "Posizione non assegnata"}
               </div>
             </div>
             <div style={{ padding: 12, borderRadius: 12, border: "1px solid rgba(124,58,237,0.18)", background: "#f8fafc" }}>
               <div style={{ fontWeight: 900, color: "#7c3aed" }}>REALE</div>
               <div style={{ marginTop: 4, fontSize: 13 }}>Disponibili: {mixedCartInfo.realeFree}</div>
               <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>
-                {mixedCartInfo.realeShelf ? `${mixedCartInfo.realeShelf}${mixedCartInfo.realePlace ? ` · ${mixedCartInfo.realePlace}` : ""}` : "Scaffale non assegnato"}
+                {mixedCartInfo.realeShelf ? `${mixedCartInfo.realeShelf}${mixedCartInfo.realePlace ? ` · ${mixedCartInfo.realePlace}` : ""}` : "Posizione non assegnata"}
               </div>
             </div>
           </div>

@@ -346,14 +346,14 @@ export default function ScaffaliPage() {
   return (
     <main className="panel">
       <div className="pageBar">
-        <div className="pageBarTitle">Scaffali</div>
+        <div className="pageBarTitle">Posizioni</div>
       </div>
 
       <div className="card" style={{ padding: 12, margin: 12 }}>
         <div style={{ marginBottom: 12, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
           <div>
             <label className="label" htmlFor="qScaffali">
-              Cerca materiale (codice, descrizione, scaffale, QR)
+              Cerca materiale (codice, descrizione, posizione, QR)
             </label>
             <input
               id="qScaffali"
@@ -383,7 +383,7 @@ export default function ScaffaliPage() {
         </div>
 
         <div style={{ fontSize: 13, color: "#64748b", marginBottom: 12 }}>
-          Assegna scaffale e luogo per ogni materiale e magazzino. Usa la ricerca testo o scansiona il QR per trovare rapidamente un materiale.
+          Assegna posizione e luogo per ogni materiale e magazzino. Usa la ricerca testo o scansiona il QR per trovare rapidamente un materiale.
         </div>
         {(assignmentFilter === "missing" || assignmentFilter === "assigned" || assignmentFilter === "orphan") && (
           <div
@@ -405,7 +405,7 @@ export default function ScaffaliPage() {
                 {assignmentFilter === "missing"
                   ? "Posizioni senza assegnazione"
                   : assignmentFilter === "orphan"
-                    ? "Scaffali senza riga Excel"
+                    ? "Posizioni senza riga Excel"
                     : "Posizioni assegnate"}
                 {warehouseFilter ? ` · ${warehouseFilter}` : " · Tutti i magazzini"}
               </div>
@@ -418,7 +418,7 @@ export default function ScaffaliPage() {
         )}
         {isMobile && (
           <div style={{ fontSize: 12, padding: 10, background: "#e0f2fe", borderRadius: 8, marginBottom: 12, border: "1px solid #0ea5e9" }}>
-            Clicca su un materiale per aprire il popup e inserire scaffale e luogo.
+            Clicca su un materiale per aprire il popup e inserire posizione e luogo.
           </div>
         )}
 
@@ -614,7 +614,7 @@ export default function ScaffaliPage() {
                   <div style={{ fontWeight: 800, marginBottom: 10 }}>PRM</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     <div>
-                      <label className="label" style={{ fontSize: 12 }}>Scaffale</label>
+                      <label className="label" style={{ fontSize: 12 }}>Posizione</label>
                       <input
                         type="text"
                         className="input"
@@ -642,7 +642,7 @@ export default function ScaffaliPage() {
                   <div style={{ fontWeight: 800, marginBottom: 10 }}>REALE</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     <div>
-                      <label className="label" style={{ fontSize: 12 }}>Scaffale</label>
+                      <label className="label" style={{ fontSize: 12 }}>Posizione</label>
                       <input
                         type="text"
                         className="input"
@@ -684,8 +684,8 @@ export default function ScaffaliPage() {
                   <th>Codice</th>
                   <th>Descrizione</th>
                   <th>UM</th>
-                  <th>Scaffale · Luogo PRM</th>
-                  <th>Scaffale · Luogo REALE</th>
+                  <th>Posizione · Luogo PRM</th>
+                  <th>Posizione · Luogo REALE</th>
                 </tr>
               </thead>
               <tbody>
@@ -718,7 +718,7 @@ export default function ScaffaliPage() {
                             <input
                               type="text"
                               className="input"
-                              placeholder="Scaffale"
+                              placeholder="Posizione"
                               value={editCell.shelf}
                               onChange={(e) => setEditCell((p) => (p ? { ...p, shelf: e.target.value } : null))}
                               onKeyDown={(e) => {
@@ -783,7 +783,7 @@ export default function ScaffaliPage() {
                             <input
                               type="text"
                               className="input"
-                              placeholder="Scaffale"
+                              placeholder="Posizione"
                               value={editCell.shelf}
                               onChange={(e) => setEditCell((p) => (p ? { ...p, shelf: e.target.value } : null))}
                               onKeyDown={(e) => {

@@ -795,7 +795,7 @@ export default function AdminPage() {
                 <button
                   className="btn"
                   onClick={() => { setNfcResetModalOpen(true); setNfcResetMsg(null); setNfcTagIdInput(""); }}
-                  title="Rimuovi l'associazione di un tag NFC da attrezzature e scaffali"
+                  title="Rimuovi l'associazione di un tag NFC da attrezzature e posizioni"
                 >
                   Reset tag NFC
                 </button>
@@ -1127,7 +1127,7 @@ export default function AdminPage() {
           <div className="modalWindow" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420, padding: 20 }}>
             <div id="nfc-reset-title" style={{ fontWeight: 900, fontSize: 18, marginBottom: 12 }}>Reset tag NFC</div>
             <p style={{ fontSize: 14, color: "#64748b", marginBottom: 16 }}>
-              Inserisci o scansiona l&apos;ID del tag NFC per rimuovere l&apos;associazione da attrezzature e scaffali.
+              Inserisci o scansiona l&apos;ID del tag NFC per rimuovere l&apos;associazione da attrezzature e posizioni.
             </p>
             <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
               <input

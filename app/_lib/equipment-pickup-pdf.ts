@@ -262,14 +262,6 @@ function drawPage(
   pdf.setFont("helvetica", "normal");
   pdf.text(pdf.splitTextToSize(sheet.note || "—", CONTENT_W - 28).slice(0, 2), MARGIN_X + 25, y + 5);
 
-  y += noteH + 7;
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(8.5);
-  pdf.text("Firma consegna:", MARGIN_X, y);
-  pdf.line(MARGIN_X + 28, y + 1, MARGIN_X + 82, y + 1);
-  pdf.text("Firma ricevente:", MARGIN_X + 96, y);
-  pdf.line(MARGIN_X + 125, y + 1, PAGE_W - MARGIN_X, y + 1);
-
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(7.5);
   pdf.setTextColor(120, 120, 120);

@@ -318,6 +318,16 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const [closeNote, setCloseNote] = useState("");
   const [groupEditState, setGroupEditState] = useState<GroupEditState>({});
   const [pickupPdfBusy, setPickupPdfBusy] = useState(false);
+  const [openMovementMeta, setOpenMovementMeta] = useState({
+    destination: "",
+    interventionPlan: "",
+    note: "",
+  });
+  const [openAddSearch, setOpenAddSearch] = useState("");
+  const [openAddOpen, setOpenAddOpen] = useState(false);
+  const [addingToOpenMovement, setAddingToOpenMovement] = useState(false);
+  const [removeEquipmentConfirm, setRemoveEquipmentConfirm] = useState<EquipmentMovementRow | null>(null);
+  const [metaSaving, setMetaSaving] = useState(false);
   /** Flusso guidato uscita: 1 = Magazzino, 2 = Attrezzatura, 3 = Dettagli e conferma */
   const [outboundStep, setOutboundStep] = useState<1 | 2 | 3>(1);
   /** Wizard prelievo in popup: quando true il flusso è dentro un modal */
@@ -330,6 +340,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<FastBarcodeReader | null>(null);
   const assetBoxRef = useRef<HTMLDivElement | null>(null);
+  const openAddBoxRef = useRef<HTMLDivElement | null>(null);
   const categoryGroupsTableMissingRef = useRef(false);
   const remotePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -1026,11 +1037,11 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   async function applySearchResult(value: string, mode: "barcode" | "nfc") {
     const normalized = value.trim().toLowerCase();
     if (!normalized) return;
-    if (!warehouseSelected) {
+    if (!warehouseSelected && !(addingToOpenMovement && closingWarehouse)) {
       setMsg("Seleziona prima il magazzino da cui prelevare.");
       return;
     }
-    if (mode === "nfc") {
+    if (mode === "nfc" && !addingToOpenMovement) {
       const category = await checkNfcCategoryTag(value);
       if (category) {
         if (scanMode !== "CART") {
@@ -1047,7 +1058,12 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       }
     }
     setAssetSearch(value.trim());
-    const searchBase = warehouseSelected ? assetsByWarehouse : [];
+    const searchBase =
+      addingToOpenMovement && closingWarehouse
+        ? assets.filter((asset) => (asset.warehouse ?? "").trim() === closingWarehouse)
+        : warehouseSelected
+          ? assetsByWarehouse
+          : [];
     const matched = searchBase.find((asset) => {
       if (mode === "barcode") {
         return [asset.barcode, asset.serial_number, asset.asset_code]
@@ -1057,12 +1073,20 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       return String(asset.nfc_tag_id ?? "").trim().toLowerCase() === normalized;
     });
     if (matched) {
+      if (addingToOpenMovement && closeOpen && closing) {
+        setAddingToOpenMovement(false);
+        setScanResult(null);
+        setMsg(null);
+        await addEquipmentToOpenMovement(matched);
+        return;
+      }
       setForm((prev) => ({ ...prev, equipment_id: matched.id }));
       setAssetSearch(`${matched.serial_number || matched.asset_code} - ${matched.name}`);
       setAssetOpen(false);
       setMsg(null);
       setScanResult({ asset: matched, source: mode, mode: scanMode });
     } else {
+      setAddingToOpenMovement(false);
       setMsg(mode === "barcode" ? "Nessuna attrezzatura trovata per questo QR nel magazzino selezionato." : "Nessuna attrezzatura associata a questo tag NFC nel magazzino selezionato.");
     }
   }
@@ -1080,6 +1104,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     readerRef.current = null;
     setCameraScanning(false);
     setScanResolving(false);
+    setAddingToOpenMovement(false);
   }
 
   async function startCameraScanForSearch() {
@@ -1124,6 +1149,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       }
     } catch (error) {
       stopCameraScan();
+      setAddingToOpenMovement(false);
       setMsg("Errore camera: " + (error instanceof Error ? error.message : "sconosciuto"));
     }
   }
@@ -1198,8 +1224,8 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
   useEffect(() => {
     function onDocMouseDown(e: MouseEvent) {
-      if (!assetBoxRef.current) return;
-      if (!assetBoxRef.current.contains(e.target as Node)) setAssetOpen(false);
+      if (assetBoxRef.current && !assetBoxRef.current.contains(e.target as Node)) setAssetOpen(false);
+      if (openAddBoxRef.current && !openAddBoxRef.current.contains(e.target as Node)) setOpenAddOpen(false);
     }
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
@@ -1667,7 +1693,9 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   async function handleDeleteConfirm() {
     if (!deleteConfirm) return;
     await executeDeleteMovement(deleteConfirm);
-    if (closing?.id === deleteConfirm.id) closeModal();
+    if (closing && (closing.id === deleteConfirm.id || closing.movement_group_id === deleteConfirm.movement_group_id)) {
+      closeModal();
+    }
     setDeleteConfirm(null);
   }
 
@@ -1678,51 +1706,331 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
     setCloseResolutionType("RETURN");
     setCloseNote("");
     setGroupEditState({});
+    setOpenMovementMeta({ destination: "", interventionPlan: "", note: "" });
+    setOpenAddSearch("");
+    setOpenAddOpen(false);
+    setAddingToOpenMovement(false);
+    setRemoveEquipmentConfirm(null);
     setMsg(null);
+  }
+
+  function initGroupEditState(group: EquipmentMovementRow[]): GroupEditState {
+    const openRows = group.filter((movement) => getMovementStatus(movement) === "OPEN");
+    const autoSelect = openRows.length === 1;
+    const initState: GroupEditState = {};
+    for (const movement of group) {
+      initState[movement.id] = {
+        resolutionType: resolutionTypeForClosingForm(movement),
+        closeNote: movement.close_note ?? "",
+        selectedForClose: getMovementStatus(movement) === "OPEN" && autoSelect,
+      };
+    }
+    return initState;
+  }
+
+  function applyClosingGroup(group: EquipmentMovementRow[], previous?: EquipmentMovementRow | null) {
+    if (group.length === 0) {
+      closeModal();
+      return;
+    }
+    const lead =
+      group.find((movement) => getMovementStatus(movement) === "OPEN") ??
+      group.find((movement) => movement.id === previous?.id) ??
+      group[0];
+    setClosing(lead);
+    setClosingGroup(group);
+    setOpenMovementMeta({
+      destination: lead.destination ?? "",
+      interventionPlan: lead.intervention_plan_number ?? "",
+      note: lead.note ?? "",
+    });
+    setGroupEditState((prev) => {
+      const next = initGroupEditState(group);
+      for (const movement of group) {
+        if (prev[movement.id]) {
+          next[movement.id] = {
+            ...next[movement.id],
+            resolutionType: prev[movement.id].resolutionType,
+            closeNote: prev[movement.id].closeNote,
+            selectedForClose: getMovementStatus(movement) === "OPEN" ? prev[movement.id].selectedForClose : false,
+          };
+        }
+      }
+      return next;
+    });
+  }
+
+  async function fetchClosingGroup(row: EquipmentMovementRow) {
+    if (row.movement_group_id) {
+      const { data, error } = await supabase
+        .from("equipment_movements")
+        .select("*")
+        .eq("movement_group_id", row.movement_group_id)
+        .eq("equipment_area", area)
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as EquipmentMovementRow[];
+    }
+    const { data, error } = await supabase
+      .from("equipment_movements")
+      .select("*")
+      .eq("id", row.id)
+      .eq("equipment_area", area)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? [data as EquipmentMovementRow] : [];
   }
 
   async function openCloseModal(row: EquipmentMovementRow) {
     setMsg(null);
 
     let group: EquipmentMovementRow[] = [row];
-    if (row.movement_group_id) {
-      const { data: groupData, error } = await supabase
-        .from("equipment_movements")
-        .select("*")
-        .eq("movement_group_id", row.movement_group_id)
-        .order("created_at", { ascending: true });
-      if (!error && groupData?.length) {
-        group = groupData as EquipmentMovementRow[];
-      }
+    try {
+      const fetched = await fetchClosingGroup(row);
+      if (fetched.length) group = fetched;
+    } catch (error) {
+      console.error("equipment open group load error:", error);
     }
 
-    setClosing(row);
+    const lead = group.find((movement) => movement.id === row.id) ?? group[0] ?? row;
+    setClosing(lead);
     setClosingGroup(group);
-    setCloseResolutionType(resolutionTypeForClosingForm(row));
-    setCloseNote(row.close_note ?? "");
-
-    const initState: GroupEditState = {};
-    for (const movement of group) {
-      initState[movement.id] = {
-        resolutionType: resolutionTypeForClosingForm(movement),
-        closeNote: movement.close_note ?? "",
-        selectedForClose: false,
-      };
-    }
-    setGroupEditState(initState);
+    setCloseResolutionType(resolutionTypeForClosingForm(lead));
+    setCloseNote(lead.close_note ?? "");
+    setOpenMovementMeta({
+      destination: lead.destination ?? "",
+      interventionPlan: lead.intervention_plan_number ?? "",
+      note: lead.note ?? "",
+    });
+    setOpenAddSearch("");
+    setOpenAddOpen(false);
+    setGroupEditState(initGroupEditState(group));
     setCloseOpen(true);
+  }
+
+  const closingOpenRows = useMemo(
+    () => closingGroup.filter((row) => getMovementStatus(row) === "OPEN"),
+    [closingGroup]
+  );
+
+  const closingWarehouse = useMemo(() => {
+    const firstAsset = closing ? assetMap.get(closing.equipment_id) : undefined;
+    return (firstAsset?.warehouse ?? "").trim();
+  }, [assetMap, closing]);
+
+  const openAddMatches = useMemo(() => {
+    if (!closeOpen || !closingWarehouse) return [];
+    const idsInMovement = new Set(closingGroup.map((row) => row.equipment_id));
+    const search = openAddSearch.trim().toLowerCase();
+    return assets
+      .filter((asset) => {
+        if ((asset.warehouse ?? "").trim() !== closingWarehouse) return false;
+        if (asset.status !== "AVAILABLE") return false;
+        if (openMovementAssetIds.has(asset.id) || idsInMovement.has(asset.id)) return false;
+        if (!search) return true;
+        return [asset.serial_number, asset.asset_code, asset.name, asset.barcode, asset.nfc_tag_id]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(search));
+      })
+      .slice(0, 12);
+  }, [assets, closeOpen, closingGroup, closingWarehouse, openAddSearch, openMovementAssetIds]);
+
+  const allOpenSelected =
+    closingOpenRows.length > 0 &&
+    closingOpenRows.every((row) => !canEditRow(row) || groupEditState[row.id]?.selectedForClose);
+
+  function toggleSelectAllOpen(checked: boolean) {
+    setGroupEditState((prev) => {
+      const next = { ...prev };
+      for (const row of closingOpenRows) {
+        if (!canEditRow(row)) continue;
+        const state = next[row.id] ?? {
+          resolutionType: "RETURN" as EquipmentResolutionType,
+          closeNote: "",
+          selectedForClose: false,
+        };
+        next[row.id] = { ...state, selectedForClose: checked };
+      }
+      return next;
+    });
+  }
+
+  async function ensureMovementGroupId(lead: EquipmentMovementRow, group: EquipmentMovementRow[]) {
+    const existing = lead.movement_group_id || group.find((row) => row.movement_group_id)?.movement_group_id;
+    if (existing) return existing;
+    const groupId = crypto.randomUUID();
+    const { error } = await supabase
+      .from("equipment_movements")
+      .update({ movement_group_id: groupId })
+      .in(
+        "id",
+        group.map((row) => row.id)
+      )
+      .eq("equipment_area", area);
+    if (error) throw error;
+    return groupId;
+  }
+
+  async function addEquipmentToOpenMovement(asset: EquipmentAssetRow) {
+    if (!closing) return;
+    if (!canEditRow(closing)) {
+      setMsg("Solo il creatore del movimento o l'admin può aggiungere attrezzature.");
+      return;
+    }
+    if (asset.status !== "AVAILABLE" || openMovementAssetIds.has(asset.id)) {
+      setMsg("Questa attrezzatura non è disponibile per il prelievo.");
+      return;
+    }
+    if (closingGroup.some((row) => row.equipment_id === asset.id)) {
+      setMsg("Questa attrezzatura è già nel movimento.");
+      return;
+    }
+    if (closingWarehouse && (asset.warehouse ?? "").trim() !== closingWarehouse) {
+      setMsg("Puoi aggiungere solo attrezzature dello stesso magazzino.");
+      return;
+    }
+    if (!user?.id) {
+      setMsg("Devi essere loggato.");
+      return;
+    }
+
+    setSaving(true);
+    setMsg(null);
+    try {
+      const groupId = await ensureMovementGroupId(closing, closingGroup);
+      const lead = closingGroup[0] ?? closing;
+      const { error } = await supabase.from("equipment_movements").insert({
+        equipment_id: asset.id,
+        equipment_area: area,
+        type: "OUT",
+        status: "OPEN",
+        note: normalizeNullable(openMovementMeta.note),
+        destination: normalizeNullable(openMovementMeta.destination) || lead.destination,
+        intervention_plan_number: normalizeNullable(openMovementMeta.interventionPlan) || lead.intervention_plan_number,
+        created_by: lead.created_by ?? user.id,
+        created_by_name: lead.created_by_name ?? profileInfo?.fullName ?? user.email ?? null,
+        created_by_email: lead.created_by_email ?? user.email ?? null,
+        assigned_to_name: lead.assigned_to_name,
+        assigned_to_email: lead.assigned_to_email,
+        assigned_to_badge: lead.assigned_to_badge,
+        resolution_type: null,
+        close_note: null,
+        closed_at: null,
+        closed_by: null,
+        movement_group_id: groupId,
+        details_json: {
+          asset_code: asset.asset_code,
+          asset_name: asset.name,
+          equipment_area: area,
+          mode: "open-movement-add",
+        },
+      });
+      if (error) throw error;
+      toast.success("Attrezzatura aggiunta al movimento");
+      notifyEquipmentSync(area, "movements-add-to-open");
+      await loadData();
+      const refreshed = await fetchClosingGroup({ ...lead, movement_group_id: groupId });
+      applyClosingGroup(refreshed, closing);
+      setOpenAddSearch("");
+      setOpenAddOpen(false);
+    } catch (error) {
+      if (isOpenMovementConflictError(error)) {
+        setMsg("Aggiunta non riuscita: questa attrezzatura ha già un movimento aperto.");
+      } else {
+        setMsg("Aggiunta attrezzatura non riuscita: " + describeError(error));
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function executeRemoveEquipmentFromOpenMovement(row: EquipmentMovementRow) {
+    if (getMovementStatus(row) !== "OPEN") {
+      setMsg("Puoi togliere solo attrezzature ancora fuori.");
+      return;
+    }
+    if (!canEditRow(row)) {
+      setMsg("Solo il creatore del movimento o l'admin può togliere questa attrezzatura.");
+      return;
+    }
+
+    setDeletingId(row.id);
+    setMsg(null);
+    try {
+      const { error } = await supabase
+        .from("equipment_movements")
+        .delete()
+        .eq("id", row.id)
+        .eq("equipment_area", area)
+        .eq("status", "OPEN");
+      if (error) throw error;
+      toast.success("Attrezzatura tolta dal movimento");
+      notifyEquipmentSync(area, "movements-remove-from-open");
+      await loadData();
+      if (!closing) {
+        closeModal();
+        return;
+      }
+      const remaining = closingGroup.filter((item) => item.id !== row.id);
+      if (remaining.length === 0) {
+        closeModal();
+        return;
+      }
+      const lead = remaining[0];
+      const refreshed = await fetchClosingGroup(
+        lead.movement_group_id ? { ...lead, movement_group_id: lead.movement_group_id } : lead
+      );
+      applyClosingGroup(refreshed.length ? refreshed : remaining, closing);
+    } catch (error) {
+      setMsg("Rimozione attrezzatura non riuscita: " + describeError(error));
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  async function saveOpenMovementMeta() {
+    if (!closing) return;
+    if (!canEditRow(closing)) {
+      setMsg("Solo il creatore del movimento o l'admin può modificare i dati di uscita.");
+      return;
+    }
+    if (!openMovementMeta.destination.trim()) {
+      setMsg("La destinazione è obbligatoria.");
+      return;
+    }
+
+    setMetaSaving(true);
+    setMsg(null);
+    try {
+      const payload = {
+        destination: normalizeNullable(openMovementMeta.destination),
+        intervention_plan_number: normalizeNullable(openMovementMeta.interventionPlan),
+        note: normalizeNullable(openMovementMeta.note),
+      };
+      const ids = closingGroup.map((row) => row.id);
+      const { error } = await supabase
+        .from("equipment_movements")
+        .update(payload)
+        .in("id", ids)
+        .eq("equipment_area", area);
+      if (error) throw error;
+      toast.success("Dati uscita aggiornati");
+      notifyEquipmentSync(area, "movements-update-open-meta");
+      await loadData();
+      const refreshed = await fetchClosingGroup(closing);
+      applyClosingGroup(refreshed.length ? refreshed : closingGroup.map((row) => ({ ...row, ...payload })), closing);
+    } catch (error) {
+      setMsg("Salvataggio dati uscita non riuscito: " + describeError(error));
+    } finally {
+      setMetaSaving(false);
+    }
   }
 
   async function confirmClose() {
     if (!closing) return;
-    const isGroup = closingGroup.length > 1 && !!closing.movement_group_id;
-    const targetRows = isGroup
-      ? closingGroup.filter(
-          (row) => getMovementStatus(row) === "OPEN" && groupEditState[row.id]?.selectedForClose
-        )
-      : [closing];
+    const targetRows = closingOpenRows.filter((row) => groupEditState[row.id]?.selectedForClose);
 
-    if (isGroup && targetRows.length === 0) {
+    if (targetRows.length === 0) {
       setMsg("Seleziona almeno un'attrezzatura da far rientrare.");
       return;
     }
@@ -1740,8 +2048,8 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       let closedMaintenance = false;
       for (const row of targetRows) {
         if (getMovementStatus(row) === "CLOSED") continue;
-        const resolutionType = isGroup ? groupEditState[row.id]?.resolutionType : closeResolutionType;
-        const note = isGroup ? groupEditState[row.id]?.closeNote : closeNote;
+        const resolutionType = groupEditState[row.id]?.resolutionType ?? closeResolutionType;
+        const note = groupEditState[row.id]?.closeNote ?? closeNote;
 
         if (!resolutionType) {
           setMsg("Seleziona l'esito finale prima di confermare la chiusura.");
@@ -1764,17 +2072,15 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         if (resolutionType === "MAINTENANCE") closedMaintenance = true;
       }
 
-      const remainingOpen = isGroup
-        ? closingGroup.filter(
-            (row) => getMovementStatus(row) === "OPEN" && !targetRows.some((target) => target.id === row.id)
-          ).length
-        : 0;
+      const remainingOpen = closingOpenRows.filter(
+        (row) => !targetRows.some((target) => target.id === row.id)
+      ).length;
       toast.success(
-        isGroup
-          ? remainingOpen > 0
-            ? `${targetRows.length} rientrate · ${remainingOpen} ancora fuori`
-            : "Tutte le attrezzature del gruppo sono rientrate"
-          : "Movimento chiuso"
+        remainingOpen > 0
+          ? `${targetRows.length} rientrate · ${remainingOpen} ancora fuori`
+          : targetRows.length > 1
+            ? "Tutte le attrezzature del gruppo sono rientrate"
+            : "Movimento chiuso"
       );
       if (closedMaintenance) notifyEquipmentMaintenance(area);
       notifyEquipmentSync(area, "movements-close");
@@ -1896,6 +2202,31 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
               row.close_note || "—"
             )}
           </td>
+          {selectable && (
+            <td>
+              {rowOpen && canEditRow(row) ? (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={saving || deletingId === row.id}
+                  onClick={() => setRemoveEquipmentConfirm(row)}
+                  style={{
+                    borderColor: "rgba(239,68,68,0.5)",
+                    background: "rgba(239,68,68,0.1)",
+                    color: "#991b1b",
+                    padding: "6px 10px",
+                    fontSize: 12,
+                  }}
+                >
+                  <AppBusyLabel busy={deletingId === row.id}>
+                    {deletingId === row.id ? "Rimozione..." : "Togli"}
+                  </AppBusyLabel>
+                </button>
+              ) : (
+                "—"
+              )}
+            </td>
+          )}
         </tr>
       );
     });
@@ -2905,7 +3236,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           <div>
             <div className="equipmentSectionTitle">Movimenti aperti</div>
             <div className="equipmentSectionHint">
-              Le uscite aperte restano qui finché non vengono chiuse o rettificate.
+              Le uscite aperte restano qui finché non vengono chiuse o rettificate. Dal dettaglio puoi aggiungere o togliere attrezzature, modificare destinazione / piano / note e selezionare tutte per il rientro.
             </div>
           </div>
         </div>
@@ -3167,222 +3498,303 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           }
         >
 
-            {closingGroup.length <= 1 && (() => {
-              const asset = assetMap.get(closing.equipment_id);
-              const status = getMovementStatus(closing);
-              return (
-                <>
-                  <div
-                    style={{
-                      marginTop: 14,
-                      border: "1px solid rgba(59,130,246,0.25)",
-                      borderRadius: 14,
-                      padding: 12,
-                      background: "rgba(59,130,246,0.06)",
-                    }}
-                  >
-                    <div style={{ fontWeight: 900, marginBottom: 10 }}>Dettaglio uscita</div>
-                    <table className="table" style={{ fontSize: 13, width: "100%" }}>
-                      <tbody>
-                        {[
-                          { label: "Seriale", value: asset?.serial_number || asset?.asset_code || "—" },
-                          { label: "Nome", value: asset?.name || "—" },
-                          { label: "Stato movimento", value: EQUIPMENT_MOVEMENT_STATUS_LABELS[status] },
-                          { label: "Tipo", value: EQUIPMENT_MOVEMENT_LABELS.OUT },
-                          { label: "Area", value: EQUIPMENT_AREA_LABELS[closing.equipment_area] },
-                          { label: "Assegnatario", value: [closing.assigned_to_name, closing.assigned_to_badge ? `Badge ${closing.assigned_to_badge}` : null].filter(Boolean).join(" · ") || "—" },
-                          { label: "Nota uscita", value: closing.note || "—" },
-                          { label: "Esito finale", value: closing.resolution_type ? EQUIPMENT_RESOLUTION_LABELS[closing.resolution_type] : "—" },
-                          { label: "Nota chiusura", value: closing.close_note || "—" },
-                          { label: "Data chiusura", value: closing.closed_at ? fmtDateTime(closing.closed_at) : "—" },
-                        ].map((row) => (
-                          <tr key={row.label}>
-                            <td style={{ width: 220, padding: "8px 12px", fontWeight: 600, color: "#475569" }}>{row.label}</td>
-                            <td style={{ padding: "8px 12px", background: "#f8fafc", borderRadius: 4 }}>{row.value}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+            <div
+              style={{
+                marginTop: 14,
+                border: "1px solid rgba(59,130,246,0.25)",
+                borderRadius: 14,
+                padding: 12,
+                background: "rgba(59,130,246,0.06)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ fontWeight: 900 }}>Dati uscita</div>
+                <button
+                  className="btn btnPrimary"
+                  type="button"
+                  onClick={() => void saveOpenMovementMeta()}
+                  disabled={metaSaving || saving || !canEditRow(closing)}
+                >
+                  <AppBusyLabel busy={metaSaving}>{metaSaving ? "Salvataggio..." : "Salva destinazione / piano / note"}</AppBusyLabel>
+                </button>
+              </div>
+              <div style={{ marginTop: 6, fontSize: 13, color: "#475569" }}>
+                Assegnatario: {[closing.assigned_to_name, closing.assigned_to_badge ? `Badge ${closing.assigned_to_badge}` : null].filter(Boolean).join(" · ") || "—"}
+              </div>
+              <div className="mobileGrid1" style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
+                <div style={{ gridColumn: "span 4" }}>
+                  <label className="label" htmlFor="open-movement-destination">Destinazione *</label>
+                  <ClearableInput
+                    id="open-movement-destination"
+                    value={openMovementMeta.destination}
+                    onChange={(value) => setOpenMovementMeta((prev) => ({ ...prev, destination: value }))}
+                    placeholder="Destinazione"
+                    disabled={!canEditRow(closing)}
+                  />
+                </div>
+                <div style={{ gridColumn: "span 4" }}>
+                  <label className="label" htmlFor="open-movement-plan">Piano d&apos;intervento</label>
+                  <ClearableInput
+                    id="open-movement-plan"
+                    value={openMovementMeta.interventionPlan}
+                    onChange={(value) => setOpenMovementMeta((prev) => ({ ...prev, interventionPlan: value }))}
+                    placeholder="Numero piano"
+                    disabled={!canEditRow(closing)}
+                  />
+                </div>
+                <div style={{ gridColumn: "span 4" }}>
+                  <label className="label" htmlFor="open-movement-note">Note uscita</label>
+                  <ClearableInput
+                    id="open-movement-note"
+                    value={openMovementMeta.note}
+                    onChange={(value) => setOpenMovementMeta((prev) => ({ ...prev, note: value }))}
+                    placeholder="Note"
+                    disabled={!canEditRow(closing)}
+                  />
+                </div>
+              </div>
+            </div>
 
-                  {status === "OPEN" && (
+            <div
+              style={{
+                marginTop: 14,
+                border: "1px solid rgba(15,23,42,0.12)",
+                borderRadius: 14,
+                padding: 12,
+                background: "rgba(255,255,255,0.9)",
+              }}
+            >
+              <div style={{ fontWeight: 900, marginBottom: 6 }}>Aggiungi attrezzatura</div>
+              <div style={{ fontSize: 13, color: "#64748b", marginBottom: 10 }}>
+                Se qualcuno ha sbagliato, puoi togliere una riga sotto o aggiungerne un&apos;altra dello stesso magazzino{closingWarehouse ? ` (${closingWarehouse})` : ""}.
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "end" }}>
+                <div ref={openAddBoxRef} style={{ position: "relative", flex: "1 1 260px", minWidth: 0 }}>
+                  <label className="label" htmlFor="open-add-asset">Cerca seriale / nome</label>
+                  <ClearableInput
+                    id="open-add-asset"
+                    value={openAddSearch}
+                    onChange={(value) => {
+                      setOpenAddSearch(value);
+                      setOpenAddOpen(true);
+                    }}
+                    onFocus={() => setOpenAddOpen(true)}
+                    placeholder="Aggiungi attrezzatura"
+                    disabled={!canEditRow(closing) || saving}
+                  />
+                  {openAddOpen && (
                     <div
                       style={{
-                        marginTop: 14,
+                        position: "absolute",
+                        left: 0,
+                        right: 0,
+                        top: "100%",
+                        marginTop: 4,
+                        background: "#fff",
                         border: "1px solid rgba(15,23,42,0.12)",
-                        borderRadius: 14,
-                        padding: 12,
-                        background: "rgba(255,255,255,0.85)",
+                        borderRadius: 10,
+                        boxShadow: "0 12px 32px rgba(0,0,0,0.12)",
+                        overflow: "hidden",
+                        zIndex: 20,
+                        maxHeight: 240,
+                        overflowY: "auto",
                       }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                        <div style={{ fontWeight: 900 }}>Rettifica / Chiusura uscita</div>
-                        <button className="btn btnPrimary" type="button" onClick={confirmClose} disabled={saving || !canEditRow(closing)}>
-                          <AppBusyLabel busy={saving}>{saving ? "Salvataggio..." : "Conferma chiusura"}</AppBusyLabel>
-                        </button>
-                      </div>
-
-                      <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>
-                        Solo il creatore del movimento o l&apos;admin può chiudere questa uscita.
-                      </div>
-
-                      <div className="mobileGrid1" style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 10 }}>
-                        <div style={{ gridColumn: "span 4" }}>
-                          <label className="label" htmlFor="equipmentCloseResolution">
-                            Esito finale
-                          </label>
-                          <select
-                            id="equipmentCloseResolution"
-                            className="input"
-                            value={closeResolutionType}
-                            onChange={(e) => setCloseResolutionType(e.target.value as EquipmentResolutionType)}
-                            disabled={!canEditRow(closing)}
+                      {openAddMatches.length === 0 ? (
+                        <div style={{ padding: 12, fontSize: 13, color: "#64748b" }}>
+                          Nessuna attrezzatura disponibile in questo magazzino.
+                        </div>
+                      ) : (
+                        openAddMatches.map((asset) => (
+                          <button
+                            key={asset.id}
+                            type="button"
+                            onClick={() => void addEquipmentToOpenMovement(asset)}
+                            style={{
+                              display: "block",
+                              width: "100%",
+                              textAlign: "left",
+                              padding: "10px 12px",
+                              border: "none",
+                              background: "#fff",
+                              cursor: "pointer",
+                              borderTop: "1px solid #f1f5f9",
+                            }}
                           >
-                            {EQUIPMENT_RESOLUTION_TYPE_OPTIONS.map((option) => (
-                              <option key={option} value={option}>{EQUIPMENT_RESOLUTION_LABELS[option]}</option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div style={{ gridColumn: "span 8" }}>
-                          <label className="label" htmlFor="equipmentCloseNote">
-                            Nota chiusura
-                          </label>
-                          <ClearableInput
-                            id="equipmentCloseNote"
-                            value={closeNote}
-                            onChange={setCloseNote}
-                            placeholder="Esito finale / nota rettifica"
-                            disabled={!canEditRow(closing)}
-                          />
-                        </div>
-                      </div>
-
-                      <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-                        Dopo la chiusura lo stato del movimento passa a <b>CHIUSO</b> con l&apos;esito registrato (rientro o manutenzione).
-                      </div>
+                            <div style={{ fontWeight: 900 }}>{asset.serial_number || asset.asset_code}</div>
+                            <div style={{ fontSize: 12, color: "#334155" }}>{asset.name}</div>
+                          </button>
+                        ))
+                      )}
                     </div>
                   )}
-                </>
-              );
-            })()}
-
-            {closingGroup.length > 1 && (
-              <>
-                <div
-                  style={{
-                    marginTop: 14,
-                    border: "1px solid rgba(59,130,246,0.25)",
-                    borderRadius: 14,
-                    padding: 12,
-                    background: "rgba(59,130,246,0.06)",
-                  }}
-                >
-                  <div style={{ fontWeight: 900, marginBottom: 10 }}>
-                    Dettaglio gruppo · {closingGroup.filter((row) => getMovementStatus(row) === "CLOSED").length} rientrate ·{" "}
-                    {closingGroup.filter((row) => getMovementStatus(row) === "OPEN").length} ancora fuori
-                  </div>
-                  <div style={{ fontSize: 13, color: "#475569" }}>
-                    Seleziona soltanto le attrezzature che rientrano adesso. Le altre resteranno aperte e potranno rientrare nei prossimi giorni.
-                  </div>
                 </div>
-
-                <details
-                  open
-                  style={{ marginTop: 14, border: "1px solid #bfdbfe", borderRadius: 12, background: "#fff", overflow: "hidden" }}
-                >
-                  <summary
-                    style={{ padding: 14, cursor: "pointer", fontWeight: 900, color: "#1d4ed8", background: "#eff6ff" }}
-                  >
-                    Ancora fuori ({closingGroup.filter((row) => getMovementStatus(row) === "OPEN").length})
-                  </summary>
-                  <div className="tableWrap">
-                    <table className="table">
-                      <thead>
-                        <tr>
-                          <th>Rientra ora</th>
-                          <th>Matricola / seriale</th>
-                          <th>Descrizione</th>
-                          <th>Stato</th>
-                          <th>Esito finale</th>
-                          <th>Nota chiusura</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {renderClosingGroupRows(
-                          closingGroup.filter((row) => getMovementStatus(row) === "OPEN"),
-                          true
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </details>
-
-                <details
-                  style={{ marginTop: 12, border: "1px solid #bbf7d0", borderRadius: 12, background: "#fff", overflow: "hidden" }}
-                >
-                  <summary
-                    style={{ padding: 14, cursor: "pointer", fontWeight: 900, color: "#047857", background: "#f0fdf4" }}
-                  >
-                    Rientrate ({closingGroup.filter((row) => getMovementStatus(row) === "CLOSED").length})
-                  </summary>
-                  {closingGroup.some((row) => getMovementStatus(row) === "CLOSED") ? (
-                    <div className="tableWrap">
-                      <table className="table">
-                        <thead>
-                          <tr>
-                            <th>Matricola / seriale</th>
-                            <th>Descrizione</th>
-                            <th>Stato / data</th>
-                            <th>Esito finale</th>
-                            <th>Nota chiusura</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {renderClosingGroupRows(
-                            closingGroup.filter((row) => getMovementStatus(row) === "CLOSED"),
-                            false
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div style={{ padding: 14, color: "#64748b" }}>Nessuna attrezzatura è ancora rientrata.</div>
-                  )}
-                </details>
-
-                <div style={{ marginTop: 16, padding: 16, border: "1px solid #e2e8f0", borderRadius: 12, background: "#f8fafc" }}>
-                  <div style={{ fontWeight: 900, marginBottom: 10 }}>Rientro progressivo</div>
-                  <div style={{ fontSize: 13, marginBottom: 12, color: "#64748b" }}>
-                    Verranno chiuse solo le righe selezionate. Il gruppo resterà aperto finché non saranno rientrate tutte le attrezzature.
-                  </div>
-                  <button
-                    className="btn btnPrimary"
-                    type="button"
-                    onClick={confirmClose}
-                    disabled={
-                      saving ||
-                      !closingGroup.some(
-                        (row) => getMovementStatus(row) === "OPEN" && groupEditState[row.id]?.selectedForClose
-                      )
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={!canEditRow(closing) || saving}
+                  onClick={() => {
+                    if (!closingWarehouse) {
+                      setMsg("Magazzino del movimento non disponibile.");
+                      return;
                     }
-                  >
-                    <AppBusyLabel busy={saving}>
-                      {saving
-                        ? "Salvataggio..."
-                        : `Conferma rientro selezionati (${
-                            closingGroup.filter(
-                              (row) => getMovementStatus(row) === "OPEN" && groupEditState[row.id]?.selectedForClose
-                            ).length
-                          })`}
-                    </AppBusyLabel>
-                  </button>
+                    setAddingToOpenMovement(true);
+                    void startCameraScanForSearch();
+                  }}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                >
+                  <QrIcon />
+                  QR
+                </button>
+              </div>
+            </div>
+
+            <div
+              style={{
+                marginTop: 14,
+                border: "1px solid rgba(59,130,246,0.25)",
+                borderRadius: 14,
+                padding: 12,
+                background: "rgba(59,130,246,0.06)",
+              }}
+            >
+              <div style={{ fontWeight: 900, marginBottom: 6 }}>
+                Attrezzature · {closingGroup.filter((row) => getMovementStatus(row) === "CLOSED").length} rientrate ·{" "}
+                {closingOpenRows.length} ancora fuori
+              </div>
+              <div style={{ fontSize: 13, color: "#475569" }}>
+                Seleziona le attrezzature da far rientrare ora. Puoi usare &quot;Seleziona tutte&quot; per chiuderle insieme.
+              </div>
+            </div>
+
+            <details
+              open
+              style={{ marginTop: 14, border: "1px solid #bfdbfe", borderRadius: 12, background: "#fff", overflow: "hidden" }}
+            >
+              <summary
+                style={{ padding: 14, cursor: "pointer", fontWeight: 900, color: "#1d4ed8", background: "#eff6ff" }}
+              >
+                Ancora fuori ({closingOpenRows.length})
+              </summary>
+              <div className="tableWrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>
+                        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, margin: 0 }}>
+                          <input
+                            type="checkbox"
+                            checked={allOpenSelected}
+                            onChange={(event) => toggleSelectAllOpen(event.target.checked)}
+                            disabled={closingOpenRows.filter(canEditRow).length === 0}
+                            aria-label="Seleziona tutte le attrezzature ancora fuori"
+                            style={{ width: 18, height: 18 }}
+                          />
+                          Tutte
+                        </label>
+                      </th>
+                      <th>Matricola / seriale</th>
+                      <th>Descrizione</th>
+                      <th>Stato</th>
+                      <th>Esito finale</th>
+                      <th>Nota chiusura</th>
+                      <th>Azioni</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {closingOpenRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} style={{ padding: 12, color: "#64748b" }}>Nessuna attrezzatura ancora fuori.</td>
+                      </tr>
+                    ) : (
+                      renderClosingGroupRows(closingOpenRows, true)
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+
+            <details
+              style={{ marginTop: 12, border: "1px solid #bbf7d0", borderRadius: 12, background: "#fff", overflow: "hidden" }}
+            >
+              <summary
+                style={{ padding: 14, cursor: "pointer", fontWeight: 900, color: "#047857", background: "#f0fdf4" }}
+              >
+                Rientrate ({closingGroup.filter((row) => getMovementStatus(row) === "CLOSED").length})
+              </summary>
+              {closingGroup.some((row) => getMovementStatus(row) === "CLOSED") ? (
+                <div className="tableWrap">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Matricola / seriale</th>
+                        <th>Descrizione</th>
+                        <th>Stato / data</th>
+                        <th>Esito finale</th>
+                        <th>Nota chiusura</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {renderClosingGroupRows(
+                        closingGroup.filter((row) => getMovementStatus(row) === "CLOSED"),
+                        false
+                      )}
+                    </tbody>
+                  </table>
                 </div>
-              </>
-            )}
+              ) : (
+                <div style={{ padding: 14, color: "#64748b" }}>Nessuna attrezzatura è ancora rientrata.</div>
+              )}
+            </details>
+
+            <div style={{ marginTop: 16, padding: 16, border: "1px solid #e2e8f0", borderRadius: 12, background: "#f8fafc" }}>
+              <div style={{ fontWeight: 900, marginBottom: 10 }}>Rientro</div>
+              <div style={{ fontSize: 13, marginBottom: 12, color: "#64748b" }}>
+                Verranno chiuse solo le righe selezionate. Il movimento resta aperto finché non sono rientrate tutte.
+              </div>
+              <button
+                className="btn btnPrimary"
+                type="button"
+                onClick={confirmClose}
+                disabled={saving || !closingOpenRows.some((row) => groupEditState[row.id]?.selectedForClose)}
+              >
+                <AppBusyLabel busy={saving}>
+                  {saving
+                    ? "Salvataggio..."
+                    : `Conferma rientro selezionati (${
+                        closingOpenRows.filter((row) => groupEditState[row.id]?.selectedForClose).length
+                      })`}
+                </AppBusyLabel>
+              </button>
+            </div>
 
             {msg && <div style={{ marginTop: 10, fontWeight: 800, whiteSpace: "pre-wrap" }}>{msg}</div>}
         </AppModalFrame>
+      )}
+
+      {removeEquipmentConfirm && (
+        <ConfirmModal
+          open={!!removeEquipmentConfirm}
+          title="Togliere attrezzatura"
+          message={
+            (() => {
+              const asset = assetMap.get(removeEquipmentConfirm.equipment_id);
+              const label = asset
+                ? `${asset.serial_number || asset.asset_code} - ${asset.name}`
+                : removeEquipmentConfirm.equipment_id;
+              return `Togliere "${label}" da questo movimento?\n\nL'attrezzatura tornerà disponibile. Utile se è stata inserita per errore.`;
+            })()
+          }
+          confirmLabel="Togli"
+          cancelLabel="Annulla"
+          danger
+          onConfirm={() => {
+            const row = removeEquipmentConfirm;
+            setRemoveEquipmentConfirm(null);
+            void executeRemoveEquipmentFromOpenMovement(row);
+          }}
+          onCancel={() => setRemoveEquipmentConfirm(null)}
+        />
       )}
 
       {deleteConfirm && (

@@ -923,6 +923,7 @@ DROP POLICY IF EXISTS "equipment_movements_select_all" ON public.equipment_movem
 DROP POLICY IF EXISTS "equipment_movements_insert_auth" ON public.equipment_movements;
 DROP POLICY IF EXISTS "equipment_movements_update_creator_or_admin" ON public.equipment_movements;
 DROP POLICY IF EXISTS "equipment_movements_delete_admin" ON public.equipment_movements;
+DROP POLICY IF EXISTS "equipment_movements_delete_creator_or_admin" ON public.equipment_movements;
 CREATE POLICY "equipment_movements_select_all" ON public.equipment_movements FOR SELECT TO authenticated USING (true);
 CREATE POLICY "equipment_movements_insert_auth" ON public.equipment_movements FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY "equipment_movements_update_creator_or_admin" ON public.equipment_movements FOR UPDATE TO authenticated
@@ -936,9 +937,14 @@ CREATE POLICY "equipment_movements_update_creator_or_admin" ON public.equipment_
     OR (equipment_area = 'LINEE' AND public.can_manage_equipment_linee())
     OR (equipment_area = 'STAZIONI' AND public.can_manage_equipment_stazioni())
   );
-CREATE POLICY "equipment_movements_delete_admin" ON public.equipment_movements FOR DELETE TO authenticated
+CREATE POLICY "equipment_movements_delete_creator_or_admin" ON public.equipment_movements FOR DELETE TO authenticated
   USING (
-    (equipment_area = 'LINEE' AND public.can_manage_equipment_linee())
+    (
+      created_by IS NOT NULL
+      AND created_by::text = auth.uid()::text
+      AND COALESCE(status, 'OPEN') = 'OPEN'
+    )
+    OR (equipment_area = 'LINEE' AND public.can_manage_equipment_linee())
     OR (equipment_area = 'STAZIONI' AND public.can_manage_equipment_stazioni())
   );
 
@@ -974,11 +980,10 @@ BEGIN
   -- UPDATE solo metadati (es. details_json per reintegro manutenzione): non risincronizzare l'anagrafica.
   -- Altrimenti il ramo MAINTENANCE rimetterebbe l'asset in manutenzione dopo ogni PATCH al movimento chiuso.
   IF TG_OP = 'UPDATE'
-     AND COALESCE(OLD.status, '') = 'CLOSED'
-     AND COALESCE(NEW.status, '') = 'CLOSED'
-     AND OLD.resolution_type IS NOT DISTINCT FROM NEW.resolution_type
+     AND COALESCE(NEW.status, 'OPEN') IS NOT DISTINCT FROM COALESCE(OLD.status, 'OPEN')
      AND OLD.equipment_id IS NOT DISTINCT FROM NEW.equipment_id
      AND COALESCE(OLD.type, 'OUT') IS NOT DISTINCT FROM COALESCE(NEW.type, 'OUT')
+     AND OLD.resolution_type IS NOT DISTINCT FROM NEW.resolution_type
      AND OLD.closed_at IS NOT DISTINCT FROM NEW.closed_at
      AND OLD.close_note IS NOT DISTINCT FROM NEW.close_note
      AND OLD.closed_by IS NOT DISTINCT FROM NEW.closed_by

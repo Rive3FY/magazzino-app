@@ -1,6 +1,6 @@
 -- Conserva movimenti e registri quando si aggiorna l'anagrafica attrezzature.
--- Prima: ON DELETE CASCADE cancellava tutti i movimenti se si eliminava l'asset
--- (es. cancellazione + reimport del file Excel).
+-- Prima: ON DELETE CASCADE cancellava tutti i movimenti se si eliminava l'asset.
+-- Superato da 20260910140000 (ON DELETE SET NULL + equipment_id nullable).
 
 DO $$
 DECLARE

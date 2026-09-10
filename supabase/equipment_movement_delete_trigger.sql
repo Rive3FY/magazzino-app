@@ -6,6 +6,9 @@ RETURNS TRIGGER
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 AS $$
 BEGIN
+  IF OLD.equipment_id IS NULL THEN
+    RETURN OLD;
+  END IF;
   IF OLD.status = 'OPEN' THEN
     UPDATE public.equipment_assets
     SET

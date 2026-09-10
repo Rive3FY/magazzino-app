@@ -81,7 +81,10 @@ export function buildEquipmentPickupPdfSheet(
   const warehouses = Array.from(
     new Set(
       ordered
-        .map((movement) => clean(assetMap.get(movement.equipment_id)?.warehouse))
+        .map((movement) => {
+          const asset = movement.equipment_id ? assetMap.get(movement.equipment_id) : undefined;
+          return clean(asset?.warehouse) || getDetail(movement, "warehouse");
+        })
         .filter(Boolean)
     )
   );
@@ -100,16 +103,17 @@ export function buildEquipmentPickupPdfSheet(
     note: clean(lead.note),
     movementKey: movementKey(ordered),
     rows: ordered.map((movement) => {
-      const asset = assetMap.get(movement.equipment_id);
+      const asset = movement.equipment_id ? assetMap.get(movement.equipment_id) : undefined;
       return {
         matricola:
           clean(asset?.serial_number) ||
           clean(asset?.asset_code) ||
+          getDetail(movement, "serial_number") ||
           getDetail(movement, "asset_code") ||
-          movement.equipment_id,
+          "—",
         descrizione: clean(asset?.name) || getDetail(movement, "asset_name") || "—",
-        categoria: clean(asset?.category),
-        ubicazione: [clean(asset?.shelf), clean(asset?.place)].filter(Boolean).join(" · "),
+        categoria: clean(asset?.category) || getDetail(movement, "category"),
+        ubicazione: [clean(asset?.shelf) || getDetail(movement, "shelf"), clean(asset?.place) || getDetail(movement, "place")].filter(Boolean).join(" · "),
       };
     }),
   };

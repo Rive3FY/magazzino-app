@@ -41,8 +41,8 @@ export function useEquipmentMaintenanceNotifications(area: EquipmentArea | null,
       console.warn("equipment maintenance badge:", movErr.message);
       return;
     }
-    const movRows = (movements ?? []) as { equipment_id: string }[];
-    const ids = [...new Set(movRows.map((m) => m.equipment_id).filter(Boolean))];
+    const movRows = (movements ?? []) as { equipment_id: string | null }[];
+    const ids = [...new Set(movRows.map((m) => m.equipment_id).filter((id): id is string => Boolean(id)))];
     if (ids.length === 0) {
       setCount(0);
       return;
@@ -62,11 +62,9 @@ export function useEquipmentMaintenanceNotifications(area: EquipmentArea | null,
 
     let queue = 0;
     for (const m of movRows) {
+      if (!m.equipment_id) continue;
       const st = statusById.get(m.equipment_id);
-      if (!st) {
-        queue += 1;
-        continue;
-      }
+      if (!st) continue;
       if (!assetResolvedStatus(st)) queue += 1;
     }
     setCount(queue);

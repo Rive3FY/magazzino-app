@@ -1,6 +1,6 @@
--- Esegui nel SQL Editor di Supabase (dopo equipment_open_movement_edit.sql se non l'hai già lanciato).
--- Import Excel: cancella dall'anagrafica le attrezzature assenti dal file,
--- ma i movimenti e i registri restano. Gli scaffali materiali non vengono toccati.
+-- Sostituzione anagrafica da Excel: cancella gli asset assenti dal file
+-- ma conserva movimenti e registri (identity in details_json, poi SET NULL).
+-- Gli scaffali materiali (material_shelves) non sono toccati.
 
 ALTER TABLE public.equipment_movements
   ALTER COLUMN equipment_id DROP NOT NULL;
@@ -43,6 +43,7 @@ DECLARE
   current_asset public.equipment_assets%ROWTYPE;
   effective_closed_at timestamptz;
 BEGIN
+  -- Movimento storico dopo cancellazione anagrafica (ON DELETE SET NULL).
   IF NEW.equipment_id IS NULL THEN
     IF TG_OP = 'INSERT' THEN
       RAISE EXCEPTION 'equipment_id_required';
@@ -50,6 +51,7 @@ BEGIN
     RETURN NEW;
   END IF;
 
+  -- UPDATE solo metadati (destinazione, note, piano, gruppo, details_json): non toccare l'anagrafica.
   IF TG_OP = 'UPDATE'
      AND COALESCE(NEW.status, 'OPEN') IS NOT DISTINCT FROM COALESCE(OLD.status, 'OPEN')
      AND OLD.equipment_id IS NOT DISTINCT FROM NEW.equipment_id

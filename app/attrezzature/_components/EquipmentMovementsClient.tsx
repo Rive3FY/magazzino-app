@@ -33,6 +33,13 @@ import type {
   EquipmentMovementRow,
   EquipmentResolutionType,
 } from "../../_lib/types";
+import {
+  equipmentMovementDetailsJson,
+  movementAssetCode,
+  movementAssetName,
+  movementAssetLabel,
+  movementWarehouse,
+} from "../../_lib/equipment-movement-snapshot";
 
 type Props = {
   area: EquipmentArea;
@@ -831,7 +838,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   }, [assetsByWarehouse, categorySelectModalCategory, warehouseFilter]);
 
   const openMovementAssetIds = useMemo(
-    () => new Set(openHistory.map((row) => row.equipment_id)),
+    () => new Set(openHistory.map((row) => row.equipment_id).filter((id): id is string => Boolean(id))),
     [openHistory]
   );
 
@@ -1548,12 +1555,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           closed_at: null,
           closed_by: null,
           movement_group_id: movementGroupId,
-          details_json: {
-            asset_code: item.asset_code,
-            asset_name: item.name,
-            equipment_area: area,
-            mode: "cart",
-          },
+          details_json: equipmentMovementDetailsJson(item, area, "cart"),
         });
         if (error) throw error;
       }
@@ -1620,12 +1622,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
       closed_at: null,
       closed_by: null,
       movement_group_id: null,
-      details_json: {
-        asset_code: selectedAsset.asset_code ?? null,
-        asset_name: selectedAsset.name ?? null,
-        equipment_area: area,
-        mode: "single",
-      },
+      details_json: equipmentMovementDetailsJson(selectedAsset, area, "single"),
     });
 
     if (error) {
@@ -1814,13 +1811,16 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
   );
 
   const closingWarehouse = useMemo(() => {
-    const firstAsset = closing ? assetMap.get(closing.equipment_id) : undefined;
-    return (firstAsset?.warehouse ?? "").trim();
+    if (!closing) return "";
+    const firstAsset = closing.equipment_id ? assetMap.get(closing.equipment_id) : undefined;
+    return movementWarehouse(closing, firstAsset);
   }, [assetMap, closing]);
 
   const openAddMatches = useMemo(() => {
     if (!closeOpen || !closingWarehouse) return [];
-    const idsInMovement = new Set(closingGroup.map((row) => row.equipment_id));
+    const idsInMovement = new Set(
+      closingGroup.map((row) => row.equipment_id).filter((id): id is string => Boolean(id))
+    );
     const search = openAddSearch.trim().toLowerCase();
     return assets
       .filter((asset) => {
@@ -1918,12 +1918,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
         closed_at: null,
         closed_by: null,
         movement_group_id: groupId,
-        details_json: {
-          asset_code: asset.asset_code,
-          asset_name: asset.name,
-          equipment_area: area,
-          mode: "open-movement-add",
-        },
+        details_json: equipmentMovementDetailsJson(asset, area, "open-movement-add"),
       });
       if (error) throw error;
       toast.success("Attrezzatura aggiunta al movimento");
@@ -2118,7 +2113,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
 
   function renderClosingGroupRows(groupRows: EquipmentMovementRow[], selectable: boolean) {
     return groupRows.map((row) => {
-      const asset = assetMap.get(row.equipment_id);
+      const asset = row.equipment_id ? assetMap.get(row.equipment_id) : undefined;
       const rowOpen = getMovementStatus(row) === "OPEN";
       const state = groupEditState[row.id] ?? {
         resolutionType: "RETURN" as EquipmentResolutionType,
@@ -2132,7 +2127,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
             <td>
               <input
                 type="checkbox"
-                aria-label={`Seleziona ${asset?.serial_number || asset?.asset_code || row.equipment_id} per il rientro`}
+                aria-label={`Seleziona ${movementAssetCode(row, asset) || "attrezzatura"} per il rientro`}
                 checked={state.selectedForClose}
                 onChange={(event) =>
                   setGroupEditState((prev) => ({
@@ -2148,8 +2143,8 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
               />
             </td>
           )}
-          <td style={{ fontWeight: 900 }}>{asset?.serial_number || asset?.asset_code || row.equipment_id}</td>
-          <td>{asset?.name || String(row.details_json?.asset_name ?? "").trim() || "—"}</td>
+          <td style={{ fontWeight: 900 }}>{movementAssetCode(row, asset) || "—"}</td>
+          <td>{movementAssetName(row, asset) || "—"}</td>
           <td>
             <div style={{ fontWeight: 700 }}>{rowOpen ? "Ancora fuori" : "Rientrata"}</div>
             {!rowOpen && row.closed_at && (
@@ -3268,7 +3263,7 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                 </tr>
               ) : (
                 openMovements.map((row) => {
-                  const asset = assetMap.get(row.equipment_id);
+                  const asset = row.equipment_id ? assetMap.get(row.equipment_id) : undefined;
                   const title = row.movement_group_id ? "Clicca per chiudere / rettificare il gruppo" : "Clicca per chiudere / rettificare";
                   const busy = deletingId === row.id;
                   return (
@@ -3308,13 +3303,11 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
                               </>
                             );
                           })()
-                        ) : asset ? (
-                          `${asset.serial_number || asset.asset_code} - ${asset.name}`
                         ) : (
-                          row.equipment_id
+                          movementAssetLabel(row, asset)
                         )}
                       </td>
-                      <td>{asset?.warehouse || "—"}</td>
+                      <td>{movementWarehouse(row, asset) || "—"}</td>
                       <td>{row.destination || "—"}</td>
                       <td>
                         {[row.assigned_to_name, row.assigned_to_badge ? `Badge ${row.assigned_to_badge}` : null]
@@ -3778,10 +3771,10 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           title="Togliere attrezzatura"
           message={
             (() => {
-              const asset = assetMap.get(removeEquipmentConfirm.equipment_id);
-              const label = asset
-                ? `${asset.serial_number || asset.asset_code} - ${asset.name}`
-                : removeEquipmentConfirm.equipment_id;
+              const asset = removeEquipmentConfirm.equipment_id
+                ? assetMap.get(removeEquipmentConfirm.equipment_id)
+                : undefined;
+              const label = movementAssetLabel(removeEquipmentConfirm, asset);
               return `Togliere "${label}" da questo movimento?\n\nL'attrezzatura tornerà disponibile. Utile se è stata inserita per errore.`;
             })()
           }
@@ -3803,12 +3796,10 @@ export default function EquipmentMovementsClient({ area, basePath }: Props) {
           title="Eliminare movimento"
           message={
             (() => {
-              const asset = assetMap.get(deleteConfirm.equipment_id);
+              const asset = deleteConfirm.equipment_id ? assetMap.get(deleteConfirm.equipment_id) : undefined;
               const label = deleteConfirm.movement_group_id
                 ? `Prelievo multiplo (${history.filter((m) => m.movement_group_id === deleteConfirm.movement_group_id).length} attrezzature)`
-                : asset
-                  ? `${asset.serial_number || asset.asset_code} - ${asset.name}`
-                  : deleteConfirm.equipment_id;
+                : movementAssetLabel(deleteConfirm, asset);
               return `Eliminare il movimento "${label}"?\n\nLe attrezzature coinvolte torneranno disponibili.`;
             })()
           }

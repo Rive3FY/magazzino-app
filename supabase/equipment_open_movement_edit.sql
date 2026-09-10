@@ -12,6 +12,13 @@ DECLARE
   current_asset public.equipment_assets%ROWTYPE;
   effective_closed_at timestamptz;
 BEGIN
+  IF NEW.equipment_id IS NULL THEN
+    IF TG_OP = 'INSERT' THEN
+      RAISE EXCEPTION 'equipment_id_required';
+    END IF;
+    RETURN NEW;
+  END IF;
+
   IF TG_OP = 'UPDATE'
      AND COALESCE(NEW.status, 'OPEN') IS NOT DISTINCT FROM COALESCE(OLD.status, 'OPEN')
      AND OLD.equipment_id IS NOT DISTINCT FROM NEW.equipment_id

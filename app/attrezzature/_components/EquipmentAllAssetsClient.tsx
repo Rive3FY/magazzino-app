@@ -23,6 +23,11 @@ import ConfirmModal from "../../_components/ConfirmModal";
 import { equipmentAssetSchema } from "../../_lib/validations";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../../_lib/fastBarcodeScanner";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentStatus } from "../../_lib/types";
+import {
+  deleteAssetsPreservingMovements,
+  findOpenMovementAssetIds,
+  isAssetBlockedFromCatalogDelete,
+} from "../../_lib/equipment-movement-snapshot";
 import AppSpinner, { AppBusyLabel, AppLoading } from "../../_components/AppSpinner";
 
 const EQUIPMENT_TABLE_SORT_STATUS_ORDER: Record<EquipmentStatus, number> = EQUIPMENT_STATUS_OPTIONS.reduce(
@@ -943,10 +948,10 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
   function openDeleteAssetConfirm(row: EquipmentAssetRow) {
     if (!isAdmin) return;
     void (async () => {
-      const blocked = await findAssetsWithMovements([row.id]);
+      const blocked = await findAssetsBlockedFromDelete([row.id]);
       if (blocked.size > 0) {
         setMsg(
-          "Non puoi eliminare questa attrezzatura: ha movimenti o registri collegati. Per cambiare l'anagrafica importa di nuovo il file Excel: lo storico resta."
+          "Non puoi eliminare questa attrezzatura mentre è in uscita aperta o in manutenzione. Chiudi il movimento o reintegra, poi riprova. I registri restano anche dopo l'eliminazione."
         );
         return;
       }
@@ -958,10 +963,10 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     if (!isAdmin || selectedIds.size === 0) return;
     void (async () => {
       const ids = Array.from(selectedIds);
-      const blocked = await findAssetsWithMovements(ids);
+      const blocked = await findAssetsBlockedFromDelete(ids);
       if (blocked.size > 0) {
         setMsg(
-          `${blocked.size} attrezzatura/e selezionate hanno movimenti o registri e non possono essere eliminate. Togliele dalla selezione oppure aggiorna l'anagrafica con un nuovo Excel.`
+          `${blocked.size} attrezzatura/e selezionate sono in uscita aperta o in manutenzione e non possono essere eliminate. Togliele dalla selezione.`
         );
         return;
       }
@@ -969,47 +974,41 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
     })();
   }
 
-  async function findAssetsWithMovements(ids: string[]) {
+  async function findAssetsBlockedFromDelete(ids: string[]) {
     const blocked = new Set<string>();
     if (ids.length === 0) return blocked;
-    const { data, error } = await supabase
-      .from("equipment_movements")
-      .select("equipment_id")
-      .in("equipment_id", ids);
-    if (error) {
-      console.error(error);
-      setMsg("Impossibile verificare i movimenti collegati: " + error.message);
+    const open = await findOpenMovementAssetIds(supabase, ids);
+    if (open.error) {
+      console.error(open.error);
+      setMsg("Impossibile verificare i movimenti aperti: " + open.error);
       ids.forEach((id) => blocked.add(id));
       return blocked;
     }
-    for (const row of data ?? []) {
-      if (row.equipment_id) blocked.add(row.equipment_id);
+    for (const id of ids) {
+      const row = rows.find((asset) => asset.id === id);
+      if (row && isAssetBlockedFromCatalogDelete(row, open.ids)) blocked.add(id);
     }
     return blocked;
   }
 
   async function executeDeleteAssetRow(row: EquipmentAssetRow, silent?: boolean) {
-    const blocked = await findAssetsWithMovements([row.id]);
+    const blocked = await findAssetsBlockedFromDelete([row.id]);
     if (blocked.size > 0) {
       setMsg(
-        `Eliminazione bloccata per ${row.serial_number || row.asset_code}: restano movimenti o registri collegati.`
+        `Eliminazione bloccata per ${row.serial_number || row.asset_code}: attrezzatura in uscita aperta o in manutenzione.`
       );
       return;
     }
 
-    const { error } = await supabase
-      .from("equipment_assets")
-      .delete()
-      .eq("id", row.id)
-      .eq("equipment_area", area);
+    const { error } = await deleteAssetsPreservingMovements(supabase, [row], area);
 
     if (error) {
       console.error(error);
-      const blockedByHistory = /foreign key|restrict/i.test(error.message);
+      const blockedByHistory = /foreign key|restrict/i.test(error);
       setMsg(
         blockedByHistory
-          ? `Eliminazione bloccata per ${row.serial_number || row.asset_code}: restano movimenti o registri collegati.`
-          : "Eliminazione non riuscita: " + error.message
+          ? `Eliminazione bloccata per ${row.serial_number || row.asset_code}: esegui su Supabase lo script equipment_preserve_movements.sql e riprova.`
+          : "Eliminazione non riuscita: " + error
       );
       return;
     }
@@ -1079,7 +1078,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
               <div className="equipmentSectionTitle">Tutte le attrezzature {areaLabel}</div>
               <div className="equipmentSectionHint">
                 Vista completa del magazzino con ricerca, filtri e gestione anagrafica tramite popup.
-                {isAdmin ? " Se reimporti il file Excel, le attrezzature già presenti si aggiornano e i movimenti restano." : ""}
+                {isAdmin ? " Se reimporti il file Excel, l'anagrafica viene sostituita: le attrezzature assenti dal file si cancellano, mentre movimenti, registri e scaffali restano." : ""}
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -2080,9 +2079,9 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
           title="Eliminare attrezzatura/e"
           message={
             deleteConfirm.type === "single" && deleteConfirm.row
-              ? `Eliminare l'attrezzatura ${deleteConfirm.row.serial_number || deleteConfirm.row.asset_code}?\n\nSe ha movimenti o registri l'eliminazione verrà bloccata.`
+              ? `Eliminare l'attrezzatura ${deleteConfirm.row.serial_number || deleteConfirm.row.asset_code} dall'anagrafica?\n\nMovimenti e registri restano. Non puoi eliminare attrezzature in uscita aperta o in manutenzione.`
               : deleteConfirm.type === "bulk" && deleteConfirm.count
-                ? `Eliminare ${deleteConfirm.count} attrezzatura/e selezionate?\n\nQuelle con movimenti o registri non verranno cancellate.`
+                ? `Eliminare ${deleteConfirm.count} attrezzatura/e selezionate dall'anagrafica?\n\nMovimenti e registri restano. Quelle in uscita aperta o in manutenzione non verranno cancellate.`
                 : ""
           }
           confirmLabel="Elimina"

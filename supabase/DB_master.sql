@@ -891,7 +891,7 @@ CREATE POLICY "equipment_assets_delete_admin" ON public.equipment_assets FOR DEL
 CREATE TABLE IF NOT EXISTS public.equipment_movements (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   created_at timestamptz NOT NULL DEFAULT now(),
-  equipment_id uuid NOT NULL REFERENCES public.equipment_assets(id) ON DELETE RESTRICT,
+  equipment_id uuid REFERENCES public.equipment_assets(id) ON DELETE SET NULL,
   equipment_area text NOT NULL CHECK (equipment_area IN ('LINEE', 'STAZIONI')),
   type text NOT NULL DEFAULT 'OUT' CHECK (type IN ('OUT')),
   status text NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'CLOSED')),
@@ -977,6 +977,14 @@ DECLARE
   current_asset public.equipment_assets%ROWTYPE;
   effective_closed_at timestamptz;
 BEGIN
+  -- Movimento storico dopo cancellazione anagrafica (ON DELETE SET NULL).
+  IF NEW.equipment_id IS NULL THEN
+    IF TG_OP = 'INSERT' THEN
+      RAISE EXCEPTION 'equipment_id_required';
+    END IF;
+    RETURN NEW;
+  END IF;
+
   -- UPDATE solo metadati (es. details_json per reintegro manutenzione): non risincronizzare l'anagrafica.
   -- Altrimenti il ramo MAINTENANCE rimetterebbe l'asset in manutenzione dopo ogni PATCH al movimento chiuso.
   IF TG_OP = 'UPDATE'
@@ -1112,6 +1120,9 @@ RETURNS TRIGGER
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 AS $$
 BEGIN
+  IF OLD.equipment_id IS NULL THEN
+    RETURN OLD;
+  END IF;
   IF OLD.status = 'OPEN' THEN
     UPDATE public.equipment_assets
     SET

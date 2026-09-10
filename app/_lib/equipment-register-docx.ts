@@ -50,12 +50,13 @@ export type EquipmentRegisterAsset = {
   serial_number: string | null;
   name: string;
   equipment_area: EquipmentRegisterArea;
+  warehouse?: string | null;
 };
 
 export type EquipmentRegisterMovement = {
   id: string;
   created_at: string;
-  equipment_id: string;
+  equipment_id: string | null;
   equipment_area: EquipmentRegisterArea;
   status: "OPEN" | "CLOSED" | null;
   note: string | null;
@@ -69,6 +70,7 @@ export type EquipmentRegisterMovement = {
   closed_at: string | null;
   closed_by: string | null;
   movement_group_id: string | null;
+  details_json?: Record<string, unknown> | null;
 };
 
 export type EquipmentRegisterRow = {
@@ -85,6 +87,34 @@ export function getEquipmentRegisterHeader(area: EquipmentRegisterArea, sedeDi?:
     unitaProduttiva: "U.I. Maddaloni",
     sedeDi: (sedeDi ?? "").trim(),
   };
+}
+
+export function equipmentRegisterWarehouse(
+  movement: EquipmentRegisterMovement,
+  asset?: EquipmentRegisterAsset | null
+) {
+  const fromAsset = String(asset?.warehouse ?? "").trim();
+  if (fromAsset) return fromAsset;
+  const details = movement.details_json && typeof movement.details_json === "object" ? movement.details_json : null;
+  return String(details?.warehouse ?? "").trim();
+}
+
+export function collectEquipmentRegisterWarehouses(
+  assets: EquipmentRegisterAsset[],
+  movements: EquipmentRegisterMovement[]
+) {
+  const assetMap = new Map(assets.map((asset) => [asset.id, asset]));
+  const warehouses = new Set<string>();
+  for (const asset of assets) {
+    const warehouse = String(asset.warehouse ?? "").trim();
+    if (warehouse) warehouses.add(warehouse);
+  }
+  for (const movement of movements) {
+    const asset = movement.equipment_id ? assetMap.get(movement.equipment_id) : undefined;
+    const warehouse = equipmentRegisterWarehouse(movement, asset);
+    if (warehouse) warehouses.add(warehouse);
+  }
+  return Array.from(warehouses).sort();
 }
 
 function formatDateOnly(iso: string | null) {
@@ -109,9 +139,11 @@ export function buildEquipmentRegisterRows(args: {
   const sorted = movements.slice().sort((a, b) => a.created_at.localeCompare(b.created_at));
 
   return sorted.map((movement) => {
-    const asset = assetMap.get(movement.equipment_id);
+    const asset = movement.equipment_id ? assetMap.get(movement.equipment_id) : undefined;
+    const details = movement.details_json && typeof movement.details_json === "object" ? movement.details_json : null;
+    const snapshotCode = String(details?.serial_number || details?.asset_code || "").trim();
     const prelievoItem =
-      asset?.serial_number || asset?.asset_code || movement.intervention_plan_number || "";
+      asset?.serial_number || asset?.asset_code || snapshotCode || movement.intervention_plan_number || "";
 
     const prelievoNominativo =
       (movement.created_by ? createdByNameMap[movement.created_by] ?? "" : "") ||

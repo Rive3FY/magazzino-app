@@ -27,6 +27,12 @@ import ConfirmModal from "../../_components/ConfirmModal";
 import { scanFastBarcode, stopFastBarcodeScan, type FastBarcodeReader } from "../../_lib/fastBarcodeScanner";
 import { matchesMaterialSearch } from "../../_lib/materialSearch";
 import type { EquipmentArea, EquipmentAssetRow, EquipmentMovementRow, EquipmentStatus } from "../../_lib/types";
+import {
+  detailsField,
+  movementAssetCode,
+  movementAssetLabel,
+  movementWarehouse,
+} from "../../_lib/equipment-movement-snapshot";
 import AppSpinner, { AppLoading } from "../../_components/AppSpinner";
 
 type Props = {
@@ -410,8 +416,13 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
       const w = (row.warehouse ?? "").trim();
       if (w) set.add(w);
     }
+    for (const movement of history) {
+      const asset = movement.equipment_id ? rows.find((item) => item.id === movement.equipment_id) : undefined;
+      const w = movementWarehouse(movement, asset);
+      if (w) set.add(w);
+    }
     return Array.from(set).sort();
-  }, [rows]);
+  }, [history, rows]);
 
   const filteredRows = useMemo(() => {
     if (quickWarehouseFilter === "ALL") return rows;
@@ -482,8 +493,6 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     return rows.find((row) => row.id === quickSelectedId) ?? null;
   }, [quickSelectedId, rows]);
 
-  const filteredAssetIds = useMemo(() => new Set(filteredRows.map((r) => r.id)), [filteredRows]);
-
   const quickActive = useMemo(() => quickSuggestions[quickActiveIndex] ?? null, [quickSuggestions, quickActiveIndex]);
   const categoryResultsRows = useMemo(() => {
     if (!categoryResultsName) return [];
@@ -525,7 +534,10 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
     const toIso = toIsoEndOfDay(historyTo);
     const seen = new Set<string>();
     return history.filter((row) => {
-      if (quickWarehouseFilter !== "ALL" && !filteredAssetIds.has(row.equipment_id)) return false;
+      if (quickWarehouseFilter !== "ALL") {
+        const asset = row.equipment_id ? rows.find((item) => item.id === row.equipment_id) : undefined;
+        if (movementWarehouse(row, asset) !== quickWarehouseFilter) return false;
+      }
       if (fromIso && row.created_at < fromIso) return false;
       if (toIso && row.created_at > toIso) return false;
       const gid = row.movement_group_id;
@@ -535,7 +547,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
       }
       return true;
     });
-  }, [history, historyFrom, historyTo, quickWarehouseFilter, filteredAssetIds]);
+  }, [history, historyFrom, historyTo, quickWarehouseFilter, rows]);
 
   const [historyDetail, setHistoryDetail] = useState<EquipmentMovementRow | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -582,9 +594,16 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
 
   function renderHistoryEquipmentCards(movements: EquipmentMovementRow[]) {
     return movements.map((movement) => {
-      const asset = rows.find((item) => item.id === movement.equipment_id);
-      const fallbackName = String(movement.details_json?.asset_name ?? "").trim();
-      const fallbackCode = String(movement.details_json?.asset_code ?? "").trim();
+      const asset = movement.equipment_id ? rows.find((item) => item.id === movement.equipment_id) : undefined;
+      const extraDetails = [
+        movementWarehouse(movement, asset) || null,
+        String(asset?.category ?? "").trim() || detailsField(movement.details_json, "category") || null,
+        [String(asset?.shelf ?? "").trim() || detailsField(movement.details_json, "shelf"), String(asset?.place ?? "").trim() || detailsField(movement.details_json, "place")]
+          .filter(Boolean)
+          .join(" · ") || null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
       return (
         <div
           key={movement.id}
@@ -596,21 +615,13 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
           }}
         >
           <div style={{ fontWeight: 900 }}>
-            {asset
-              ? `${asset.serial_number || asset.asset_code} - ${asset.name}`
-              : `${fallbackCode || movement.equipment_id}${fallbackName ? ` - ${fallbackName}` : ""}`}
+            {movementAssetLabel(movement, asset)}
           </div>
           <div style={{ marginTop: 6, fontSize: 13, color: "#334155" }}>
-            {[
-              asset?.warehouse || null,
-              asset?.category || null,
-              [asset?.shelf, asset?.place].filter(Boolean).join(" · ") || null,
-            ]
-              .filter(Boolean)
-              .join(" · ") || "Nessun dettaglio aggiuntivo"}
+            {extraDetails || "Nessun dettaglio aggiuntivo"}
           </div>
           <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
-            Seriale: {asset?.serial_number || asset?.asset_code || fallbackCode || "—"}
+            Seriale: {movementAssetCode(movement, asset) || "—"}
           </div>
           <div
             style={{
@@ -1273,7 +1284,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                 </tr>
               ) : (
                 displayHistory.map((row) => {
-                  const asset = rows.find((item) => item.id === row.equipment_id);
+                  const asset = row.equipment_id ? rows.find((item) => item.id === row.equipment_id) : undefined;
                   const groupCount = row.movement_group_id ? (historyGroupCountMap.get(row.movement_group_id) ?? 1) : 1;
                   const groupSummary = row.movement_group_id ? historyGroupSummaryMap.get(row.movement_group_id) : null;
                   const status = groupSummary ? (groupSummary.open > 0 ? "OPEN" : "CLOSED") : (row.status ?? "OPEN");
@@ -1309,9 +1320,7 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
                       <td style={{ fontWeight: 900 }}>
                         {groupCount > 1
                           ? `Prelievo multiplo (${groupCount} attrezzature) · ${groupSummary?.closed ?? 0} rientrate · ${groupSummary?.open ?? groupCount} fuori`
-                          : asset
-                            ? `${asset.serial_number || asset.asset_code} - ${asset.name}`
-                            : row.equipment_id}
+                          : movementAssetLabel(row, asset)}
                       </td>
                       <td>
                         {groupCount > 1
@@ -1661,14 +1670,12 @@ export default function EquipmentRegistryClient({ area, basePath }: Props) {
           title="Eliminare movimento"
           message={
             (() => {
-              const asset = rows.find((r) => r.id === deleteConfirm.equipment_id);
+              const asset = deleteConfirm.equipment_id ? rows.find((r) => r.id === deleteConfirm.equipment_id) : undefined;
               const groupCount = deleteConfirm.movement_group_id ? (historyGroupCountMap.get(deleteConfirm.movement_group_id) ?? 1) : 1;
               const label =
                 groupCount > 1
                   ? `Prelievo multiplo (${groupCount} attrezzature)`
-                  : asset
-                    ? `${asset.serial_number || asset.asset_code} - ${asset.name}`
-                    : deleteConfirm.equipment_id;
+                  : movementAssetLabel(deleteConfirm, asset);
               return `Eliminare il movimento "${label}"?\n\nLe attrezzature coinvolte torneranno disponibili.`;
             })()
           }

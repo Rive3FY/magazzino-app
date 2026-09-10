@@ -5,12 +5,17 @@ import JSZip from "jszip";
 import { createClient as createServerClient } from "../../../_lib/supabase/server";
 import {
   buildEquipmentRegisterRows,
+  collectEquipmentRegisterWarehouses,
+  equipmentRegisterWarehouse,
   fillEquipmentRegisterDocumentXml,
   fillEquipmentRegisterHeaderXml,
   type EquipmentRegisterArea,
   type EquipmentRegisterAsset,
   type EquipmentRegisterMovement,
 } from "../../../_lib/equipment-register-docx";
+
+const MOVEMENT_SELECT =
+  "id,created_at,equipment_id,equipment_area,status,note,destination,intervention_plan_number,created_by,created_by_name,assigned_to_name,resolution_type,close_note,closed_at,closed_by,movement_group_id,details_json";
 
 function isEquipmentArea(value: string): value is EquipmentRegisterArea {
   return value === "LINEE" || value === "STAZIONI";
@@ -22,6 +27,85 @@ function safeFilePart(value: string) {
 
 function buildRegisterPersonName(firstName: string | null | undefined, lastName: string | null | undefined) {
   return [String(lastName ?? "").trim(), String(firstName ?? "").trim()].filter(Boolean).join(" ");
+}
+
+async function loadAreaRegisterData(supabase: Awaited<ReturnType<typeof createServerClient>>, area: EquipmentRegisterArea) {
+  const assetsRes = await supabase
+    .from("equipment_assets")
+    .select("id,asset_code,serial_number,name,equipment_area,warehouse")
+    .eq("equipment_area", area)
+    .order("serial_number", { ascending: true });
+  if (assetsRes.error) {
+    return { error: assetsRes.error.message, assets: [] as EquipmentRegisterAsset[], movements: [] as EquipmentRegisterMovement[] };
+  }
+
+  const movementsRes = await supabase
+    .from("equipment_movements")
+    .select(MOVEMENT_SELECT)
+    .eq("equipment_area", area)
+    .order("created_at", { ascending: true });
+  if (movementsRes.error) {
+    return { error: movementsRes.error.message, assets: [] as EquipmentRegisterAsset[], movements: [] as EquipmentRegisterMovement[] };
+  }
+
+  return {
+    error: null as string | null,
+    assets: (assetsRes.data ?? []) as EquipmentRegisterAsset[],
+    movements: (movementsRes.data ?? []) as EquipmentRegisterMovement[],
+  };
+}
+
+async function profileNameMaps(
+  supabase: Awaited<ReturnType<typeof createServerClient>>,
+  movements: EquipmentRegisterMovement[]
+) {
+  const profileIds = Array.from(
+    new Set(
+      movements
+        .flatMap((m) => [m.created_by, m.closed_by])
+        .filter((v): v is string => Boolean(v))
+    )
+  );
+  if (profileIds.length === 0) {
+    return { createdByNameMap: {} as Record<string, string>, closedByNameMap: {} as Record<string, string>, error: null as string | null };
+  }
+  const { data: profiles, error } = await supabase
+    .from("profiles")
+    .select("id,first_name,last_name")
+    .in("id", profileIds);
+  if (error) {
+    return { createdByNameMap: {} as Record<string, string>, closedByNameMap: {} as Record<string, string>, error: error.message };
+  }
+  const nameMap = Object.fromEntries(
+    (profiles ?? []).map((p) => {
+      const fullName = buildRegisterPersonName(
+        (p as { first_name?: string | null }).first_name,
+        (p as { last_name?: string | null }).last_name
+      );
+      return [String((p as { id: string }).id), fullName];
+    })
+  );
+  return { createdByNameMap: nameMap, closedByNameMap: nameMap, error: null as string | null };
+}
+
+function registerRowsForWarehouse(
+  assets: EquipmentRegisterAsset[],
+  movements: EquipmentRegisterMovement[],
+  warehouse: string,
+  createdByNameMap: Record<string, string>,
+  closedByNameMap: Record<string, string>
+) {
+  const assetMap = new Map(assets.map((asset) => [asset.id, asset]));
+  const filteredMovements = movements.filter((movement) => {
+    const asset = movement.equipment_id ? assetMap.get(movement.equipment_id) : undefined;
+    return equipmentRegisterWarehouse(movement, asset) === warehouse;
+  });
+  return buildEquipmentRegisterRows({
+    assets,
+    movements: filteredMovements,
+    createdByNameMap,
+    closedByNameMap,
+  });
 }
 
 export async function GET(request: Request) {
@@ -60,23 +144,15 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Header DOCX non valido" }, { status: 500 });
     }
 
+    const loaded = await loadAreaRegisterData(supabase, areaParam);
+    if (loaded.error) {
+      return NextResponse.json({ error: loaded.error }, { status: 500 });
+    }
+    const { assets, movements } = loaded;
+    const warehouses = collectEquipmentRegisterWarehouses(assets, movements);
     const allWarehouses = !warehouseParam || warehouseParam === "__ALL__";
 
-    let updatedDocumentXml: string;
-    let filename: string;
-
     if (allWarehouses) {
-      const { data: warehouseRows } = await supabase
-        .from("equipment_assets")
-        .select("warehouse")
-        .eq("equipment_area", areaParam);
-      const warehouseSet = new Set<string>();
-      for (const row of warehouseRows ?? []) {
-        const w = (row as { warehouse?: string | null }).warehouse;
-        if (w && String(w).trim()) warehouseSet.add(String(w).trim());
-      }
-      const warehouses = Array.from(warehouseSet).sort();
-
       if (warehouses.length === 0) {
         return NextResponse.json(
           { error: "Nessun magazzino trovato per questa area." },
@@ -84,74 +160,22 @@ export async function GET(request: Request) {
         );
       }
 
+      const names = await profileNameMaps(supabase, movements);
+      if (names.error) {
+        return NextResponse.json({ error: names.error }, { status: 500 });
+      }
+
       const outZip = new JSZip();
       const dateStr = new Date().toISOString().slice(0, 10);
 
       for (const wh of warehouses) {
-        let assetsQuery = supabase
-          .from("equipment_assets")
-          .select("id,asset_code,serial_number,name,equipment_area")
-          .eq("equipment_area", areaParam)
-          .eq("warehouse", wh);
-        const assetsRes = await assetsQuery.order("serial_number", { ascending: true });
-        if (assetsRes.error) {
-          return NextResponse.json({ error: assetsRes.error.message }, { status: 500 });
-        }
-        const assets = (assetsRes.data ?? []) as EquipmentRegisterAsset[];
-        const assetIds = assets.map((asset) => asset.id);
-
-        let movements: EquipmentRegisterMovement[] = [];
-        if (assetIds.length > 0) {
-          const { data: movementRows, error: movementsError } = await supabase
-            .from("equipment_movements")
-            .select("id,created_at,equipment_id,equipment_area,status,note,destination,intervention_plan_number,created_by,created_by_name,assigned_to_name,resolution_type,close_note,closed_at,closed_by,movement_group_id")
-            .eq("equipment_area", areaParam)
-            .in("equipment_id", assetIds)
-            .order("created_at", { ascending: true });
-          if (movementsError) {
-            return NextResponse.json({ error: movementsError.message }, { status: 500 });
-          }
-          movements = (movementRows ?? []) as EquipmentRegisterMovement[];
-        }
-
-        const profileIds = Array.from(
-          new Set(
-            movements
-              .flatMap((m) => [m.created_by, m.closed_by])
-              .filter((v): v is string => Boolean(v))
-          )
-        );
-
-        let createdByNameMap: Record<string, string> = {};
-        let closedByNameMap: Record<string, string> = {};
-        if (profileIds.length > 0) {
-          const { data: profiles, error: profilesError } = await supabase
-            .from("profiles")
-            .select("id,first_name,last_name")
-            .in("id", profileIds);
-          if (profilesError) {
-            return NextResponse.json({ error: profilesError.message }, { status: 500 });
-          }
-          const nameMap = Object.fromEntries(
-            (profiles ?? []).map((p) => {
-              const fullName = buildRegisterPersonName(
-                (p as { first_name?: string | null }).first_name,
-                (p as { last_name?: string | null }).last_name
-              );
-              return [String((p as { id: string }).id), fullName];
-            })
-          );
-          createdByNameMap = nameMap;
-          closedByNameMap = nameMap;
-        }
-
-        const registerRows = buildEquipmentRegisterRows({
+        const registerRows = registerRowsForWarehouse(
           assets,
           movements,
-          createdByNameMap,
-          closedByNameMap,
-        });
-
+          wh,
+          names.createdByNameMap,
+          names.closedByNameMap
+        );
         const whDocumentXml = fillEquipmentRegisterDocumentXml({
           documentXml,
           area: areaParam,
@@ -162,7 +186,6 @@ export async function GET(request: Request) {
           headerXml,
           year: new Date().getFullYear(),
         });
-
         const whZip = await JSZip.loadAsync(templateBuffer);
         whZip.file("word/document.xml", whDocumentXml);
         whZip.file("word/header1.xml", whHeaderXml);
@@ -182,79 +205,26 @@ export async function GET(request: Request) {
           "Cache-Control": "no-store",
         },
       });
-    } else {
-      let assetsQuery = supabase
-        .from("equipment_assets")
-        .select("id,asset_code,serial_number,name,equipment_area")
-        .eq("equipment_area", areaParam)
-        .eq("warehouse", warehouseParam);
-      const assetsRes = await assetsQuery.order("serial_number", { ascending: true });
-      if (assetsRes.error) {
-        return NextResponse.json({ error: assetsRes.error.message }, { status: 500 });
-      }
-      const assets = (assetsRes.data ?? []) as EquipmentRegisterAsset[];
-      const assetIds = assets.map((asset) => asset.id);
-
-      let movements: EquipmentRegisterMovement[] = [];
-      if (assetIds.length > 0) {
-        const { data: movementRows, error: movementsError } = await supabase
-          .from("equipment_movements")
-          .select("id,created_at,equipment_id,equipment_area,status,note,destination,intervention_plan_number,created_by,created_by_name,assigned_to_name,resolution_type,close_note,closed_at,closed_by,movement_group_id")
-          .eq("equipment_area", areaParam)
-          .in("equipment_id", assetIds)
-          .order("created_at", { ascending: true });
-        if (movementsError) {
-          return NextResponse.json({ error: movementsError.message }, { status: 500 });
-        }
-        movements = (movementRows ?? []) as EquipmentRegisterMovement[];
-      }
-
-      const profileIds = Array.from(
-        new Set(
-          movements
-            .flatMap((m) => [m.created_by, m.closed_by])
-            .filter((v): v is string => Boolean(v))
-        )
-      );
-
-      let createdByNameMap: Record<string, string> = {};
-      let closedByNameMap: Record<string, string> = {};
-      if (profileIds.length > 0) {
-        const { data: profiles, error: profilesError } = await supabase
-          .from("profiles")
-          .select("id,first_name,last_name")
-          .in("id", profileIds);
-        if (profilesError) {
-          return NextResponse.json({ error: profilesError.message }, { status: 500 });
-        }
-        const nameMap = Object.fromEntries(
-          (profiles ?? []).map((p) => {
-            const fullName = buildRegisterPersonName(
-              (p as { first_name?: string | null }).first_name,
-              (p as { last_name?: string | null }).last_name
-            );
-            return [String((p as { id: string }).id), fullName];
-          })
-        );
-        createdByNameMap = nameMap;
-        closedByNameMap = nameMap;
-      }
-
-      const registerRows = buildEquipmentRegisterRows({
-        assets,
-        movements,
-        createdByNameMap,
-        closedByNameMap,
-      });
-
-      updatedDocumentXml = fillEquipmentRegisterDocumentXml({
-        documentXml,
-        area: areaParam,
-        rows: registerRows,
-        sedeDi: warehouseParam || undefined,
-      });
-      filename = `registro_movimentazione_dotazioni_${safeFilePart(areaParam)}_${safeFilePart(warehouseParam)}_${new Date().toISOString().slice(0, 10)}.docx`;
     }
+
+    const names = await profileNameMaps(supabase, movements);
+    if (names.error) {
+      return NextResponse.json({ error: names.error }, { status: 500 });
+    }
+    const registerRows = registerRowsForWarehouse(
+      assets,
+      movements,
+      warehouseParam,
+      names.createdByNameMap,
+      names.closedByNameMap
+    );
+    const updatedDocumentXml = fillEquipmentRegisterDocumentXml({
+      documentXml,
+      area: areaParam,
+      rows: registerRows,
+      sedeDi: warehouseParam || undefined,
+    });
+    const filename = `registro_movimentazione_dotazioni_${safeFilePart(areaParam)}_${safeFilePart(warehouseParam)}_${new Date().toISOString().slice(0, 10)}.docx`;
 
     const updatedHeaderXml = fillEquipmentRegisterHeaderXml({
       headerXml,

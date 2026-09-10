@@ -7,6 +7,7 @@ import { useToast } from "../../_lib/ToastContext";
 import { EQUIPMENT_AREA_LABELS } from "../../_lib/equipment";
 import type { EquipmentArea } from "../../_lib/types";
 import { AppLoading } from "../../_components/AppSpinner";
+import { detailsField } from "../../_lib/equipment-movement-snapshot";
 
 type Props = {
   area: EquipmentArea;
@@ -51,13 +52,22 @@ export default function EquipmentRegistriClient({ area }: Props) {
         .from("equipment_assets")
         .select("warehouse")
         .eq("equipment_area", area);
+      const { data: orphanMovements } = await supabase
+        .from("equipment_movements")
+        .select("details_json")
+        .eq("equipment_area", area)
+        .is("equipment_id", null);
 
       if (!alive) return;
       if (error) {
         setLoading(false);
         return;
       }
-      setAssets((data ?? []) as { warehouse: string | null }[]);
+      const fromAssets = (data ?? []) as { warehouse: string | null }[];
+      const fromHistory = (orphanMovements ?? []).map((row) => ({
+        warehouse: detailsField((row as { details_json?: Record<string, unknown> | null }).details_json, "warehouse") || null,
+      }));
+      setAssets([...fromAssets, ...fromHistory]);
       setLoading(false);
     })();
     return () => {
@@ -138,7 +148,7 @@ export default function EquipmentRegistriClient({ area }: Props) {
 
         {warehouses.length === 0 && (
           <p style={{ marginTop: 16, color: "var(--muted)", fontSize: "var(--font-sm)" }}>
-            Nessun magazzino disponibile. Aggiungi attrezzature con magazzino assegnato per generare il registro.
+            Nessun magazzino disponibile. Aggiungi attrezzature con magazzino assegnato, oppure importa un file dopo aver eseguito lo script SQL dei movimenti, per generare il registro.
           </p>
         )}
       </div>

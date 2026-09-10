@@ -1,12 +1,18 @@
 "use client";
 
 import * as XLSX from "xlsx";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { createClient } from "../../_lib/supabase/client";
 import { useToast } from "../../_lib/ToastContext";
 import AppModalFrame from "../../_components/AppModalFrame";
 import { AppBusyLabel } from "../../_components/AppSpinner";
 import type { EquipmentArea } from "../../_lib/types";
+import {
+  deleteAssetsPreservingMovements,
+  findOpenMovementAssetIds,
+  isAssetBlockedFromCatalogDelete,
+  type EquipmentCatalogAsset,
+} from "../../_lib/equipment-movement-snapshot";
 
 const EQUIPMENT_FIELDS = [
   { key: "serial_number", label: "Seriale / Codice", required: true },
@@ -26,6 +32,8 @@ type Props = {
   onSuccess: () => void;
 };
 
+type ExistingAsset = EquipmentCatalogAsset & { area: EquipmentArea };
+
 function toStr(v: unknown): string {
   if (v == null) return "";
   if (typeof v === "number") return String(v);
@@ -36,18 +44,23 @@ function normalizeSerial(value: string) {
   return value.trim().toLowerCase();
 }
 
+function serialKeyOf(asset: { serial_number?: string | null; asset_code?: string | null }) {
+  return normalizeSerial(String(asset.serial_number || asset.asset_code || ""));
+}
+
 export default function EquipmentExcelImportClient({ area, onClose, onSuccess }: Props) {
   const toast = useToast();
   const supabase = createClient();
 
   const [step, setStep] = useState<"upload" | "mapping" | "preview">("upload");
-  const [file, setFile] = useState<File | null>(null);
   const [excelColumns, setExcelColumns] = useState<{ index: number; label: string }[]>([]);
   const [excelRows, setExcelRows] = useState<unknown[][]>([]);
   const [columnMapping, setColumnMapping] = useState<Record<string, number>>({});
   const [importing, setImporting] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [existingBySerial, setExistingBySerial] = useState<Map<string, { id: string; area: EquipmentArea }>>(new Map());
+  const [areaAssets, setAreaAssets] = useState<ExistingAsset[]>([]);
+  const [openAssetIds, setOpenAssetIds] = useState<Set<string>>(new Set());
   const [msg, setMsg] = useState<string | null>(null);
 
   function colLetter(n: number): string {
@@ -63,7 +76,6 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    setFile(f);
     setMsg(null);
 
     const reader = new FileReader();
@@ -142,6 +154,29 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
   const updateCount = validRows.filter((row) => existingBySerial.has(normalizeSerial(row.serial_number))).length;
   const createCount = validRows.length - updateCount;
 
+  const incomingKeys = useMemo(
+    () => new Set(validRows.map((row) => normalizeSerial(row.serial_number))),
+    [validRows]
+  );
+
+  const missingAssets = useMemo(
+    () => areaAssets.filter((asset) => {
+      const key = serialKeyOf(asset);
+      return !key || !incomingKeys.has(key);
+    }),
+    [areaAssets, incomingKeys]
+  );
+
+  const removableMissing = useMemo(
+    () => missingAssets.filter((asset) => !isAssetBlockedFromCatalogDelete(asset, openAssetIds)),
+    [missingAssets, openAssetIds]
+  );
+
+  const blockedMissing = useMemo(
+    () => missingAssets.filter((asset) => isAssetBlockedFromCatalogDelete(asset, openAssetIds)),
+    [missingAssets, openAssetIds]
+  );
+
   function catalogPayload(row: Record<string, string>, mode: "insert" | "update") {
     const serial = row.serial_number.trim();
     const payload: Record<string, string | null> = {
@@ -163,15 +198,37 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
     try {
       const { data, error } = await supabase
         .from("equipment_assets")
-        .select("id,serial_number,asset_code,equipment_area");
+        .select("id,serial_number,asset_code,equipment_area,name,warehouse,shelf,place,category,status");
       if (error) throw error;
       const map = new Map<string, { id: string; area: EquipmentArea }>();
+      const currentArea: ExistingAsset[] = [];
       for (const asset of data ?? []) {
-        const key = normalizeSerial(String(asset.serial_number || asset.asset_code || ""));
-        if (!key) continue;
-        map.set(key, { id: asset.id, area: asset.equipment_area as EquipmentArea });
+        const row = asset as {
+          id: string;
+          serial_number: string | null;
+          asset_code: string | null;
+          equipment_area: EquipmentArea;
+          name: string | null;
+          warehouse: string | null;
+          shelf: string | null;
+          place: string | null;
+          category: string | null;
+          status: string | null;
+        };
+        const key = serialKeyOf(row);
+        if (key) map.set(key, { id: row.id, area: row.equipment_area });
+        if (row.equipment_area === area) {
+          currentArea.push({ ...row, area: row.equipment_area });
+        }
       }
       setExistingBySerial(map);
+      setAreaAssets(currentArea);
+      const open = await findOpenMovementAssetIds(
+        supabase,
+        currentArea.map((asset) => asset.id)
+      );
+      if (open.error) throw new Error(open.error);
+      setOpenAssetIds(open.ids);
       setStep("preview");
     } catch (err) {
       setMsg("Errore lettura anagrafica: " + (err instanceof Error ? err.message : String(err)));
@@ -235,19 +292,60 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
       }
     }
 
-    setImporting(false);
-
     if (errors.length > 0) {
+      setImporting(false);
       setMsg(`Import parziale. ${updated} aggiornate, ${created} nuove. Errori: ${errors.join("; ")}`);
-    } else {
-      toast.success(
-        updated > 0
-          ? `${updated} attrezzature aggiornate${created > 0 ? `, ${created} nuove` : ""}. Movimenti e registri conservati.`
-          : `${created} attrezzature importate`
-      );
-      onSuccess();
-      onClose();
+      return;
     }
+
+    const { data: currentAreaRows, error: reloadError } = await supabase
+      .from("equipment_assets")
+      .select("id,serial_number,asset_code,name,warehouse,shelf,place,category,status")
+      .eq("equipment_area", area);
+    if (reloadError) {
+      setImporting(false);
+      setMsg("Anagrafica aggiornata, ma non è stato possibile rimuovere le attrezzature assenti dal file: " + reloadError.message);
+      return;
+    }
+
+    const incoming = new Set(validRows.map((row) => normalizeSerial(row.serial_number)));
+    const toReview = ((currentAreaRows ?? []) as EquipmentCatalogAsset[]).filter((asset) => {
+      const key = serialKeyOf(asset);
+      return !key || !incoming.has(key);
+    });
+    const open = await findOpenMovementAssetIds(
+      supabase,
+      toReview.map((asset) => asset.id)
+    );
+    if (open.error) {
+      setImporting(false);
+      setMsg("Anagrafica aggiornata, ma non è stato possibile verificare i movimenti aperti: " + open.error);
+      return;
+    }
+
+    const toDelete = toReview.filter((asset) => !isAssetBlockedFromCatalogDelete(asset, open.ids));
+    const kept = toReview.length - toDelete.length;
+    const removed = await deleteAssetsPreservingMovements(supabase, toDelete, area);
+    setImporting(false);
+    if (removed.error) {
+      setMsg(
+        `Anagrafica aggiornata (${updated} aggiornate, ${created} nuove), ma la rimozione delle attrezzature assenti dal file è fallita: ${removed.error}`
+      );
+      return;
+    }
+
+    const parts = [
+      updated > 0 ? `${updated} aggiornate` : null,
+      created > 0 ? `${created} nuove` : null,
+      toDelete.length > 0 ? `${toDelete.length} rimosse dall'anagrafica` : "nessuna rimossa",
+    ].filter(Boolean);
+    toast.success(
+      `${parts.join(", ")}. Movimenti, registri e scaffali conservati${
+        kept > 0 ? `. ${kept} non rimosse perché in uscita aperta o in manutenzione` : ""
+      }.`
+    );
+    onSuccess();
+    onClose();
   }
 
   return (
@@ -258,7 +356,7 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
         <>
           {step === "upload" && "Carica il file Excel (.xlsx, .xls)"}
           {step === "mapping" && "Associa le colonne del file ai campi del registro"}
-          {step === "preview" && "Anteprima: aggiorna l'anagrafica senza toccare i movimenti"}
+          {step === "preview" && "Anteprima: il file sostituisce l'anagrafica, movimenti e registri restano"}
         </>
       }
       onClose={onClose}
@@ -280,7 +378,7 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
                 />
                 <div style={{ marginTop: 12, fontSize: 13, color: "#64748b" }}>
                   Il file deve avere la prima riga con le intestazioni delle colonne. Dopo il caricamento potrai associare ogni colonna del file ai campi del registro.
-                  Le attrezzature già presenti (stesso seriale) vengono aggiornate; movimenti e registri restano.
+                  Le attrezzature già presenti (stesso seriale) vengono aggiornate; quelle assenti dal file vengono cancellate dall&apos;anagrafica. Movimenti, registri e scaffali restano.
                 </div>
               </div>
             </div>
@@ -342,7 +440,13 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
                 </div>
                 <div style={{ padding: 10, borderRadius: 8, background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)", fontSize: 13, fontWeight: 700, color: "#166534" }}>
                   {updateCount} già in anagrafica verranno aggiornate · {createCount} nuove.
-                  Movimenti e registri non vengono cancellati. Le attrezzature assenti dal file restano.
+                  Movimenti, registri e scaffali non vengono cancellati.
+                </div>
+                <div style={{ padding: 10, borderRadius: 8, background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", fontSize: 13, fontWeight: 700, color: "#991b1b" }}>
+                  {removableMissing.length} attrezzature assenti dal file verranno rimosse dall&apos;anagrafica.
+                  {blockedMissing.length > 0
+                    ? ` ${blockedMissing.length} restano perché in uscita aperta o in manutenzione.`
+                    : ""}
                 </div>
                 <div style={{ overflowX: "auto", maxHeight: 280, border: "1px solid #e2e8f0", borderRadius: 8 }}>
                   <table className="table" style={{ fontSize: 12 }}>
@@ -379,9 +483,7 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
                     <AppBusyLabel busy={importing}>
                       {importing
                         ? "Importazione…"
-                        : updateCount > 0
-                          ? `Aggiorna ${updateCount}${createCount > 0 ? ` e importa ${createCount}` : ""}`
-                          : `Importa ${validRows.length} attrezzature`}
+                        : `Sostituisci anagrafica (${updateCount} aggiorna, ${createCount} nuove, ${removableMissing.length} rimuovi)`}
                     </AppBusyLabel>
                   </button>
                   <button type="button" className="btn" onClick={() => setStep("mapping")}>

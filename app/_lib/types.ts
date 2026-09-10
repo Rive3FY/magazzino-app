@@ -103,7 +103,7 @@ export type EquipmentAssetRow = {
 export type EquipmentMovementRow = {
   id: string;
   created_at: string;
-  equipment_id: string;
+  equipment_id: string | null;
   equipment_area: EquipmentArea;
   type: EquipmentMovementType;
   status: EquipmentMovementStatus | null;

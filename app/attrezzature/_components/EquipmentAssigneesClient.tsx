@@ -264,14 +264,14 @@ export default function EquipmentAssigneesClient({ area, basePath }: Props) {
                       </thead>
                       <tbody>
                         {selectedOpenMovements.map((m) => {
-                          const asset = assets.find((a) => a.id === m.equipment_id);
+                          const asset = m.equipment_id ? assets.find((a) => a.id === m.equipment_id) : undefined;
                           return (
                             <tr key={m.id}>
                               <td>{fmtDateTime(m.created_at)}</td>
-                              <td>{asset ? (asset.serial_number || asset.asset_code) : m.equipment_id}</td>
+                              <td>{asset ? (asset.serial_number || asset.asset_code) : String(m.details_json?.serial_number || m.details_json?.asset_code || "—")}</td>
                               <td><span style={equipmentMovementPillStyle(m.status)}>{EQUIPMENT_MOVEMENT_STATUS_LABELS[m.status ?? "OPEN"]}</span></td>
                               <td>
-                                <Link href={`${basePath}/movimenti?asset=${m.equipment_id}`} className="btn" style={{ fontSize: 12, padding: "6px 10px" }}>
+                                <Link href={m.equipment_id ? `${basePath}/movimenti?asset=${m.equipment_id}` : `${basePath}/movimenti`} className="btn" style={{ fontSize: 12, padding: "6px 10px" }}>
                                   Vai
                                 </Link>
                               </td>
@@ -303,11 +303,13 @@ export default function EquipmentAssigneesClient({ area, basePath }: Props) {
                       </thead>
                       <tbody>
                         {selectedHistory.slice(0, 50).map((m) => {
-                          const asset = assets.find((a) => a.id === m.equipment_id) ?? selectedAssets.find((a) => a.id === m.equipment_id);
+                          const asset = (m.equipment_id
+                            ? assets.find((a) => a.id === m.equipment_id) ?? selectedAssets.find((a) => a.id === m.equipment_id)
+                            : undefined);
                           return (
                             <tr key={m.id}>
                               <td>{fmtDateTime(m.created_at)}</td>
-                              <td>{asset ? (asset.serial_number || asset.asset_code) : m.equipment_id}</td>
+                              <td>{asset ? (asset.serial_number || asset.asset_code) : String(m.details_json?.serial_number || m.details_json?.asset_code || "—")}</td>
                               <td>{m.resolution_type ? EQUIPMENT_RESOLUTION_LABELS[m.resolution_type] : "—"}</td>
                               <td>{m.closed_at ? fmtDateTime(m.closed_at) : "—"}</td>
                             </tr>

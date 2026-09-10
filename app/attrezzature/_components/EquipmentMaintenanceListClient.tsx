@@ -114,6 +114,10 @@ function MaintenanceDetailModal({ mov, asset, area, userId, userEmail, onClose, 
 
   useEffect(() => {
     let alive = true;
+    if (!mov.equipment_id) {
+      setOpenMovementMsg(null);
+      return;
+    }
     (async () => {
       const { data, error } = await supabase
         .from("equipment_movements")
@@ -313,7 +317,7 @@ export default function EquipmentMaintenanceListClient({ area, basePath }: Props
       const list = (movements ?? []) as EquipmentMovementRow[];
       setRows(list);
 
-      const ids = [...new Set(list.map((m) => m.equipment_id).filter(Boolean))];
+      const ids = [...new Set(list.map((m) => m.equipment_id).filter((id): id is string => Boolean(id)))];
       if (ids.length === 0) {
         setAssetsById(new Map());
       } else {
@@ -364,10 +368,13 @@ export default function EquipmentMaintenanceListClient({ area, basePath }: Props
 
   const sortedRows = useMemo(() => {
     if (listMode === "all") return rows;
-    return rows.filter((m) => !isRowResolved(assetsById.get(m.equipment_id)));
+    return rows.filter((m) => {
+      if (!m.equipment_id) return false;
+      return !isRowResolved(assetsById.get(m.equipment_id));
+    });
   }, [rows, listMode, assetsById]);
 
-  const detailAsset = detailMov ? assetsById.get(detailMov.equipment_id) : undefined;
+  const detailAsset = detailMov?.equipment_id ? assetsById.get(detailMov.equipment_id) : undefined;
 
   if (authLoading || adminLoading) {
     return (
@@ -487,7 +494,7 @@ export default function EquipmentMaintenanceListClient({ area, basePath }: Props
               </thead>
               <tbody>
                 {sortedRows.map((m) => {
-                  const asset = assetsById.get(m.equipment_id);
+                  const asset = m.equipment_id ? assetsById.get(m.equipment_id) : undefined;
                   const code = asset?.asset_code ?? (m.details_json as { asset_code?: string } | null)?.asset_code ?? "—";
                   const name = asset?.name ?? (m.details_json as { asset_name?: string } | null)?.asset_name ?? "—";
                   const st = asset?.status;

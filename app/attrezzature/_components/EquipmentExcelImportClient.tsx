@@ -32,6 +32,10 @@ function toStr(v: unknown): string {
   return String(v).trim();
 }
 
+function normalizeSerial(value: string) {
+  return value.trim().toLowerCase();
+}
+
 export default function EquipmentExcelImportClient({ area, onClose, onSuccess }: Props) {
   const toast = useToast();
   const supabase = createClient();
@@ -42,6 +46,8 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
   const [excelRows, setExcelRows] = useState<unknown[][]>([]);
   const [columnMapping, setColumnMapping] = useState<Record<string, number>>({});
   const [importing, setImporting] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [existingBySerial, setExistingBySerial] = useState<Map<string, { id: string; area: EquipmentArea }>>(new Map());
   const [msg, setMsg] = useState<string | null>(null);
 
   function colLetter(n: number): string {
@@ -133,6 +139,46 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
   const previewRows = step === "preview" ? buildPreviewRows() : [];
   const validRows = previewRows.filter((r) => r.serial_number.trim() && r.name.trim());
   const skippedCount = previewRows.length - validRows.length;
+  const updateCount = validRows.filter((row) => existingBySerial.has(normalizeSerial(row.serial_number))).length;
+  const createCount = validRows.length - updateCount;
+
+  function catalogPayload(row: Record<string, string>, mode: "insert" | "update") {
+    const serial = row.serial_number.trim();
+    const payload: Record<string, string | null> = {
+      asset_code: serial,
+      serial_number: serial,
+      name: row.name.trim(),
+    };
+    for (const { key } of EQUIPMENT_FIELDS) {
+      if (key === "serial_number" || key === "name") continue;
+      if (mode === "update" && columnMapping[key] === undefined) continue;
+      payload[key] = row[key].trim() || null;
+    }
+    return payload;
+  }
+
+  async function goPreview() {
+    setPreviewLoading(true);
+    setMsg(null);
+    try {
+      const { data, error } = await supabase
+        .from("equipment_assets")
+        .select("id,serial_number,asset_code,equipment_area");
+      if (error) throw error;
+      const map = new Map<string, { id: string; area: EquipmentArea }>();
+      for (const asset of data ?? []) {
+        const key = normalizeSerial(String(asset.serial_number || asset.asset_code || ""));
+        if (!key) continue;
+        map.set(key, { id: asset.id, area: asset.equipment_area as EquipmentArea });
+      }
+      setExistingBySerial(map);
+      setStep("preview");
+    } catch (err) {
+      setMsg("Errore lettura anagrafica: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
 
   async function doImport() {
     if (validRows.length === 0) {
@@ -144,39 +190,61 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
     setMsg(null);
 
     let created = 0;
+    let updated = 0;
     const errors: string[] = [];
+    const seenInFile = new Map<string, { id: string; area: EquipmentArea }>(existingBySerial);
 
     for (const row of validRows) {
       const serial = row.serial_number.trim();
-      const payload = {
-        asset_code: serial,
-        serial_number: serial,
-        name: row.name.trim(),
-        category: row.category.trim() || null,
-        warehouse: row.warehouse.trim() || null,
-        shelf: row.shelf.trim() || null,
-        place: row.place.trim() || null,
-        brand: row.brand.trim() || null,
-        model: row.model.trim() || null,
-        notes: row.notes.trim() || null,
-        equipment_area: area,
-      };
+      const key = normalizeSerial(serial);
+      const existing = seenInFile.get(key);
+      const payload = catalogPayload(row, existing ? "update" : "insert");
 
-      const { error } = await supabase.from("equipment_assets").insert(payload).select("id").single();
+      if (existing && existing.area !== area) {
+        errors.push(`${serial}: già presente nell'area ${existing.area === "LINEE" ? "Linee" : "Stazioni"}`);
+        if (errors.length >= 5) break;
+        continue;
+      }
+
+      if (existing) {
+        const { error } = await supabase
+          .from("equipment_assets")
+          .update(payload)
+          .eq("id", existing.id)
+          .eq("equipment_area", area);
+        if (error) {
+          errors.push(`${serial}: ${error.message}`);
+          if (errors.length >= 5) break;
+        } else {
+          updated++;
+        }
+        continue;
+      }
+
+      const { data, error } = await supabase
+        .from("equipment_assets")
+        .insert({ ...payload, equipment_area: area })
+        .select("id")
+        .single();
       if (error) {
         errors.push(`${serial}: ${error.message}`);
         if (errors.length >= 5) break;
       } else {
         created++;
+        if (data?.id) seenInFile.set(key, { id: data.id, area });
       }
     }
 
     setImporting(false);
 
     if (errors.length > 0) {
-      setMsg(`Import parziale. ${created} create. Errori: ${errors.join("; ")}`);
+      setMsg(`Import parziale. ${updated} aggiornate, ${created} nuove. Errori: ${errors.join("; ")}`);
     } else {
-      toast.success(`${created} attrezzature importate`);
+      toast.success(
+        updated > 0
+          ? `${updated} attrezzature aggiornate${created > 0 ? `, ${created} nuove` : ""}. Movimenti e registri conservati.`
+          : `${created} attrezzature importate`
+      );
       onSuccess();
       onClose();
     }
@@ -190,7 +258,7 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
         <>
           {step === "upload" && "Carica il file Excel (.xlsx, .xls)"}
           {step === "mapping" && "Associa le colonne del file ai campi del registro"}
-          {step === "preview" && "Anteprima e conferma importazione"}
+          {step === "preview" && "Anteprima: aggiorna l'anagrafica senza toccare i movimenti"}
         </>
       }
       onClose={onClose}
@@ -212,6 +280,7 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
                 />
                 <div style={{ marginTop: 12, fontSize: 13, color: "#64748b" }}>
                   Il file deve avere la prima riga con le intestazioni delle colonne. Dopo il caricamento potrai associare ogni colonna del file ai campi del registro.
+                  Le attrezzature già presenti (stesso seriale) vengono aggiornate; movimenti e registri restano.
                 </div>
               </div>
             </div>
@@ -222,7 +291,7 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
               <div className="appModalSectionHeader">Associazione colonne</div>
               <div className="appModalSectionBody" style={{ display: "grid", gap: 12 }}>
                 <div style={{ fontSize: 13, color: "#64748b" }}>
-                  Per ogni campo del registro, scegli quale colonna del tuo Excel usare. Lascia "(Non usare)" per ignorare una colonna.
+                  Per ogni campo del registro, scegli quale colonna del tuo Excel usare. Lascia &quot;(Non usare)&quot; per ignorare una colonna.
                   {excelColumns.length > 0 && (
                     <span style={{ display: "block", marginTop: 4, fontWeight: 600 }}>{excelColumns.length} colonne trovate nel file.</span>
                   )}
@@ -252,8 +321,8 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
                   ))}
                 </div>
                 <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                  <button type="button" className="btn btnPrimary" onClick={() => setStep("preview")}>
-                    Anteprima
+                  <button type="button" className="btn btnPrimary" onClick={() => void goPreview()} disabled={previewLoading}>
+                    <AppBusyLabel busy={previewLoading}>{previewLoading ? "Lettura anagrafica…" : "Anteprima"}</AppBusyLabel>
                   </button>
                   <button type="button" className="btn" onClick={() => setStep("upload")}>
                     Cambia file
@@ -270,6 +339,10 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
                 <div style={{ fontWeight: 800 }}>
                   Anteprima ({validRows.length} righe valide
                   {skippedCount > 0 && `, ${skippedCount} saltate (seriale/nome mancanti)`})
+                </div>
+                <div style={{ padding: 10, borderRadius: 8, background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)", fontSize: 13, fontWeight: 700, color: "#166534" }}>
+                  {updateCount} già in anagrafica verranno aggiornate · {createCount} nuove.
+                  Movimenti e registri non vengono cancellati. Le attrezzature assenti dal file restano.
                 </div>
                 <div style={{ overflowX: "auto", maxHeight: 280, border: "1px solid #e2e8f0", borderRadius: 8 }}>
                   <table className="table" style={{ fontSize: 12 }}>
@@ -303,7 +376,13 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
                     disabled={importing || validRows.length === 0}
                     onClick={() => void doImport()}
                   >
-                    <AppBusyLabel busy={importing}>{importing ? "Importazione…" : `Importa ${validRows.length} attrezzature`}</AppBusyLabel>
+                    <AppBusyLabel busy={importing}>
+                      {importing
+                        ? "Importazione…"
+                        : updateCount > 0
+                          ? `Aggiorna ${updateCount}${createCount > 0 ? ` e importa ${createCount}` : ""}`
+                          : `Importa ${validRows.length} attrezzature`}
+                    </AppBusyLabel>
                   </button>
                   <button type="button" className="btn" onClick={() => setStep("mapping")}>
                     Modifica associazioni

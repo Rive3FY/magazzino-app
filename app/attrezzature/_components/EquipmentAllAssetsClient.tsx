@@ -942,15 +942,61 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
 
   function openDeleteAssetConfirm(row: EquipmentAssetRow) {
     if (!isAdmin) return;
-    setDeleteConfirm({ type: "single", row });
+    void (async () => {
+      const blocked = await findAssetsWithMovements([row.id]);
+      if (blocked.size > 0) {
+        setMsg(
+          "Non puoi eliminare questa attrezzatura: ha movimenti o registri collegati. Per cambiare l'anagrafica importa di nuovo il file Excel: lo storico resta."
+        );
+        return;
+      }
+      setDeleteConfirm({ type: "single", row });
+    })();
   }
 
   function openDeleteBulkConfirm() {
     if (!isAdmin || selectedIds.size === 0) return;
-    setDeleteConfirm({ type: "bulk", count: selectedIds.size });
+    void (async () => {
+      const ids = Array.from(selectedIds);
+      const blocked = await findAssetsWithMovements(ids);
+      if (blocked.size > 0) {
+        setMsg(
+          `${blocked.size} attrezzatura/e selezionate hanno movimenti o registri e non possono essere eliminate. Togliele dalla selezione oppure aggiorna l'anagrafica con un nuovo Excel.`
+        );
+        return;
+      }
+      setDeleteConfirm({ type: "bulk", count: selectedIds.size });
+    })();
+  }
+
+  async function findAssetsWithMovements(ids: string[]) {
+    const blocked = new Set<string>();
+    if (ids.length === 0) return blocked;
+    const { data, error } = await supabase
+      .from("equipment_movements")
+      .select("equipment_id")
+      .in("equipment_id", ids);
+    if (error) {
+      console.error(error);
+      setMsg("Impossibile verificare i movimenti collegati: " + error.message);
+      ids.forEach((id) => blocked.add(id));
+      return blocked;
+    }
+    for (const row of data ?? []) {
+      if (row.equipment_id) blocked.add(row.equipment_id);
+    }
+    return blocked;
   }
 
   async function executeDeleteAssetRow(row: EquipmentAssetRow, silent?: boolean) {
+    const blocked = await findAssetsWithMovements([row.id]);
+    if (blocked.size > 0) {
+      setMsg(
+        `Eliminazione bloccata per ${row.serial_number || row.asset_code}: restano movimenti o registri collegati.`
+      );
+      return;
+    }
+
     const { error } = await supabase
       .from("equipment_assets")
       .delete()
@@ -959,7 +1005,12 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
 
     if (error) {
       console.error(error);
-      setMsg("Eliminazione non riuscita: " + error.message);
+      const blockedByHistory = /foreign key|restrict/i.test(error.message);
+      setMsg(
+        blockedByHistory
+          ? `Eliminazione bloccata per ${row.serial_number || row.asset_code}: restano movimenti o registri collegati.`
+          : "Eliminazione non riuscita: " + error.message
+      );
       return;
     }
 
@@ -1028,6 +1079,7 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
               <div className="equipmentSectionTitle">Tutte le attrezzature {areaLabel}</div>
               <div className="equipmentSectionHint">
                 Vista completa del magazzino con ricerca, filtri e gestione anagrafica tramite popup.
+                {isAdmin ? " Se reimporti il file Excel, le attrezzature già presenti si aggiornano e i movimenti restano." : ""}
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -2028,9 +2080,9 @@ export default function EquipmentAllAssetsClient({ area, basePath }: Props) {
           title="Eliminare attrezzatura/e"
           message={
             deleteConfirm.type === "single" && deleteConfirm.row
-              ? `Eliminare l'attrezzatura ${deleteConfirm.row.serial_number || deleteConfirm.row.asset_code}?\n\nAnche lo storico collegato verrà rimosso.`
+              ? `Eliminare l'attrezzatura ${deleteConfirm.row.serial_number || deleteConfirm.row.asset_code}?\n\nSe ha movimenti o registri l'eliminazione verrà bloccata.`
               : deleteConfirm.type === "bulk" && deleteConfirm.count
-                ? `Eliminare ${deleteConfirm.count} attrezzatura/e selezionate?\n\nAnche lo storico collegato verrà rimosso.`
+                ? `Eliminare ${deleteConfirm.count} attrezzatura/e selezionate?\n\nQuelle con movimenti o registri non verranno cancellate.`
                 : ""
           }
           confirmLabel="Elimina"

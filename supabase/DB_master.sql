@@ -891,7 +891,7 @@ CREATE POLICY "equipment_assets_delete_admin" ON public.equipment_assets FOR DEL
 CREATE TABLE IF NOT EXISTS public.equipment_movements (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   created_at timestamptz NOT NULL DEFAULT now(),
-  equipment_id uuid NOT NULL REFERENCES public.equipment_assets(id) ON DELETE CASCADE,
+  equipment_id uuid NOT NULL REFERENCES public.equipment_assets(id) ON DELETE RESTRICT,
   equipment_area text NOT NULL CHECK (equipment_area IN ('LINEE', 'STAZIONI')),
   type text NOT NULL DEFAULT 'OUT' CHECK (type IN ('OUT')),
   status text NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'CLOSED')),

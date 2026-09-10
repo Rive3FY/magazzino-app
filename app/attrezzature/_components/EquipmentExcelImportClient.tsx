@@ -442,12 +442,18 @@ export default function EquipmentExcelImportClient({ area, onClose, onSuccess }:
                   {updateCount} già in anagrafica verranno aggiornate · {createCount} nuove.
                   Movimenti, registri e scaffali non vengono cancellati.
                 </div>
-                <div style={{ padding: 10, borderRadius: 8, background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", fontSize: 13, fontWeight: 700, color: "#991b1b" }}>
-                  {removableMissing.length} attrezzature assenti dal file verranno rimosse dall&apos;anagrafica.
-                  {blockedMissing.length > 0
-                    ? ` ${blockedMissing.length} restano perché in uscita aperta o in manutenzione.`
-                    : ""}
-                </div>
+                {removableMissing.length > 0 || blockedMissing.length > 0 ? (
+                  <div style={{ padding: 10, borderRadius: 8, background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", fontSize: 13, fontWeight: 700, color: "#991b1b" }}>
+                    {removableMissing.length} attrezzature assenti dal file verranno rimosse dall&apos;anagrafica.
+                    {blockedMissing.length > 0
+                      ? ` ${blockedMissing.length} restano perché in uscita aperta o in manutenzione.`
+                      : ""}
+                  </div>
+                ) : (
+                  <div style={{ padding: 10, borderRadius: 8, background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)", fontSize: 13, fontWeight: 700, color: "#166534" }}>
+                    Nessuna attrezzatura verrà rimossa: tutte quelle in anagrafica sono nel file.
+                  </div>
+                )}
                 <div style={{ overflowX: "auto", maxHeight: 280, border: "1px solid #e2e8f0", borderRadius: 8 }}>
                   <table className="table" style={{ fontSize: 12 }}>
                     <thead>

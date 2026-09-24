@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "../_lib/supabase/client";
 import { useIsAdmin } from "../_lib/hooks/useIsAdmin";
 import { useToast } from "../_lib/ToastContext";
-import { toNumberLoose } from "../_lib/utils";
 import AppSpinner, { AppLoading } from "../_components/AppSpinner";
 
 type WarehouseKind = "PRM" | "REALE";
@@ -60,21 +59,61 @@ function normalizeExcelHeader(value: string) {
     .trim();
 }
 
-function getExcelCell(row: Record<string, unknown>, aliases: string[]) {
+function findExcelKey(row: Record<string, unknown>, aliases: string[]): string | null {
   for (const alias of aliases) {
-    if (Object.prototype.hasOwnProperty.call(row, alias)) return row[alias];
+    if (Object.prototype.hasOwnProperty.call(row, alias)) return alias;
   }
 
   const normalizedAliases = new Set(aliases.map(normalizeExcelHeader));
-  for (const [key, value] of Object.entries(row)) {
-    if (normalizedAliases.has(normalizeExcelHeader(key))) return value;
+  for (const key of Object.keys(row)) {
+    if (normalizedAliases.has(normalizeExcelHeader(key))) return key;
   }
 
-  return "";
+  return null;
 }
 
-function getExcelNumber(row: Record<string, unknown>, aliases: string[]) {
-  return toNumberLoose(getExcelCell(row, aliases));
+function getExcelCell(row: Record<string, unknown>, aliases: string[]) {
+  const key = findExcelKey(row, aliases);
+  if (!key) return undefined;
+  return row[key];
+}
+
+/** Parsing quantità Excel: supporta 1234,56 / 1.234,56 / 1,234.56. Restituisce null se assente o illeggibile. */
+function parseExcelQuantity(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+
+  let raw = String(value).trim().replace(/\u00a0/g, " ").replace(/\s+/g, "");
+  if (!raw || raw === "-" || raw === "—") return null;
+
+  const negative = raw.startsWith("-");
+  if (negative) raw = raw.slice(1);
+
+  if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(raw)) {
+    raw = raw.replace(/\./g, "").replace(",", ".");
+  } else if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(raw)) {
+    raw = raw.replace(/,/g, "");
+  } else if (raw.includes(",") && !raw.includes(".")) {
+    raw = raw.replace(",", ".");
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return null;
+  return negative ? -parsed : parsed;
+}
+
+function getExcelNumberOrNull(row: Record<string, unknown>, aliases: string[]): number | null {
+  if (!findExcelKey(row, aliases)) return null;
+  const cell = getExcelCell(row, aliases);
+  if (cell === "" || cell === null || cell === undefined) return 0;
+  return parseExcelQuantity(cell);
+}
+
+function sampleHeadersHaveAlias(rows: Record<string, unknown>[], aliases: string[]) {
+  for (const row of rows.slice(0, 20)) {
+    if (findExcelKey(row, aliases)) return true;
+  }
+  return false;
 }
 
 const QTY_FREE_ALIASES = [
@@ -204,6 +243,21 @@ export default function ImportPage() {
         defval: "",
       });
 
+      if (rows.length === 0) {
+        setMsg("Il foglio Excel è vuoto.");
+        return;
+      }
+
+      if (!sampleHeadersHaveAlias(rows, QTY_FREE_ALIASES)) {
+        const headers = Object.keys(rows[0] ?? {}).slice(0, 12).join(", ");
+        setMsg(
+          "Import bloccato: non trovo la colonna quantità libera (es. \"Qnt. a Mag. libero\").\n" +
+            "Senza quella colonna l'import azzererebbe le giacenze.\n\n" +
+            `Intestazioni trovate (prime): ${headers || "(nessuna)"}`
+        );
+        return;
+      }
+
       // 1) Upsert anagrafica items (se ti serve)
       const itemsMap = new Map<string, { code: string; name: string; um: string | null }>();
 
@@ -253,6 +307,7 @@ export default function ImportPage() {
       };
 
       const map = new Map<string, ExcelRowPayload>();
+      const unreadableQtyCodes: string[] = [];
 
       for (const r of rows) {
         const code = String(r["Materiale"] ?? "").trim();
@@ -263,9 +318,14 @@ export default function ImportPage() {
         const key = `${code}_${warehouseKind}`;
 
         // Quantità: lettura robusta delle intestazioni (maiuscole, spazi, accenti, varianti PRM/REALE).
-        const qtyFree = getExcelNumber(r, QTY_FREE_ALIASES);
-        const qtyBlocked = getExcelNumber(r, QTY_BLOCKED_ALIASES);
-        const qtyQuality = getExcelNumber(r, QTY_QUALITY_ALIASES);
+        const qtyFree = getExcelNumberOrNull(r, QTY_FREE_ALIASES);
+        if (qtyFree === null) {
+          unreadableQtyCodes.push(code);
+          if (unreadableQtyCodes.length >= 8) break;
+          continue;
+        }
+        const qtyBlocked = getExcelNumberOrNull(r, QTY_BLOCKED_ALIASES) ?? 0;
+        const qtyQuality = getExcelNumberOrNull(r, QTY_QUALITY_ALIASES) ?? 0;
 
         const excelJson: Record<string, unknown> = {};
         for (const k of Object.keys(r)) {
@@ -290,10 +350,29 @@ export default function ImportPage() {
         });
       }
 
+      if (unreadableQtyCodes.length > 0) {
+        setMsg(
+          "Import bloccato: alcune quantità libere non sono leggibili e non verranno forzate a 0.\n" +
+            `Esempi: ${unreadableQtyCodes.join(", ")}\n\n` +
+            "Controlla il formato dei numeri (es. 1.234,56) e riprova."
+        );
+        return;
+      }
+
       const payload = Array.from(map.values());
 
       if (payload.length === 0) {
         setMsg("Nessuna riga valida trovata nel file (controlla le intestazioni Excel).");
+        return;
+      }
+
+      const zeroCount = payload.filter((row) => row.qty_free === 0).length;
+      if (payload.length >= 10 && zeroCount / payload.length >= 0.95) {
+        setMsg(
+          `Import bloccato per sicurezza: ${zeroCount}/${payload.length} materiali avrebbero quantità libera = 0.\n` +
+            "Questo di solito significa che la colonna quantità non è stata letta correttamente.\n" +
+            "Verifica il file (o usa un backup dall'archivio) e riprova."
+        );
         return;
       }
 

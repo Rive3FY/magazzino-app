@@ -656,8 +656,8 @@ useEffect(() => {
         return;
       }
 
-      // Manteniamo coerenti anche i 3 campi nel JSON
-      const nextJson = { ...editExcel };
+      // Manteniamo coerenti anche i 3 campi nel JSON, senza perdere i metadati già salvati.
+      const nextJson = { ...(editing.row_json ?? {}), ...editExcel };
       nextJson["Materiale"] = code;
       nextJson["Magazzino"] = editing.warehouse;
       nextJson["TOTALE"] = qtyFree;

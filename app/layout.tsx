@@ -1,5 +1,7 @@
 import "./globals.css";
+import { after } from "next/server";
 import { createClient } from "./_lib/supabase/server";
+import { ensureStockRebasedToTotale } from "./_lib/rebaseStockToTotale";
 import { ToastProvider } from "./_lib/ToastContext";
 import { SidebarProvider } from "./_lib/SidebarContext";
 import ForceLogoutListener from "./_components/ForceLogoutListener";
@@ -18,6 +20,8 @@ export const viewport = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  after(() => ensureStockRebasedToTotale());
+
   const supabase = await createClient();
   const { data } = await supabase.auth.getUser();
   const user = data.user;

@@ -660,6 +660,7 @@ useEffect(() => {
       const nextJson = { ...editExcel };
       nextJson["Materiale"] = code;
       nextJson["Magazzino"] = editing.warehouse;
+      nextJson["TOTALE"] = qtyFree;
       nextJson["Qnt. a Mag. libero"] = qtyFree;
       nextJson["Qnt. a Mag. bloccato"] = qtyBlocked;
       nextJson["Controllo Qualità Magazzino"] = qtyQuality;

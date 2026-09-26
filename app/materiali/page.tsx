@@ -396,7 +396,7 @@ export default function Home() {
       const wh = (r as any).warehouse;
       const q = Number.isFinite(Number((r as any).qty_free))
         ? n((r as any).qty_free)
-        : n((r as any).row_json?.["Qnt. a Mag. libero"]);
+        : n((r as any).row_json?.["TOTALE"] ?? (r as any).row_json?.["Qnt. a Mag. libero"]);
       if (wh === "PRM") prmQty = q;
       if (wh === "REALE") realeQty = q;
     }

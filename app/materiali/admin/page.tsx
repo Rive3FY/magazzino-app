@@ -220,7 +220,7 @@ export default function MaterialiAdminPage() {
         qty_free: req.delta_free,
         qty_blocked: 0,
         qty_quality: 0,
-        row_json: { "Qnt. a Mag. libero": req.delta_free },
+        row_json: { TOTALE: req.delta_free, "Qnt. a Mag. libero": req.delta_free },
       });
       if (insErr) throw insErr;
 

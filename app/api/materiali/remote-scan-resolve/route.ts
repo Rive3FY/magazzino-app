@@ -20,7 +20,7 @@ function excelFreeQty(row: unknown) {
     return n(record.qty_free);
   }
   const rowJson = asRecord(record.row_json);
-  return n(rowJson?.["Qnt. a Mag. libero"] ?? 0);
+  return n(rowJson?.["TOTALE"] ?? rowJson?.["Qnt. a Mag. libero"] ?? 0);
 }
 
 function getSupabaseAdmin() {

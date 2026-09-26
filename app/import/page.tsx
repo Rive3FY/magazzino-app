@@ -116,17 +116,8 @@ function sampleHeadersHaveAlias(rows: Record<string, unknown>[], aliases: string
   return false;
 }
 
-const QTY_FREE_ALIASES = [
-  "Qnt. a Mag. libero",
-  "Qnt. a Mag. Libero",
-  "Qnt a Mag libero",
-  "Qta a Mag libero",
-  "Quantità disponibile",
-  "Quantita disponibile",
-  "Qnt. disponibile",
-  "Disponibile",
-  "Libero",
-];
+/** Giacenza usata dall'app: colonna TOTALE, uguale nei file PRM e REALE. */
+const QTY_FREE_ALIASES = ["TOTALE", "Totale"];
 
 const QTY_BLOCKED_ALIASES = ["Qnt. a Mag. bloccato", "Qnt a Mag bloccato", "Quantità bloccata", "Quantita bloccata", "Bloccato"];
 const QTY_QUALITY_ALIASES = ["Controllo Qualità Magazzino", "Controllo Qualita Magazzino", "Qualità", "Qualita"];
@@ -251,8 +242,8 @@ export default function ImportPage() {
       if (!sampleHeadersHaveAlias(rows, QTY_FREE_ALIASES)) {
         const headers = Object.keys(rows[0] ?? {}).slice(0, 12).join(", ");
         setMsg(
-          "Import bloccato: non trovo la colonna quantità libera (es. \"Qnt. a Mag. libero\").\n" +
-            "Senza quella colonna l'import azzererebbe le giacenze.\n\n" +
+          "Import bloccato: non trovo la colonna TOTALE.\n" +
+            "La giacenza di PRM e REALE si legge solo da quella colonna.\n\n" +
             `Intestazioni trovate (prime): ${headers || "(nessuna)"}`
         );
         return;
@@ -317,7 +308,7 @@ export default function ImportPage() {
 
         const key = `${code}_${warehouseKind}`;
 
-        // Quantità: lettura robusta delle intestazioni (maiuscole, spazi, accenti, varianti PRM/REALE).
+        // Giacenza: colonna TOTALE (PRM e REALE). Non usare "Qnt. a Mag. libero".
         const qtyFree = getExcelNumberOrNull(r, QTY_FREE_ALIASES);
         if (qtyFree === null) {
           unreadableQtyCodes.push(code);
@@ -336,6 +327,7 @@ export default function ImportPage() {
         excelJson["Materiale"] = code;
         excelJson["Descrizione Materiale"] = name;
         excelJson["Magazzino"] = warehouseKind;
+        excelJson["TOTALE"] = qtyFree;
         excelJson["Qnt. a Mag. libero"] = qtyFree;
         excelJson["Qnt. a Mag. bloccato"] = qtyBlocked;
         excelJson["Controllo Qualità Magazzino"] = qtyQuality;
@@ -352,7 +344,7 @@ export default function ImportPage() {
 
       if (unreadableQtyCodes.length > 0) {
         setMsg(
-          "Import bloccato: alcune quantità libere non sono leggibili e non verranno forzate a 0.\n" +
+          "Import bloccato: alcuni valori della colonna TOTALE non sono leggibili e non verranno forzati a 0.\n" +
             `Esempi: ${unreadableQtyCodes.join(", ")}\n\n` +
             "Controlla il formato dei numeri (es. 1.234,56) e riprova."
         );
@@ -369,8 +361,8 @@ export default function ImportPage() {
       const zeroCount = payload.filter((row) => row.qty_free === 0).length;
       if (payload.length >= 10 && zeroCount / payload.length >= 0.95) {
         setMsg(
-          `Import bloccato per sicurezza: ${zeroCount}/${payload.length} materiali avrebbero quantità libera = 0.\n` +
-            "Questo di solito significa che la colonna quantità non è stata letta correttamente.\n" +
+          `Import bloccato per sicurezza: ${zeroCount}/${payload.length} materiali avrebbero TOTALE = 0.\n` +
+            "Questo di solito significa che la colonna TOTALE non è stata letta correttamente.\n" +
             "Verifica il file (o usa un backup dall'archivio) e riprova."
         );
         return;
@@ -399,9 +391,10 @@ export default function ImportPage() {
       }
 
       for (const chunk of chunks) {
+        const liveChunk = chunk.map((row) => ({ ...row, initial_qty: row.qty_free }));
         const { error: eLive } = await supabase
           .from("excel_live")
-          .upsert(chunk, { onConflict: "code,warehouse" });
+          .upsert(liveChunk, { onConflict: "code,warehouse" });
 
         if (eLive) {
           setMsg(
@@ -421,8 +414,8 @@ export default function ImportPage() {
         backupMsg = `\n\nImport completato ma backup file non salvato: ${message}`;
       }
 
-      setMsg(`Import ${warehouseKind} completato ✅ (${payload.length} materiali)${backupMsg}`);
-      toast.success(`Import ${warehouseKind} completato (${payload.length} materiali)`);
+      setMsg(`Import ${warehouseKind} completato ✅ (${payload.length} materiali, giacenza dalla colonna TOTALE)${backupMsg}`);
+      toast.success(`Import ${warehouseKind} completato (${payload.length} materiali, giacenza da TOTALE)`);
       await loadCounts();
     } catch (e: unknown) {
       setMsg("Errore import: " + (e instanceof Error ? e.message : String(e)));
@@ -443,6 +436,10 @@ export default function ImportPage() {
     <main className="panel">
       <div className="pageBar">
         <div className="pageBarTitle">Import & Export Excel</div>
+      </div>
+
+      <div style={{ margin: "0 12px 4px", fontSize: 13, color: "#475569" }}>
+        La quantità di materiale, sia per PRM sia per REALE, è la colonna <b>TOTALE</b> del file Excel.
       </div>
 
       <div className="card" style={{ padding: 12, margin: 12 }}>

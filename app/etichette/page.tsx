@@ -34,7 +34,7 @@ function getLiveQty(row: LiveRow) {
   if (row.qty_free !== null && row.qty_free !== undefined && row.qty_free !== "") {
     return n(row.qty_free);
   }
-  return n(row.row_json?.["Qnt. a Mag. libero"] ?? 0);
+  return n(row.row_json?.["TOTALE"] ?? row.row_json?.["Qnt. a Mag. libero"] ?? 0);
 }
 
 function getLiveItemName(row: LiveRow) {

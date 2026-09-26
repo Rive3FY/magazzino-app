@@ -61,7 +61,7 @@ function excelFreeQty(row: unknown) {
     return n(record.qty_free);
   }
   const rowJson = asRecord(record.row_json);
-  return n(rowJson?.["Qnt. a Mag. libero"] ?? 0);
+  return n(rowJson?.["TOTALE"] ?? rowJson?.["Qnt. a Mag. libero"] ?? 0);
 }
 
 function excelNumberField(row: unknown, key: string) {
@@ -2037,7 +2037,7 @@ function finalizeMaterialPickupSuccess() {
           qty_free: 0,
           qty_blocked: 0,
           qty_quality: 0,
-          row_json: { "Qnt. a Mag. libero": 0 },
+          row_json: { TOTALE: 0, "Qnt. a Mag. libero": 0 },
         })
         .select("code,warehouse,qty_free,qty_blocked,qty_quality,row_json")
         .maybeSingle();
@@ -2053,11 +2053,12 @@ function finalizeMaterialPickupSuccess() {
     }
 
     const rowJson = { ...(live.row_json ?? {}) };
-    const currentFromJson = n(rowJson["Qnt. a Mag. libero"]);
+    const currentFromJson = n(rowJson["TOTALE"] ?? rowJson["Qnt. a Mag. libero"]);
     const currentFree = Number.isFinite(Number(live.qty_free)) ? n(live.qty_free) : currentFromJson;
     const base = Number.isFinite(currentFree) ? currentFree : currentFromJson;
     const next = base + deltaFree;
 
+    rowJson["TOTALE"] = next;
     rowJson["Qnt. a Mag. libero"] = next;
 
     const { error: eUp } = await supabase

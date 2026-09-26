@@ -345,7 +345,7 @@ export default function AdminPanelClient() {
           if (!code || !name) return null;
 
           const initial_qty = toNumber(r["TOTALE"]);
-          const qty_free = toNumber(r["Qnt. a Mag. Libero"]);
+          const qty_free = initial_qty;
           const qty_blocked = toNumber(r["Qnt. a Mag. bloccato"]);
           const qty_quality = toNumber(r["Controllo Qualità Magazzino"]);
 
